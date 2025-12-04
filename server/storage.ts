@@ -53,14 +53,14 @@ export class DatabaseStorage implements IStorage {
       yil: gumrukVerileri.yil,
     }).from(gumrukVerileri);
     
-    const grouped = result.reduce((acc, item) => {
+    const grouped = result.reduce<Record<string, { ay: string; yil: number; kayitSayisi: number }>>((acc, item) => {
       const key = `${item.ay}-${item.yil}`;
       if (!acc[key]) {
         acc[key] = { ay: item.ay, yil: item.yil, kayitSayisi: 0 };
       }
       acc[key].kayitSayisi++;
       return acc;
-    }, {} as Record<string, { ay: string; yil: number; kayitSayisi: number }>);
+    }, {});
     
     return Object.values(grouped);
   }

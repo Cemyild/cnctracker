@@ -7,6 +7,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import Dashboard from "@/pages/Dashboard";
+import Gumruk from "@/pages/Gumruk";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -21,7 +22,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
-      <Route path="/gumruk" component={Dashboard} />
+      <Route path="/gumruk" component={Gumruk} />
       <Route path="/sigorta" component={Dashboard} />
       <Route path="/nakliye" component={Dashboard} />
       <Route path="/raporlar" component={Dashboard} />
