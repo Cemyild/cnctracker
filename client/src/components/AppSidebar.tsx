@@ -15,20 +15,18 @@ import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
   FileText,
-  Wallet,
-  CreditCard,
+  Shield,
+  Truck,
   BarChart3,
-  Settings,
   LogOut,
 } from "lucide-react";
 
 const navItems = [
   { title: "Dashboard", icon: LayoutDashboard, href: "/" },
-  { title: "Procedures", icon: FileText, href: "/procedures" },
-  { title: "Expenses", icon: Wallet, href: "/expenses" },
-  { title: "Payments", icon: CreditCard, href: "/payments" },
-  { title: "Reports", icon: BarChart3, href: "/reports" },
-  { title: "Settings", icon: Settings, href: "/settings" },
+  { title: "Gümrük", icon: FileText, href: "/gumruk" },
+  { title: "Sigorta", icon: Shield, href: "/sigorta" },
+  { title: "Nakliye", icon: Truck, href: "/nakliye" },
+  { title: "Raporlar", icon: BarChart3, href: "/raporlar" },
 ];
 
 export function AppSidebar() {

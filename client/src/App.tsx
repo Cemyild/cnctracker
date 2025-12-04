@@ -13,11 +13,10 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
-      <Route path="/procedures" component={Dashboard} />
-      <Route path="/expenses" component={Dashboard} />
-      <Route path="/payments" component={Dashboard} />
-      <Route path="/reports" component={Dashboard} />
-      <Route path="/settings" component={Dashboard} />
+      <Route path="/gumruk" component={Dashboard} />
+      <Route path="/sigorta" component={Dashboard} />
+      <Route path="/nakliye" component={Dashboard} />
+      <Route path="/raporlar" component={Dashboard} />
       <Route component={NotFound} />
     </Switch>
   );
