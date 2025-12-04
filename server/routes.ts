@@ -5,12 +5,22 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import type { InsertGumrukVerisi } from "@shared/schema";
 import { createHash } from "crypto";
+import { z } from "zod";
 
 // Row hash oluştur - satırı benzersiz tanımlamak için
 function createRowHash(row: any[]): string {
   const key = row.map(v => String(v || "")).join("|");
   return createHash("md5").update(key).digest("hex");
 }
+
+// Geçerli ay değerleri
+const gecerliAylar = ["ocak", "subat", "mart", "nisan", "mayis", "haziran", "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"] as const;
+
+// Upload parametreleri için validation schema
+const uploadParamsSchema = z.object({
+  ay: z.enum(gecerliAylar),
+  yil: z.string().regex(/^\d{4}$/).transform(Number),
+});
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -49,10 +59,12 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Dosya yüklenmedi" });
       }
 
-      const { ay, yil } = req.body;
-      if (!ay || !yil) {
-        return res.status(400).json({ error: "Ay ve yıl bilgisi gerekli" });
+      // Parametreleri doğrula
+      const parseResult = uploadParamsSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ error: "Geçersiz ay veya yıl değeri" });
       }
+      const { ay, yil } = parseResult.data;
 
       // Excel dosyasını oku
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
@@ -85,7 +97,7 @@ export async function registerRoutes(
 
         veriler.push({
           ay,
-          yil: parseInt(yil),
+          yil,
           tip: row[0] ? String(row[0]).trim() : null,
           dosyaNo: row[1] ? String(row[1]).trim() : null,
           firmaUnvan: row[2] ? String(row[2]).trim() : null,
@@ -112,17 +124,18 @@ export async function registerRoutes(
       }
 
       // Mevcut row hash'leri al
-      const existingHashes = await storage.getExistingRowHashes(ay, parseInt(yil));
+      const existingHashes = await storage.getExistingRowHashes(ay, yil);
       
       // Sadece yeni satırları filtrele
-      const yeniVeriler = veriler.filter(v => !existingHashes.has(v.rowHash || ""));
+      const yeniVeriler = veriler.filter(v => !existingHashes.has(v.rowHash));
       
       if (yeniVeriler.length === 0) {
         return res.json({ 
           success: true, 
           message: "Tüm veriler zaten mevcut, yeni kayıt eklenmedi",
-          kayitSayisi: 0,
-          mevcutKayit: veriler.length
+          eklenen: 0,
+          atlanan: veriler.length,
+          toplam: veriler.length
         });
       }
 
@@ -130,9 +143,10 @@ export async function registerRoutes(
 
       res.json({ 
         success: true, 
-        message: `${eklenenVeriler.length} yeni kayıt eklendi (${veriler.length - yeniVeriler.length} mevcut kayıt atlandı)`,
-        kayitSayisi: eklenenVeriler.length,
-        atlanankayit: veriler.length - yeniVeriler.length
+        message: `${eklenenVeriler.length} yeni kayıt eklendi${veriler.length - yeniVeriler.length > 0 ? ` (${veriler.length - yeniVeriler.length} mevcut kayıt atlandı)` : ""}`,
+        eklenen: eklenenVeriler.length,
+        atlanan: veriler.length - yeniVeriler.length,
+        toplam: veriler.length
       });
     } catch (error) {
       console.error("Excel yükleme hatası:", error);

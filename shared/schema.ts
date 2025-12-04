@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, decimal, date, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, decimal, date, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -39,8 +39,10 @@ export const gumrukVerileri = pgTable("gumruk_verileri", {
   topIskonto: decimal("top_iskonto", { precision: 15, scale: 2 }),
   topKdvTutar: decimal("top_kdv_tutar", { precision: 15, scale: 2 }),
   topFaturaTutar: decimal("top_fatura_tutar", { precision: 15, scale: 2 }), // Mal Bedeli + KDV
-  rowHash: text("row_hash"), // Satırı benzersiz tanımlayan hash
-});
+  rowHash: text("row_hash").notNull(), // Satırı benzersiz tanımlayan hash
+}, (table) => [
+  uniqueIndex("gumruk_verileri_ay_yil_hash_idx").on(table.ay, table.yil, table.rowHash),
+]);
 
 export const insertGumrukVerisiSchema = createInsertSchema(gumrukVerileri).omit({
   id: true,

@@ -92,9 +92,12 @@ export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadM
       const result = await response.json();
 
       if (response.ok) {
+        const description = result.atlanan > 0 
+          ? `${result.eklenen} yeni kayıt eklendi, ${result.atlanan} mevcut kayıt atlandı`
+          : `${result.eklenen} kayıt başarıyla eklendi`;
         toast({
           title: "Başarılı",
-          description: result.message,
+          description,
         });
         onSuccess();
         onOpenChange(false);
