@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
@@ -27,12 +27,10 @@ export function ProcedureCard({ title, count, variant = "default" }: ProcedureCa
       )}
       data-testid={`procedure-card-${title.toLowerCase().replace(/\s+/g, '-')}`}
     >
-      <CardHeader className="pb-2">
+      <div className="p-6 flex flex-col items-center gap-3">
         <CardTitle className="text-lg font-semibold text-center text-foreground">
           {title}
         </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col items-center gap-3">
         <Button
           variant="ghost"
           size="sm"
@@ -56,7 +54,7 @@ export function ProcedureCard({ title, count, variant = "default" }: ProcedureCa
             </p>
           </div>
         )}
-      </CardContent>
+      </div>
     </Card>
   );
 }
