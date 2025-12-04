@@ -4,6 +4,13 @@ import { storage } from "./storage";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import type { InsertGumrukVerisi } from "@shared/schema";
+import { createHash } from "crypto";
+
+// Row hash oluştur - satırı benzersiz tanımlamak için
+function createRowHash(row: any[]): string {
+  const key = row.map(v => String(v || "")).join("|");
+  return createHash("md5").update(key).digest("hex");
+}
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -73,6 +80,9 @@ export async function registerRoutes(
           return isNaN(num) ? null : num.toFixed(2);
         };
 
+        // Row hash oluştur
+        const rowHash = createRowHash(row);
+
         veriler.push({
           ay,
           yil: parseInt(yil),
@@ -93,6 +103,7 @@ export async function registerRoutes(
           topIskonto: parseNumber(row[14]),
           topKdvTutar: parseNumber(row[15]),
           topFaturaTutar: parseNumber(row[16]),
+          rowHash,
         });
       }
 
@@ -100,14 +111,28 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Geçerli veri bulunamadı" });
       }
 
-      // Mevcut verileri sil ve yeni verileri ekle
-      await storage.deleteGumrukVerileri(ay, parseInt(yil));
-      const eklenenVeriler = await storage.insertGumrukVerileri(veriler);
+      // Mevcut row hash'leri al
+      const existingHashes = await storage.getExistingRowHashes(ay, parseInt(yil));
+      
+      // Sadece yeni satırları filtrele
+      const yeniVeriler = veriler.filter(v => !existingHashes.has(v.rowHash || ""));
+      
+      if (yeniVeriler.length === 0) {
+        return res.json({ 
+          success: true, 
+          message: "Tüm veriler zaten mevcut, yeni kayıt eklenmedi",
+          kayitSayisi: 0,
+          mevcutKayit: veriler.length
+        });
+      }
+
+      const eklenenVeriler = await storage.insertGumrukVerileri(yeniVeriler);
 
       res.json({ 
         success: true, 
-        message: `${eklenenVeriler.length} kayıt başarıyla eklendi`,
-        kayitSayisi: eklenenVeriler.length 
+        message: `${eklenenVeriler.length} yeni kayıt eklendi (${veriler.length - yeniVeriler.length} mevcut kayıt atlandı)`,
+        kayitSayisi: eklenenVeriler.length,
+        atlanankayit: veriler.length - yeniVeriler.length
       });
     } catch (error) {
       console.error("Excel yükleme hatası:", error);

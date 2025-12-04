@@ -13,6 +13,7 @@ export interface IStorage {
   insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]>;
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
+  getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -45,6 +46,14 @@ export class DatabaseStorage implements IStorage {
     await db.delete(gumrukVerileri).where(
       and(eq(gumrukVerileri.ay, ay), eq(gumrukVerileri.yil, yil))
     );
+  }
+
+  async getExistingRowHashes(ay: string, yil: number): Promise<Set<string>> {
+    const result = await db.select({ rowHash: gumrukVerileri.rowHash })
+      .from(gumrukVerileri)
+      .where(and(eq(gumrukVerileri.ay, ay), eq(gumrukVerileri.yil, yil)));
+    
+    return new Set(result.map(r => r.rowHash).filter((h): h is string => h !== null));
   }
 
   async getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]> {

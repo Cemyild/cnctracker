@@ -39,6 +39,7 @@ export const gumrukVerileri = pgTable("gumruk_verileri", {
   topIskonto: decimal("top_iskonto", { precision: 15, scale: 2 }),
   topKdvTutar: decimal("top_kdv_tutar", { precision: 15, scale: 2 }),
   topFaturaTutar: decimal("top_fatura_tutar", { precision: 15, scale: 2 }), // Mal Bedeli + KDV
+  rowHash: text("row_hash"), // Satırı benzersiz tanımlayan hash
 });
 
 export const insertGumrukVerisiSchema = createInsertSchema(gumrukVerileri).omit({
