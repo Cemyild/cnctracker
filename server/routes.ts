@@ -52,6 +52,30 @@ export async function registerRoutes(
     }
   });
 
+  // Firma listesi getir (spesifik route - önce tanımlanmalı)
+  app.get("/api/gumruk/firmalar/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const firmalar = await storage.getFirmalar(parseInt(yil));
+      res.json(firmalar);
+    } catch (error) {
+      console.error("Firma listesi getirme hatası:", error);
+      res.status(500).json({ error: "Firmalar alınamadı" });
+    }
+  });
+
+  // Firma bazlı aylık özet getir (spesifik route - önce tanımlanmalı)
+  app.get("/api/gumruk/firma-ozet/:yil/:firma", async (req, res) => {
+    try {
+      const { yil, firma } = req.params;
+      const ozet = await storage.getFirmaAylikOzet(parseInt(yil), decodeURIComponent(firma));
+      res.json(ozet);
+    } catch (error) {
+      console.error("Firma özet getirme hatası:", error);
+      res.status(500).json({ error: "Firma özeti alınamadı" });
+    }
+  });
+
   // Gümrük verilerini getir (parametrik route - en son tanımlanmalı)
   app.get("/api/gumruk/:ay/:yil", async (req, res) => {
     try {

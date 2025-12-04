@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BackgroundPaths } from "@/components/BackgroundPaths";
 import { ExcelUploadModal } from "@/components/ExcelUploadModal";
@@ -28,8 +28,12 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  LineChart,
+  Line,
 } from "recharts";
 import type { GumrukVerisi } from "@shared/schema";
+
+type ChartMetric = "satis" | "dosya" | "kdv" | "firma";
 
 const aylar = [
   { value: "ocak", label: "Ocak", sira: 1 },
@@ -84,10 +88,19 @@ type AylikOzet = {
   dosyaSayisi: number;
 };
 
+const chartMetricOptions = [
+  { value: "satis", label: "Aylık Satış (KDV Hariç)" },
+  { value: "dosya", label: "Dosya Sayısı" },
+  { value: "kdv", label: "Toplam KDV" },
+  { value: "firma", label: "Firma Bazlı" },
+] as const;
+
 export default function Gumruk() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [selectedAy, setSelectedAy] = useState<string>("");
   const [selectedYil, setSelectedYil] = useState<string>(String(currentYear));
+  const [chartMetric, setChartMetric] = useState<ChartMetric>("satis");
+  const [selectedFirma, setSelectedFirma] = useState<string>("");
 
   // Yüklü ayları getir
   const { data: yukluAylar, refetch: refetchAylar } = useQuery<
@@ -99,6 +112,20 @@ export default function Gumruk() {
   // Aylık özet verilerini getir (grafik için)
   const { data: aylikOzet, isLoading: ozetLoading, refetch: refetchOzet } = useQuery<AylikOzet[]>({
     queryKey: ["/api/gumruk/ozet", selectedYil],
+  });
+
+  // Firma listesini getir
+  const { data: firmalar } = useQuery<string[]>({
+    queryKey: ["/api/gumruk/firmalar", selectedYil],
+    enabled: chartMetric === "firma",
+  });
+
+  // Firma bazlı özet getir
+  const { data: firmaOzet, isLoading: firmaOzetLoading } = useQuery<
+    { ay: string; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]
+  >({
+    queryKey: ["/api/gumruk/firma-ozet", selectedYil, selectedFirma],
+    enabled: chartMetric === "firma" && !!selectedFirma,
   });
 
   // Seçili ay verilerini getir
@@ -116,15 +143,61 @@ export default function Gumruk() {
   };
 
   // Grafik verisini hazırla (aylara göre sıralı)
-  const chartData = aylikOzet
-    ? aylikOzet
+  const chartData = useMemo(() => {
+    if (chartMetric === "firma" && firmaOzet) {
+      return firmaOzet
         .map((item) => ({
           ay: getAyLabel(item.ay),
           sira: getAySira(item.ay),
-          toplamSatis: item.toplamSatis,
+          deger: item.toplamSatis,
+          dosyaSayisi: item.dosyaSayisi,
+          toplamKdv: item.toplamKdv,
         }))
-        .sort((a, b) => a.sira - b.sira)
-    : [];
+        .sort((a, b) => a.sira - b.sira);
+    }
+    
+    if (!aylikOzet) return [];
+    
+    return aylikOzet
+      .map((item) => ({
+        ay: getAyLabel(item.ay),
+        sira: getAySira(item.ay),
+        deger: chartMetric === "satis" ? item.toplamSatis : 
+               chartMetric === "kdv" ? item.toplamKdv : 
+               item.dosyaSayisi,
+        dosyaSayisi: item.dosyaSayisi,
+        toplamSatis: item.toplamSatis,
+        toplamKdv: item.toplamKdv,
+      }))
+      .sort((a, b) => a.sira - b.sira);
+  }, [aylikOzet, firmaOzet, chartMetric]);
+
+  const getChartTitle = () => {
+    const metric = chartMetricOptions.find(m => m.value === chartMetric);
+    if (chartMetric === "firma" && selectedFirma) {
+      return `${selectedFirma.substring(0, 30)}${selectedFirma.length > 30 ? '...' : ''} - Aylık Satış`;
+    }
+    return metric?.label || "Aylık Satış";
+  };
+
+  const getYAxisFormatter = (value: number) => {
+    if (chartMetric === "dosya") {
+      return String(value);
+    }
+    return formatCurrencyShort(value);
+  };
+
+  const getTooltipFormatter = (value: number) => {
+    if (chartMetric === "dosya") {
+      return [value, "Dosya Sayısı"];
+    }
+    if (chartMetric === "kdv") {
+      return [formatCurrency(value), "KDV"];
+    }
+    return [formatCurrency(value), "Satış"];
+  };
+
+  const isChartLoading = chartMetric === "firma" ? firmaOzetLoading : ozetLoading;
 
   // Genel istatistikleri hesapla (tüm yıl için)
   const genelStats = aylikOzet
@@ -251,62 +324,133 @@ export default function Gumruk() {
           </Card>
         </div>
 
-        {/* Aylık Satış Grafiği */}
+        {/* Dinamik Grafik */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap">
             <CardTitle className="flex items-center gap-2">
               <BarChart3 className="w-5 h-5" />
-              Aylık Satış Grafiği (KDV Hariç)
+              {getChartTitle()}
             </CardTitle>
-            <Select value={selectedYil} onValueChange={setSelectedYil}>
-              <SelectTrigger className="w-[100px]" data-testid="select-grafik-yil">
-                <SelectValue placeholder="Yıl" />
-              </SelectTrigger>
-              <SelectContent>
-                {yillar.map((yil) => (
-                  <SelectItem key={yil} value={String(yil)}>
-                    {yil}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Select value={chartMetric} onValueChange={(v) => {
+                setChartMetric(v as ChartMetric);
+                if (v !== "firma") setSelectedFirma("");
+              }}>
+                <SelectTrigger className="w-[180px]" data-testid="select-chart-metric">
+                  <SelectValue placeholder="Metrik seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {chartMetricOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {chartMetric === "firma" && (
+                <Select value={selectedFirma} onValueChange={setSelectedFirma}>
+                  <SelectTrigger className="w-[250px]" data-testid="select-firma">
+                    <SelectValue placeholder="Firma seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {firmalar?.map((firma) => (
+                      <SelectItem key={firma} value={firma}>
+                        {firma.length > 35 ? `${firma.substring(0, 35)}...` : firma}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              <Select value={selectedYil} onValueChange={setSelectedYil}>
+                <SelectTrigger className="w-[100px]" data-testid="select-grafik-yil">
+                  <SelectValue placeholder="Yıl" />
+                </SelectTrigger>
+                <SelectContent>
+                  {yillar.map((yil) => (
+                    <SelectItem key={yil} value={String(yil)}>
+                      {yil}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </CardHeader>
           <CardContent>
-            {ozetLoading ? (
+            {isChartLoading ? (
               <div className="flex items-center justify-center h-[300px]">
                 <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
               </div>
+            ) : chartMetric === "firma" && !selectedFirma ? (
+              <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
+                <Building2 className="w-12 h-12 mb-2" />
+                <p>Grafik görüntülemek için firma seçin</p>
+              </div>
             ) : chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis 
-                    dataKey="ay" 
-                    className="text-xs fill-muted-foreground"
-                    tick={{ fontSize: 12 }}
-                  />
-                  <YAxis 
-                    className="text-xs fill-muted-foreground"
-                    tickFormatter={(value) => formatCurrencyShort(value)}
-                    tick={{ fontSize: 11 }}
-                    width={70}
-                  />
-                  <Tooltip 
-                    formatter={(value: number) => [formatCurrency(value), "Satış"]}
-                    labelStyle={{ color: "var(--foreground)" }}
-                    contentStyle={{ 
-                      backgroundColor: "hsl(var(--card))", 
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "var(--radius)"
-                    }}
-                  />
-                  <Bar 
-                    dataKey="toplamSatis" 
-                    fill="hsl(var(--primary))" 
-                    radius={[4, 4, 0, 0]}
-                    name="Toplam Satış"
-                  />
-                </BarChart>
+                {chartMetric === "dosya" ? (
+                  <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      dataKey="ay" 
+                      className="text-xs fill-muted-foreground"
+                      tick={{ fontSize: 12 }}
+                    />
+                    <YAxis 
+                      className="text-xs fill-muted-foreground"
+                      tickFormatter={getYAxisFormatter}
+                      tick={{ fontSize: 11 }}
+                      width={50}
+                    />
+                    <Tooltip 
+                      formatter={(value: number) => getTooltipFormatter(value)}
+                      labelStyle={{ color: "var(--foreground)" }}
+                      contentStyle={{ 
+                        backgroundColor: "hsl(var(--card))", 
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "var(--radius)"
+                      }}
+                    />
+                    <Line 
+                      type="monotone"
+                      dataKey="deger" 
+                      stroke="hsl(var(--primary))" 
+                      strokeWidth={2}
+                      dot={{ fill: "hsl(var(--primary))", strokeWidth: 2, r: 4 }}
+                      activeDot={{ r: 6, strokeWidth: 0 }}
+                    />
+                  </LineChart>
+                ) : (
+                  <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      dataKey="ay" 
+                      className="text-xs fill-muted-foreground"
+                      tick={{ fontSize: 12 }}
+                    />
+                    <YAxis 
+                      className="text-xs fill-muted-foreground"
+                      tickFormatter={getYAxisFormatter}
+                      tick={{ fontSize: 11 }}
+                      width={70}
+                    />
+                    <Tooltip 
+                      formatter={(value: number) => getTooltipFormatter(value)}
+                      labelStyle={{ color: "var(--foreground)" }}
+                      contentStyle={{ 
+                        backgroundColor: "hsl(var(--card))", 
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "var(--radius)"
+                      }}
+                    />
+                    <Bar 
+                      dataKey="deger" 
+                      fill={chartMetric === "kdv" ? "hsl(var(--chart-2))" : "hsl(var(--primary))"} 
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                )}
               </ResponsiveContainer>
             ) : (
               <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">

@@ -15,6 +15,8 @@ export interface IStorage {
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
   getAylikOzet(yil: number): Promise<{ ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
+  getFirmalar(yil: number): Promise<string[]>;
+  getFirmaAylikOzet(yil: number, firma: string): Promise<{ ay: string; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -94,10 +96,48 @@ export class DatabaseStorage implements IStorage {
       topKdvTutar: gumrukVerileri.topKdvTutar,
     }).from(gumrukVerileri).where(eq(gumrukVerileri.yil, yil));
     
-    const grouped = result.reduce<Record<string, { ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }>>((acc, item) => {
+    const grouped = result.reduce<Record<string, { ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }>>((acc: Record<string, { ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }>, item: { ay: string; yil: number; malBedeli: string | null; topKdvTutar: string | null }) => {
       const key = item.ay;
       if (!acc[key]) {
         acc[key] = { ay: item.ay, yil: item.yil, toplamSatis: 0, toplamKdv: 0, dosyaSayisi: 0 };
+      }
+      acc[key].toplamSatis += parseFloat(item.malBedeli || "0");
+      acc[key].toplamKdv += parseFloat(item.topKdvTutar || "0");
+      acc[key].dosyaSayisi++;
+      return acc;
+    }, {});
+    
+    return Object.values(grouped);
+  }
+
+  async getFirmalar(yil: number): Promise<string[]> {
+    const result = await db.select({
+      firmaUnvan: gumrukVerileri.firmaUnvan,
+    }).from(gumrukVerileri).where(eq(gumrukVerileri.yil, yil));
+    
+    const firmalar = new Set<string>();
+    result.forEach((item: { firmaUnvan: string | null }) => {
+      if (item.firmaUnvan) {
+        firmalar.add(item.firmaUnvan);
+      }
+    });
+    
+    return Array.from(firmalar).sort();
+  }
+
+  async getFirmaAylikOzet(yil: number, firma: string): Promise<{ ay: string; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]> {
+    const result = await db.select({
+      ay: gumrukVerileri.ay,
+      malBedeli: gumrukVerileri.malBedeli,
+      topKdvTutar: gumrukVerileri.topKdvTutar,
+    }).from(gumrukVerileri).where(
+      and(eq(gumrukVerileri.yil, yil), eq(gumrukVerileri.firmaUnvan, firma))
+    );
+    
+    const grouped = result.reduce<Record<string, { ay: string; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }>>((acc: Record<string, { ay: string; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }>, item: { ay: string; malBedeli: string | null; topKdvTutar: string | null }) => {
+      const key = item.ay;
+      if (!acc[key]) {
+        acc[key] = { ay: item.ay, toplamSatis: 0, toplamKdv: 0, dosyaSayisi: 0 };
       }
       acc[key].toplamSatis += parseFloat(item.malBedeli || "0");
       acc[key].toplamKdv += parseFloat(item.topKdvTutar || "0");
