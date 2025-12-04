@@ -33,7 +33,7 @@ import {
 } from "recharts";
 import type { GumrukVerisi } from "@shared/schema";
 
-type ChartMetric = "satis" | "dosya" | "kdv" | "firma" | "eleman";
+type ChartMetric = "satis" | "dosya" | "kdv" | "firma" | "eleman" | "gumrukBazli";
 
 const aylar = [
   { value: "ocak", label: "Ocak", sira: 1 },
@@ -94,6 +94,7 @@ const chartMetricOptions = [
   { value: "kdv", label: "Toplam KDV" },
   { value: "firma", label: "Firma Bazlı" },
   { value: "eleman", label: "Giriş Elemanı" },
+  { value: "gumrukBazli", label: "Gümrük Bazlı" },
 ] as const;
 
 export default function Gumruk() {
@@ -137,6 +138,14 @@ export default function Gumruk() {
     enabled: chartMetric === "eleman",
   });
 
+  // Gümrük müdürlüğü bazlı özet getir
+  const { data: gumrukBazliOzet, isLoading: gumrukBazliOzetLoading } = useQuery<
+    { gumruk: string; toplamSatis: number; dosyaSayisi: number }[]
+  >({
+    queryKey: ["/api/gumruk/gumruk-ozet", selectedYil],
+    enabled: chartMetric === "gumrukBazli",
+  });
+
   // Seçili ay verilerini getir
   const { data: veriler, isLoading: verilerLoading, refetch: refetchVeriler } = useQuery<GumrukVerisi[]>({
     queryKey: ["/api/gumruk", selectedAy, selectedYil],
@@ -151,11 +160,19 @@ export default function Gumruk() {
     }
   };
 
-  // Grafik verisini hazırla (aylara göre sıralı veya eleman bazlı)
+  // Grafik verisini hazırla (aylara göre sıralı veya kategori bazlı)
   const chartData = useMemo(() => {
     if (chartMetric === "eleman" && elemanOzet) {
       return elemanOzet.map((item) => ({
         isim: item.eleman,
+        deger: item.toplamSatis,
+        dosyaSayisi: item.dosyaSayisi,
+      }));
+    }
+
+    if (chartMetric === "gumrukBazli" && gumrukBazliOzet) {
+      return gumrukBazliOzet.map((item) => ({
+        isim: item.gumruk,
         deger: item.toplamSatis,
         dosyaSayisi: item.dosyaSayisi,
       }));
@@ -187,7 +204,7 @@ export default function Gumruk() {
         toplamKdv: item.toplamKdv,
       }))
       .sort((a, b) => a.sira - b.sira);
-  }, [aylikOzet, firmaOzet, elemanOzet, chartMetric]);
+  }, [aylikOzet, firmaOzet, elemanOzet, gumrukBazliOzet, chartMetric]);
 
   const getChartTitle = () => {
     const metric = chartMetricOptions.find(m => m.value === chartMetric);
@@ -196,6 +213,9 @@ export default function Gumruk() {
     }
     if (chartMetric === "eleman") {
       return `Giriş Elemanı Performansı (${selectedYil}) - KDV Hariç`;
+    }
+    if (chartMetric === "gumrukBazli") {
+      return `Gümrük Müdürlüğü Performansı (${selectedYil}) - KDV Hariç`;
     }
     return metric?.label || "Aylık Satış";
   };
@@ -221,7 +241,8 @@ export default function Gumruk() {
   };
 
   const isChartLoading = chartMetric === "firma" ? firmaOzetLoading : 
-                         chartMetric === "eleman" ? elemanOzetLoading : ozetLoading;
+                         chartMetric === "eleman" ? elemanOzetLoading : 
+                         chartMetric === "gumrukBazli" ? gumrukBazliOzetLoading : ozetLoading;
 
   // Genel istatistikleri hesapla (tüm yıl için)
   const genelStats = aylikOzet
@@ -412,7 +433,7 @@ export default function Gumruk() {
                 <p>Grafik görüntülemek için firma seçin</p>
               </div>
             ) : chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={chartMetric === "eleman" ? 400 : 300}>
+              <ResponsiveContainer width="100%" height={(chartMetric === "eleman" || chartMetric === "gumrukBazli") ? 400 : 300}>
                 {chartMetric === "dosya" ? (
                   <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -445,11 +466,11 @@ export default function Gumruk() {
                       activeDot={{ r: 6, strokeWidth: 0 }}
                     />
                   </LineChart>
-                ) : chartMetric === "eleman" ? (
+                ) : chartMetric === "eleman" || chartMetric === "gumrukBazli" ? (
                   <BarChart 
                     data={chartData} 
                     layout="vertical"
-                    margin={{ top: 10, right: 30, left: 100, bottom: 0 }}
+                    margin={{ top: 10, right: 30, left: 120, bottom: 0 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                     <XAxis 
@@ -463,7 +484,7 @@ export default function Gumruk() {
                       dataKey="isim" 
                       className="text-xs fill-muted-foreground"
                       tick={{ fontSize: 11 }}
-                      width={95}
+                      width={115}
                     />
                     <Tooltip 
                       formatter={(value: number) => getTooltipFormatter(value)}
@@ -476,7 +497,7 @@ export default function Gumruk() {
                     />
                     <Bar 
                       dataKey="deger" 
-                      fill="hsl(var(--chart-3))" 
+                      fill={chartMetric === "gumrukBazli" ? "hsl(var(--chart-4))" : "hsl(var(--chart-3))"} 
                       radius={[0, 4, 4, 0]}
                     />
                   </BarChart>

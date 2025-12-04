@@ -100,6 +100,18 @@ export async function registerRoutes(
     }
   });
 
+  // Gümrük müdürlüğü bazlı özet getir (spesifik route - önce tanımlanmalı)
+  app.get("/api/gumruk/gumruk-ozet/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const ozet = await storage.getGumrukOzet(parseInt(yil));
+      res.json(ozet);
+    } catch (error) {
+      console.error("Gümrük özet getirme hatası:", error);
+      res.status(500).json({ error: "Gümrük özeti alınamadı" });
+    }
+  });
+
   // Gümrük verilerini getir (parametrik route - en son tanımlanmalı)
   app.get("/api/gumruk/:ay/:yil", async (req, res) => {
     try {

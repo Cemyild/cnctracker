@@ -181,6 +181,25 @@ export class DatabaseStorage implements IStorage {
     
     return Object.values(grouped).sort((a, b) => b.toplamSatis - a.toplamSatis);
   }
+
+  async getGumrukOzet(yil: number): Promise<{ gumruk: string; toplamSatis: number; dosyaSayisi: number }[]> {
+    const result = await db.select({
+      gumrukAdi: gumrukVerileri.gumrukAdi,
+      malBedeli: gumrukVerileri.malBedeli,
+    }).from(gumrukVerileri).where(eq(gumrukVerileri.yil, yil));
+    
+    const grouped = result.reduce<Record<string, { gumruk: string; toplamSatis: number; dosyaSayisi: number }>>((acc, item) => {
+      const key = item.gumrukAdi || "Bilinmiyor";
+      if (!acc[key]) {
+        acc[key] = { gumruk: key, toplamSatis: 0, dosyaSayisi: 0 };
+      }
+      acc[key].toplamSatis += parseFloat(item.malBedeli || "0");
+      acc[key].dosyaSayisi++;
+      return acc;
+    }, {});
+    
+    return Object.values(grouped).sort((a, b) => b.toplamSatis - a.toplamSatis);
+  }
 }
 
 export const storage = new DatabaseStorage();
