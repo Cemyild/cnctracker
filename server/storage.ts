@@ -14,6 +14,7 @@ export interface IStorage {
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
+  getAylikOzet(yil: number): Promise<{ ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -79,6 +80,28 @@ export class DatabaseStorage implements IStorage {
         acc[key] = { ay: item.ay, yil: item.yil, kayitSayisi: 0 };
       }
       acc[key].kayitSayisi++;
+      return acc;
+    }, {});
+    
+    return Object.values(grouped);
+  }
+
+  async getAylikOzet(yil: number): Promise<{ ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]> {
+    const result = await db.select({
+      ay: gumrukVerileri.ay,
+      yil: gumrukVerileri.yil,
+      malBedeli: gumrukVerileri.malBedeli,
+      topKdvTutar: gumrukVerileri.topKdvTutar,
+    }).from(gumrukVerileri).where(eq(gumrukVerileri.yil, yil));
+    
+    const grouped = result.reduce<Record<string, { ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }>>((acc, item) => {
+      const key = item.ay;
+      if (!acc[key]) {
+        acc[key] = { ay: item.ay, yil: item.yil, toplamSatis: 0, toplamKdv: 0, dosyaSayisi: 0 };
+      }
+      acc[key].toplamSatis += parseFloat(item.malBedeli || "0");
+      acc[key].toplamKdv += parseFloat(item.topKdvTutar || "0");
+      acc[key].dosyaSayisi++;
       return acc;
     }, {});
     

@@ -19,40 +19,70 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Upload, FileSpreadsheet, TrendingUp, Users, Building2, Loader2 } from "lucide-react";
+import { Upload, FileSpreadsheet, TrendingUp, Users, Building2, Loader2, BarChart3 } from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import type { GumrukVerisi } from "@shared/schema";
 
 const aylar = [
-  { value: "ocak", label: "Ocak" },
-  { value: "subat", label: "Şubat" },
-  { value: "mart", label: "Mart" },
-  { value: "nisan", label: "Nisan" },
-  { value: "mayis", label: "Mayıs" },
-  { value: "haziran", label: "Haziran" },
-  { value: "temmuz", label: "Temmuz" },
-  { value: "agustos", label: "Ağustos" },
-  { value: "eylul", label: "Eylül" },
-  { value: "ekim", label: "Ekim" },
-  { value: "kasim", label: "Kasım" },
-  { value: "aralik", label: "Aralık" },
+  { value: "ocak", label: "Ocak", sira: 1 },
+  { value: "subat", label: "Şubat", sira: 2 },
+  { value: "mart", label: "Mart", sira: 3 },
+  { value: "nisan", label: "Nisan", sira: 4 },
+  { value: "mayis", label: "Mayıs", sira: 5 },
+  { value: "haziran", label: "Haziran", sira: 6 },
+  { value: "temmuz", label: "Temmuz", sira: 7 },
+  { value: "agustos", label: "Ağustos", sira: 8 },
+  { value: "eylul", label: "Eylül", sira: 9 },
+  { value: "ekim", label: "Ekim", sira: 10 },
+  { value: "kasim", label: "Kasım", sira: 11 },
+  { value: "aralik", label: "Aralık", sira: 12 },
 ];
 
 const currentYear = new Date().getFullYear();
 const yillar = Array.from({ length: 5 }, (_, i) => currentYear - i);
 
-function formatCurrency(value: string | null): string {
-  if (!value) return "₺0,00";
-  const num = parseFloat(value);
+function formatCurrency(value: string | number | null): string {
+  if (value === null || value === undefined) return "₺0,00";
+  const num = typeof value === "string" ? parseFloat(value) : value;
   return new Intl.NumberFormat("tr-TR", {
     style: "currency",
     currency: "TRY",
   }).format(num);
 }
 
+function formatCurrencyShort(value: number): string {
+  if (value >= 1000000) {
+    return `₺${(value / 1000000).toFixed(1)}M`;
+  }
+  if (value >= 1000) {
+    return `₺${(value / 1000).toFixed(0)}K`;
+  }
+  return `₺${value.toFixed(0)}`;
+}
+
 function getAyLabel(value: string): string {
   return aylar.find((a) => a.value === value)?.label || value;
 }
+
+function getAySira(value: string): number {
+  return aylar.find((a) => a.value === value)?.sira || 0;
+}
+
+type AylikOzet = {
+  ay: string;
+  yil: number;
+  toplamSatis: number;
+  toplamKdv: number;
+  dosyaSayisi: number;
+};
 
 export default function Gumruk() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -66,6 +96,11 @@ export default function Gumruk() {
     queryKey: ["/api/gumruk/aylar"],
   });
 
+  // Aylık özet verilerini getir (grafik için)
+  const { data: aylikOzet, isLoading: ozetLoading, refetch: refetchOzet } = useQuery<AylikOzet[]>({
+    queryKey: ["/api/gumruk/ozet", selectedYil],
+  });
+
   // Seçili ay verilerini getir
   const { data: veriler, isLoading: verilerLoading, refetch: refetchVeriler } = useQuery<GumrukVerisi[]>({
     queryKey: ["/api/gumruk", selectedAy, selectedYil],
@@ -74,13 +109,37 @@ export default function Gumruk() {
 
   const handleUploadSuccess = () => {
     refetchAylar();
+    refetchOzet();
     if (selectedAy && selectedYil) {
       refetchVeriler();
     }
   };
 
-  // İstatistikleri hesapla
-  const stats = veriler
+  // Grafik verisini hazırla (aylara göre sıralı)
+  const chartData = aylikOzet
+    ? aylikOzet
+        .map((item) => ({
+          ay: getAyLabel(item.ay),
+          sira: getAySira(item.ay),
+          toplamSatis: item.toplamSatis,
+        }))
+        .sort((a, b) => a.sira - b.sira)
+    : [];
+
+  // Genel istatistikleri hesapla (tüm yıl için)
+  const genelStats = aylikOzet
+    ? {
+        toplamSatis: aylikOzet.reduce((sum, v) => sum + v.toplamSatis, 0),
+        toplamKdv: aylikOzet.reduce((sum, v) => sum + v.toplamKdv, 0),
+        toplamDosya: aylikOzet.reduce((sum, v) => sum + v.dosyaSayisi, 0),
+        aylikOrtalama: aylikOzet.length > 0 
+          ? aylikOzet.reduce((sum, v) => sum + v.toplamSatis, 0) / aylikOzet.length 
+          : 0,
+      }
+    : null;
+
+  // Seçili ay istatistikleri
+  const ayStats = veriler
     ? {
         toplamFatura: veriler.reduce(
           (sum, v) => sum + parseFloat(v.topFaturaTutar || "0"),
@@ -95,7 +154,7 @@ export default function Gumruk() {
       }
     : null;
 
-  // En çok ciro yapan müşteriler
+  // En çok ciro yapan müşteriler (seçili ay için)
   const musteriCirolari = veriler
     ? Object.entries(
         veriler.reduce((acc, v) => {
@@ -108,7 +167,7 @@ export default function Gumruk() {
         .slice(0, 5)
     : [];
 
-  // Çalışan bazında dosya sayıları
+  // Çalışan bazında dosya sayıları (seçili ay için)
   const calisanDosyalari = veriler
     ? Object.entries(
         veriler.reduce((acc, v) => {
@@ -125,24 +184,82 @@ export default function Gumruk() {
       <BackgroundPaths />
 
       <div className="relative z-10 p-6 lg:p-8 space-y-6">
-        {/* Üst Bar */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div className="flex items-center gap-4">
-            <Select value={selectedAy} onValueChange={setSelectedAy}>
-              <SelectTrigger className="w-[140px]" data-testid="select-filter-ay">
-                <SelectValue placeholder="Ay seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {aylar.map((ay) => (
-                  <SelectItem key={ay.value} value={ay.value}>
-                    {ay.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        {/* Üst Bar - Sadece Excel Yükle butonu */}
+        <div className="flex justify-end">
+          <Button onClick={() => setIsUploadModalOpen(true)} data-testid="button-open-upload">
+            <Upload className="w-4 h-4 mr-2" />
+            Excel Yükle
+          </Button>
+        </div>
 
+        {/* Genel İstatistik Kartları */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" />
+                {selectedYil} Toplam Satış
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold" data-testid="text-yillik-satis">
+                {ozetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(genelStats?.toplamSatis || 0)}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" />
+                {selectedYil} Toplam KDV
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold" data-testid="text-yillik-kdv">
+                {ozetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(genelStats?.toplamKdv || 0)}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4" />
+                {selectedYil} Toplam Dosya
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold" data-testid="text-yillik-dosya">
+                {ozetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : genelStats?.toplamDosya || 0}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <BarChart3 className="w-4 h-4" />
+                Aylık Ortalama
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold" data-testid="text-aylik-ortalama">
+                {ozetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(genelStats?.aylikOrtalama || 0)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Aylık Satış Grafiği */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="w-5 h-5" />
+              Aylık Satış Grafiği (KDV Hariç)
+            </CardTitle>
             <Select value={selectedYil} onValueChange={setSelectedYil}>
-              <SelectTrigger className="w-[100px]" data-testid="select-filter-yil">
+              <SelectTrigger className="w-[100px]" data-testid="select-grafik-yil">
                 <SelectValue placeholder="Yıl" />
               </SelectTrigger>
               <SelectContent>
@@ -153,190 +270,233 @@ export default function Gumruk() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </CardHeader>
+          <CardContent>
+            {ozetLoading ? (
+              <div className="flex items-center justify-center h-[300px]">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis 
+                    dataKey="ay" 
+                    className="text-xs fill-muted-foreground"
+                    tick={{ fontSize: 12 }}
+                  />
+                  <YAxis 
+                    className="text-xs fill-muted-foreground"
+                    tickFormatter={(value) => formatCurrencyShort(value)}
+                    tick={{ fontSize: 11 }}
+                    width={70}
+                  />
+                  <Tooltip 
+                    formatter={(value: number) => [formatCurrency(value), "Satış"]}
+                    labelStyle={{ color: "var(--foreground)" }}
+                    contentStyle={{ 
+                      backgroundColor: "hsl(var(--card))", 
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "var(--radius)"
+                    }}
+                  />
+                  <Bar 
+                    dataKey="toplamSatis" 
+                    fill="hsl(var(--primary))" 
+                    radius={[4, 4, 0, 0]}
+                    name="Toplam Satış"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
+                <BarChart3 className="w-12 h-12 mb-2" />
+                <p>{selectedYil} yılına ait veri bulunamadı</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-          <Button onClick={() => setIsUploadModalOpen(true)} data-testid="button-open-upload">
-            <Upload className="w-4 h-4 mr-2" />
-            Excel Yükle
-          </Button>
-        </div>
+        {/* Ay Bazlı Detay Bölümü */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="w-5 h-5" />
+              Ay Bazlı Detay
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-4">
+              <Select value={selectedAy} onValueChange={setSelectedAy}>
+                <SelectTrigger className="w-[140px]" data-testid="select-filter-ay">
+                  <SelectValue placeholder="Ay seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {aylar.map((ay) => (
+                    <SelectItem key={ay.value} value={ay.value}>
+                      {ay.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-        {/* Yüklü Aylar */}
-        {yukluAylar && yukluAylar.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {yukluAylar.map((item) => (
-              <Badge
-                key={`${item.ay}-${item.yil}`}
-                variant={selectedAy === item.ay && selectedYil === String(item.yil) ? "default" : "secondary"}
-                className="cursor-pointer"
-                onClick={() => {
-                  setSelectedAy(item.ay);
-                  setSelectedYil(String(item.yil));
-                }}
-                data-testid={`badge-ay-${item.ay}-${item.yil}`}
-              >
-                {getAyLabel(item.ay)} {item.yil} ({item.kayitSayisi} kayıt)
-              </Badge>
-            ))}
-          </div>
-        )}
+              <Select value={selectedYil} onValueChange={setSelectedYil}>
+                <SelectTrigger className="w-[100px]" data-testid="select-filter-yil">
+                  <SelectValue placeholder="Yıl" />
+                </SelectTrigger>
+                <SelectContent>
+                  {yillar.map((yil) => (
+                    <SelectItem key={yil} value={String(yil)}>
+                      {yil}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-        {/* İçerik */}
-        {!selectedAy ? (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <FileSpreadsheet className="w-16 h-16 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium mb-2">Veri Görüntüleme</h3>
-              <p className="text-sm text-muted-foreground text-center max-w-md mb-4">
-                Gümrük verilerini görüntülemek için yukarıdan ay ve yıl seçin veya yeni Excel dosyası yükleyin.
-              </p>
-              <Button onClick={() => setIsUploadModalOpen(true)} variant="outline">
-                <Upload className="w-4 h-4 mr-2" />
-                Excel Yükle
-              </Button>
-            </CardContent>
-          </Card>
-        ) : verilerLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : veriler && veriler.length > 0 ? (
-          <>
-            {/* İstatistik Kartları */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4" />
-                    Toplam Fatura
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold" data-testid="text-toplam-fatura">
-                    {formatCurrency(String(stats?.toplamFatura || 0))}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4" />
-                    Toplam KDV
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold" data-testid="text-toplam-kdv">
-                    {formatCurrency(String(stats?.toplamKdv || 0))}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <FileSpreadsheet className="w-4 h-4" />
-                    Dosya Sayısı
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold" data-testid="text-dosya-sayisi">
-                    {stats?.dosyaSayisi || 0}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <Building2 className="w-4 h-4" />
-                    Müşteri Sayısı
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold" data-testid="text-musteri-sayisi">
-                    {stats?.musteriSayisi || 0}
-                  </p>
-                </CardContent>
-              </Card>
+              {selectedAy && yukluAylar && (
+                <span className="text-sm text-muted-foreground">
+                  {yukluAylar.find(a => a.ay === selectedAy && a.yil === parseInt(selectedYil))
+                    ? `${yukluAylar.find(a => a.ay === selectedAy && a.yil === parseInt(selectedYil))?.kayitSayisi} kayıt`
+                    : "Veri yok"}
+                </span>
+              )}
             </div>
 
-            {/* Alt Kartlar */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* En Çok Ciro Yapan Müşteriler */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Building2 className="w-5 h-5" />
-                    En Çok Ciro Yapan Müşteriler
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Müşteri</TableHead>
-                        <TableHead className="text-right">Ciro</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {musteriCirolari.map(([musteri, ciro], index) => (
-                        <TableRow key={musteri} data-testid={`row-musteri-${index}`}>
-                          <TableCell className="font-medium">{musteri}</TableCell>
-                          <TableCell className="text-right">
-                            {formatCurrency(String(ciro))}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+            {!selectedAy ? (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                <FileSpreadsheet className="w-12 h-12 mb-2" />
+                <p>Detay görüntülemek için ay seçin</p>
+              </div>
+            ) : verilerLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : veriler && veriler.length > 0 ? (
+              <>
+                {/* Ay İstatistik Kartları */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Toplam Fatura
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xl font-bold" data-testid="text-toplam-fatura">
+                        {formatCurrency(ayStats?.toplamFatura || 0)}
+                      </p>
+                    </CardContent>
+                  </Card>
 
-              {/* Çalışan Bazında Dosya Sayıları */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Users className="w-5 h-5" />
-                    Çalışan Bazında Dosya Sayıları
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Çalışan</TableHead>
-                        <TableHead className="text-right">Dosya Sayısı</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {calisanDosyalari.map(([calisan, sayi], index) => (
-                        <TableRow key={calisan} data-testid={`row-calisan-${index}`}>
-                          <TableCell className="font-medium">{calisan}</TableCell>
-                          <TableCell className="text-right">{sayi}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </div>
-          </>
-        ) : (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <FileSpreadsheet className="w-16 h-16 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium mb-2">Veri Bulunamadı</h3>
-              <p className="text-sm text-muted-foreground text-center max-w-md mb-4">
-                {getAyLabel(selectedAy)} {selectedYil} için kayıtlı veri bulunmuyor.
-              </p>
-              <Button onClick={() => setIsUploadModalOpen(true)} variant="outline">
-                <Upload className="w-4 h-4 mr-2" />
-                Excel Yükle
-              </Button>
-            </CardContent>
-          </Card>
-        )}
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Toplam KDV
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xl font-bold" data-testid="text-toplam-kdv">
+                        {formatCurrency(ayStats?.toplamKdv || 0)}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Dosya Sayısı
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xl font-bold" data-testid="text-dosya-sayisi">
+                        {ayStats?.dosyaSayisi || 0}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Müşteri Sayısı
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xl font-bold" data-testid="text-musteri-sayisi">
+                        {ayStats?.musteriSayisi || 0}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Alt Kartlar */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+                  {/* En Çok Ciro Yapan Müşteriler */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Building2 className="w-4 h-4" />
+                        En Çok Ciro Yapan Müşteriler
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Müşteri</TableHead>
+                            <TableHead className="text-right">Ciro</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {musteriCirolari.map(([musteri, ciro], index) => (
+                            <TableRow key={musteri} data-testid={`row-musteri-${index}`}>
+                              <TableCell className="font-medium">{musteri}</TableCell>
+                              <TableCell className="text-right">
+                                {formatCurrency(ciro)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+
+                  {/* Çalışan Bazında Dosya Sayıları */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Users className="w-4 h-4" />
+                        Çalışan Bazında Dosya Sayıları
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Çalışan</TableHead>
+                            <TableHead className="text-right">Dosya Sayısı</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {calisanDosyalari.map(([calisan, sayi], index) => (
+                            <TableRow key={calisan} data-testid={`row-calisan-${index}`}>
+                              <TableCell className="font-medium">{calisan}</TableCell>
+                              <TableCell className="text-right">{sayi}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                <FileSpreadsheet className="w-12 h-12 mb-2" />
+                <p>{getAyLabel(selectedAy)} {selectedYil} için kayıtlı veri bulunmuyor</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <ExcelUploadModal

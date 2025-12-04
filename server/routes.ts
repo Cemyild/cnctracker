@@ -52,6 +52,18 @@ export async function registerRoutes(
     }
   });
 
+  // Aylık özet getir (grafik için)
+  app.get("/api/gumruk/ozet/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const ozet = await storage.getAylikOzet(parseInt(yil));
+      res.json(ozet);
+    } catch (error) {
+      console.error("Özet getirme hatası:", error);
+      res.status(500).json({ error: "Özet alınamadı" });
+    }
+  });
+
   // Excel yükle
   app.post("/api/gumruk/yukle", upload.single("excel"), async (req, res) => {
     try {
