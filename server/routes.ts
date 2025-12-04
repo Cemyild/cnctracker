@@ -1,16 +1,131 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import multer from "multer";
+import * as XLSX from "xlsx";
+import type { InsertGumrukVerisi } from "@shared/schema";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
+  
+  // Gümrük verilerini getir
+  app.get("/api/gumruk/:ay/:yil", async (req, res) => {
+    try {
+      const { ay, yil } = req.params;
+      const veriler = await storage.getGumrukVerileri(ay, parseInt(yil));
+      res.json(veriler);
+    } catch (error) {
+      console.error("Gümrük verileri getirme hatası:", error);
+      res.status(500).json({ error: "Veriler alınamadı" });
+    }
+  });
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+  // Yüklü ayları getir
+  app.get("/api/gumruk/aylar", async (req, res) => {
+    try {
+      const aylar = await storage.getGumrukAylari();
+      res.json(aylar);
+    } catch (error) {
+      console.error("Aylar getirme hatası:", error);
+      res.status(500).json({ error: "Aylar alınamadı" });
+    }
+  });
+
+  // Excel yükle
+  app.post("/api/gumruk/yukle", upload.single("excel"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Dosya yüklenmedi" });
+      }
+
+      const { ay, yil } = req.body;
+      if (!ay || !yil) {
+        return res.status(400).json({ error: "Ay ve yıl bilgisi gerekli" });
+      }
+
+      // Excel dosyasını oku
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+
+      if (data.length < 2) {
+        return res.status(400).json({ error: "Excel dosyası boş veya geçersiz" });
+      }
+
+      // İlk satır başlıklar, 2. satırdan itibaren veriler
+      const veriler: InsertGumrukVerisi[] = [];
+      
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        if (!row || row.length === 0) continue;
+        
+        // Boş satırları atla
+        if (!row[1] && !row[2]) continue;
+
+        const parseNumber = (val: any): string | null => {
+          if (val === undefined || val === null || val === "") return null;
+          const num = parseFloat(String(val).replace(",", "."));
+          return isNaN(num) ? null : num.toFixed(2);
+        };
+
+        veriler.push({
+          ay,
+          yil: parseInt(yil),
+          tip: row[0] ? String(row[0]).trim() : null,
+          dosyaNo: row[1] ? String(row[1]).trim() : null,
+          firmaUnvan: row[2] ? String(row[2]).trim() : null,
+          rejim: row[3] ? String(row[3]).trim() : null,
+          faturaNo: row[4] ? String(row[4]).trim() : null,
+          faturaTarihi: row[5] ? String(row[5]).trim() : null,
+          gumruk: row[6] ? String(row[6]).trim() : null,
+          tescilTarihi: row[7] ? String(row[7]).trim() : null,
+          tescilNo: row[8] ? String(row[8]).trim() : null,
+          faturayiKesen: row[9] ? String(row[9]).trim() : null,
+          dovizKiymeti: row[10] ? String(row[10]).trim() : null,
+          doviz: row[11] ? String(row[11]).trim() : null,
+          girisElemani: row[12] ? String(row[12]).trim() : null,
+          malBedeli: parseNumber(row[13]),
+          topIskonto: parseNumber(row[14]),
+          topKdvTutar: parseNumber(row[15]),
+          topFaturaTutar: parseNumber(row[16]),
+        });
+      }
+
+      if (veriler.length === 0) {
+        return res.status(400).json({ error: "Geçerli veri bulunamadı" });
+      }
+
+      // Mevcut verileri sil ve yeni verileri ekle
+      await storage.deleteGumrukVerileri(ay, parseInt(yil));
+      const eklenenVeriler = await storage.insertGumrukVerileri(veriler);
+
+      res.json({ 
+        success: true, 
+        message: `${eklenenVeriler.length} kayıt başarıyla eklendi`,
+        kayitSayisi: eklenenVeriler.length 
+      });
+    } catch (error) {
+      console.error("Excel yükleme hatası:", error);
+      res.status(500).json({ error: "Excel yüklenirken bir hata oluştu" });
+    }
+  });
+
+  // Gümrük verilerini sil
+  app.delete("/api/gumruk/:ay/:yil", async (req, res) => {
+    try {
+      const { ay, yil } = req.params;
+      await storage.deleteGumrukVerileri(ay, parseInt(yil));
+      res.json({ success: true, message: "Veriler silindi" });
+    } catch (error) {
+      console.error("Silme hatası:", error);
+      res.status(500).json({ error: "Veriler silinemedi" });
+    }
+  });
 
   return httpServer;
 }
