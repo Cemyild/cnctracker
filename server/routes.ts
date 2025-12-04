@@ -150,7 +150,8 @@ export async function registerRoutes(
       });
     } catch (error) {
       console.error("Excel yükleme hatası:", error);
-      res.status(500).json({ error: "Excel yüklenirken bir hata oluştu" });
+      const errorMessage = error instanceof Error ? error.message : "Bilinmeyen hata";
+      res.status(500).json({ error: `Excel yüklenirken bir hata oluştu: ${errorMessage}` });
     }
   });
 
