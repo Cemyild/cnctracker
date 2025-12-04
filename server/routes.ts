@@ -29,19 +29,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  // Gümrük verilerini getir
-  app.get("/api/gumruk/:ay/:yil", async (req, res) => {
-    try {
-      const { ay, yil } = req.params;
-      const veriler = await storage.getGumrukVerileri(ay, parseInt(yil));
-      res.json(veriler);
-    } catch (error) {
-      console.error("Gümrük verileri getirme hatası:", error);
-      res.status(500).json({ error: "Veriler alınamadı" });
-    }
-  });
-
-  // Yüklü ayları getir
+  // Yüklü ayları getir (spesifik route - önce tanımlanmalı)
   app.get("/api/gumruk/aylar", async (req, res) => {
     try {
       const aylar = await storage.getGumrukAylari();
@@ -52,7 +40,7 @@ export async function registerRoutes(
     }
   });
 
-  // Aylık özet getir (grafik için)
+  // Aylık özet getir - grafik için (spesifik route - önce tanımlanmalı)
   app.get("/api/gumruk/ozet/:yil", async (req, res) => {
     try {
       const { yil } = req.params;
@@ -61,6 +49,18 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Özet getirme hatası:", error);
       res.status(500).json({ error: "Özet alınamadı" });
+    }
+  });
+
+  // Gümrük verilerini getir (parametrik route - en son tanımlanmalı)
+  app.get("/api/gumruk/:ay/:yil", async (req, res) => {
+    try {
+      const { ay, yil } = req.params;
+      const veriler = await storage.getGumrukVerileri(ay, parseInt(yil));
+      res.json(veriler);
+    } catch (error) {
+      console.error("Gümrük verileri getirme hatası:", error);
+      res.status(500).json({ error: "Veriler alınamadı" });
     }
   });
 
