@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -8,6 +8,14 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import Dashboard from "@/pages/Dashboard";
 import NotFound from "@/pages/not-found";
+
+const pageTitles: Record<string, string> = {
+  "/": "Dashboard",
+  "/gumruk": "Gümrük",
+  "/sigorta": "Sigorta",
+  "/nakliye": "Nakliye",
+  "/raporlar": "Raporlar",
+};
 
 function Router() {
   return (
@@ -22,6 +30,29 @@ function Router() {
   );
 }
 
+function AppContent() {
+  const [location] = useLocation();
+  const pageTitle = pageTitles[location] || "Dashboard";
+
+  return (
+    <div className="flex h-screen w-full bg-background">
+      <AppSidebar />
+      <div className="flex flex-col flex-1 min-w-0">
+        <header className="flex items-center justify-between h-16 px-4 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-50">
+          <div className="flex items-center gap-4">
+            <SidebarTrigger data-testid="button-sidebar-toggle" />
+            <h1 className="text-lg font-semibold" data-testid="text-page-title">{pageTitle}</h1>
+          </div>
+          <ThemeToggle />
+        </header>
+        <main className="flex-1 overflow-auto">
+          <Router />
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const style = {
     "--sidebar-width": "16rem",
@@ -32,21 +63,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <SidebarProvider style={style as React.CSSProperties}>
-          <div className="flex h-screen w-full bg-background">
-            <AppSidebar />
-            <div className="flex flex-col flex-1 min-w-0">
-              <header className="flex items-center justify-between h-16 px-4 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-50">
-                <div className="flex items-center gap-4">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
-                  <h1 className="text-lg font-semibold">Dashboard</h1>
-                </div>
-                <ThemeToggle />
-              </header>
-              <main className="flex-1 overflow-auto">
-                <Router />
-              </main>
-            </div>
-          </div>
+          <AppContent />
         </SidebarProvider>
         <Toaster />
       </TooltipProvider>
