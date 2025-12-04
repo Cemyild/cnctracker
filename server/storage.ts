@@ -39,7 +39,18 @@ export class DatabaseStorage implements IStorage {
 
   async insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]> {
     if (veriler.length === 0) return [];
-    return await db.insert(gumrukVerileri).values(veriler).returning();
+    
+    // Verileri 100'lük parçalar halinde ekle (PostgreSQL parametre limiti nedeniyle)
+    const BATCH_SIZE = 100;
+    const results: GumrukVerisi[] = [];
+    
+    for (let i = 0; i < veriler.length; i += BATCH_SIZE) {
+      const batch = veriler.slice(i, i + BATCH_SIZE);
+      const inserted = await db.insert(gumrukVerileri).values(batch).returning();
+      results.push(...inserted);
+    }
+    
+    return results;
   }
 
   async deleteGumrukVerileri(ay: string, yil: number): Promise<void> {
