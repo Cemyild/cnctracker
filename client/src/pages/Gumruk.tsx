@@ -33,7 +33,7 @@ import {
 } from "recharts";
 import type { GumrukVerisi } from "@shared/schema";
 
-type ChartMetric = "satis" | "dosya" | "kdv" | "firma";
+type ChartMetric = "satis" | "dosya" | "kdv" | "firma" | "eleman";
 
 const aylar = [
   { value: "ocak", label: "Ocak", sira: 1 },
@@ -93,6 +93,7 @@ const chartMetricOptions = [
   { value: "dosya", label: "Dosya Sayısı" },
   { value: "kdv", label: "Toplam KDV" },
   { value: "firma", label: "Firma Bazlı" },
+  { value: "eleman", label: "Giriş Elemanı" },
 ] as const;
 
 export default function Gumruk() {
@@ -128,6 +129,14 @@ export default function Gumruk() {
     enabled: chartMetric === "firma" && !!selectedFirma,
   });
 
+  // Giriş elemanı bazlı özet getir
+  const { data: elemanOzet, isLoading: elemanOzetLoading } = useQuery<
+    { eleman: string; toplamSatis: number; dosyaSayisi: number }[]
+  >({
+    queryKey: ["/api/gumruk/eleman-ozet", selectedYil],
+    enabled: chartMetric === "eleman",
+  });
+
   // Seçili ay verilerini getir
   const { data: veriler, isLoading: verilerLoading, refetch: refetchVeriler } = useQuery<GumrukVerisi[]>({
     queryKey: ["/api/gumruk", selectedAy, selectedYil],
@@ -142,8 +151,16 @@ export default function Gumruk() {
     }
   };
 
-  // Grafik verisini hazırla (aylara göre sıralı)
+  // Grafik verisini hazırla (aylara göre sıralı veya eleman bazlı)
   const chartData = useMemo(() => {
+    if (chartMetric === "eleman" && elemanOzet) {
+      return elemanOzet.map((item) => ({
+        isim: item.eleman,
+        deger: item.toplamSatis,
+        dosyaSayisi: item.dosyaSayisi,
+      }));
+    }
+    
     if (chartMetric === "firma" && firmaOzet) {
       return firmaOzet
         .map((item) => ({
@@ -170,12 +187,15 @@ export default function Gumruk() {
         toplamKdv: item.toplamKdv,
       }))
       .sort((a, b) => a.sira - b.sira);
-  }, [aylikOzet, firmaOzet, chartMetric]);
+  }, [aylikOzet, firmaOzet, elemanOzet, chartMetric]);
 
   const getChartTitle = () => {
     const metric = chartMetricOptions.find(m => m.value === chartMetric);
     if (chartMetric === "firma" && selectedFirma) {
       return `${selectedFirma.substring(0, 30)}${selectedFirma.length > 30 ? '...' : ''} - Aylık Satış`;
+    }
+    if (chartMetric === "eleman") {
+      return `Giriş Elemanı Performansı (${selectedYil}) - KDV Hariç`;
     }
     return metric?.label || "Aylık Satış";
   };
@@ -194,10 +214,14 @@ export default function Gumruk() {
     if (chartMetric === "kdv") {
       return [formatCurrency(value), "KDV"];
     }
+    if (chartMetric === "eleman") {
+      return [formatCurrency(value), "Toplam Satış"];
+    }
     return [formatCurrency(value), "Satış"];
   };
 
-  const isChartLoading = chartMetric === "firma" ? firmaOzetLoading : ozetLoading;
+  const isChartLoading = chartMetric === "firma" ? firmaOzetLoading : 
+                         chartMetric === "eleman" ? elemanOzetLoading : ozetLoading;
 
   // Genel istatistikleri hesapla (tüm yıl için)
   const genelStats = aylikOzet
@@ -388,7 +412,7 @@ export default function Gumruk() {
                 <p>Grafik görüntülemek için firma seçin</p>
               </div>
             ) : chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={chartMetric === "eleman" ? 400 : 300}>
                 {chartMetric === "dosya" ? (
                   <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -421,6 +445,41 @@ export default function Gumruk() {
                       activeDot={{ r: 6, strokeWidth: 0 }}
                     />
                   </LineChart>
+                ) : chartMetric === "eleman" ? (
+                  <BarChart 
+                    data={chartData} 
+                    layout="vertical"
+                    margin={{ top: 10, right: 30, left: 100, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      type="number"
+                      className="text-xs fill-muted-foreground"
+                      tickFormatter={getYAxisFormatter}
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis 
+                      type="category"
+                      dataKey="isim" 
+                      className="text-xs fill-muted-foreground"
+                      tick={{ fontSize: 11 }}
+                      width={95}
+                    />
+                    <Tooltip 
+                      formatter={(value: number) => getTooltipFormatter(value)}
+                      labelStyle={{ color: "var(--foreground)" }}
+                      contentStyle={{ 
+                        backgroundColor: "hsl(var(--card))", 
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "var(--radius)"
+                      }}
+                    />
+                    <Bar 
+                      dataKey="deger" 
+                      fill="hsl(var(--chart-3))" 
+                      radius={[0, 4, 4, 0]}
+                    />
+                  </BarChart>
                 ) : (
                   <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />

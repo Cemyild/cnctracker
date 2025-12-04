@@ -147,6 +147,40 @@ export class DatabaseStorage implements IStorage {
     
     return Object.values(grouped);
   }
+
+  async getGirisElemanlari(yil: number): Promise<string[]> {
+    const result = await db.select({
+      girisElemani: gumrukVerileri.girisElemani,
+    }).from(gumrukVerileri).where(eq(gumrukVerileri.yil, yil));
+    
+    const elemanlar = new Set<string>();
+    result.forEach((item: { girisElemani: string | null }) => {
+      if (item.girisElemani) {
+        elemanlar.add(item.girisElemani);
+      }
+    });
+    
+    return Array.from(elemanlar).sort();
+  }
+
+  async getGirisElemaniOzet(yil: number): Promise<{ eleman: string; toplamSatis: number; dosyaSayisi: number }[]> {
+    const result = await db.select({
+      girisElemani: gumrukVerileri.girisElemani,
+      malBedeli: gumrukVerileri.malBedeli,
+    }).from(gumrukVerileri).where(eq(gumrukVerileri.yil, yil));
+    
+    const grouped = result.reduce<Record<string, { eleman: string; toplamSatis: number; dosyaSayisi: number }>>((acc, item) => {
+      const key = item.girisElemani || "Bilinmiyor";
+      if (!acc[key]) {
+        acc[key] = { eleman: key, toplamSatis: 0, dosyaSayisi: 0 };
+      }
+      acc[key].toplamSatis += parseFloat(item.malBedeli || "0");
+      acc[key].dosyaSayisi++;
+      return acc;
+    }, {});
+    
+    return Object.values(grouped).sort((a, b) => b.toplamSatis - a.toplamSatis);
+  }
 }
 
 export const storage = new DatabaseStorage();

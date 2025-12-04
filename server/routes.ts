@@ -76,6 +76,30 @@ export async function registerRoutes(
     }
   });
 
+  // Giriş elemanları listesi getir (spesifik route - önce tanımlanmalı)
+  app.get("/api/gumruk/giris-elemanlari/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const elemanlar = await storage.getGirisElemanlari(parseInt(yil));
+      res.json(elemanlar);
+    } catch (error) {
+      console.error("Giriş elemanları getirme hatası:", error);
+      res.status(500).json({ error: "Giriş elemanları alınamadı" });
+    }
+  });
+
+  // Giriş elemanı bazlı özet getir (spesifik route - önce tanımlanmalı)
+  app.get("/api/gumruk/eleman-ozet/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const ozet = await storage.getGirisElemaniOzet(parseInt(yil));
+      res.json(ozet);
+    } catch (error) {
+      console.error("Eleman özet getirme hatası:", error);
+      res.status(500).json({ error: "Eleman özeti alınamadı" });
+    }
+  });
+
   // Gümrük verilerini getir (parametrik route - en son tanımlanmalı)
   app.get("/api/gumruk/:ay/:yil", async (req, res) => {
     try {
