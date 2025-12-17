@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BackgroundPaths } from "@/components/BackgroundPaths";
 import { ExcelUploadModal } from "@/components/ExcelUploadModal";
+import { AdvancedChart } from "@/components/AdvancedChart";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -30,6 +31,7 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  Cell,
 } from "recharts";
 import type { GumrukVerisi } from "@shared/schema";
 
@@ -177,7 +179,7 @@ export default function Gumruk() {
         dosyaSayisi: item.dosyaSayisi,
       }));
     }
-    
+
     if (chartMetric === "firma" && firmaOzet) {
       return firmaOzet
         .map((item) => ({
@@ -189,16 +191,16 @@ export default function Gumruk() {
         }))
         .sort((a, b) => a.sira - b.sira);
     }
-    
+
     if (!aylikOzet) return [];
-    
+
     return aylikOzet
       .map((item) => ({
         ay: getAyLabel(item.ay),
         sira: getAySira(item.ay),
-        deger: chartMetric === "satis" ? item.toplamSatis : 
-               chartMetric === "kdv" ? item.toplamKdv : 
-               item.dosyaSayisi,
+        deger: chartMetric === "satis" ? item.toplamSatis :
+          chartMetric === "kdv" ? item.toplamKdv :
+            item.dosyaSayisi,
         dosyaSayisi: item.dosyaSayisi,
         toplamSatis: item.toplamSatis,
         toplamKdv: item.toplamKdv,
@@ -240,61 +242,61 @@ export default function Gumruk() {
     return [formatCurrency(value), "Satış"];
   };
 
-  const isChartLoading = chartMetric === "firma" ? firmaOzetLoading : 
-                         chartMetric === "eleman" ? elemanOzetLoading : 
-                         chartMetric === "gumrukBazli" ? gumrukBazliOzetLoading : ozetLoading;
+  const isChartLoading = chartMetric === "firma" ? firmaOzetLoading :
+    chartMetric === "eleman" ? elemanOzetLoading :
+      chartMetric === "gumrukBazli" ? gumrukBazliOzetLoading : ozetLoading;
 
   // Genel istatistikleri hesapla (tüm yıl için)
   const genelStats = aylikOzet
     ? {
-        toplamSatis: aylikOzet.reduce((sum, v) => sum + v.toplamSatis, 0),
-        toplamKdv: aylikOzet.reduce((sum, v) => sum + v.toplamKdv, 0),
-        toplamDosya: aylikOzet.reduce((sum, v) => sum + v.dosyaSayisi, 0),
-        aylikOrtalama: aylikOzet.length > 0 
-          ? aylikOzet.reduce((sum, v) => sum + v.toplamSatis, 0) / aylikOzet.length 
-          : 0,
-      }
+      toplamSatis: aylikOzet.reduce((sum, v) => sum + v.toplamSatis, 0),
+      toplamKdv: aylikOzet.reduce((sum, v) => sum + v.toplamKdv, 0),
+      toplamDosya: aylikOzet.reduce((sum, v) => sum + v.dosyaSayisi, 0),
+      aylikOrtalama: aylikOzet.length > 0
+        ? aylikOzet.reduce((sum, v) => sum + v.toplamSatis, 0) / aylikOzet.length
+        : 0,
+    }
     : null;
 
   // Seçili ay istatistikleri
   const ayStats = veriler
     ? {
-        toplamFatura: veriler.reduce(
-          (sum, v) => sum + parseFloat(v.topFaturaTutar || "0"),
-          0
-        ),
-        toplamKdv: veriler.reduce(
-          (sum, v) => sum + parseFloat(v.topKdvTutar || "0"),
-          0
-        ),
-        dosyaSayisi: veriler.length,
-        musteriSayisi: new Set(veriler.map((v) => v.firmaUnvan)).size,
-      }
+      toplamFatura: veriler.reduce(
+        (sum, v) => sum + parseFloat(v.topFaturaTutar || "0"),
+        0
+      ),
+      toplamKdv: veriler.reduce(
+        (sum, v) => sum + parseFloat(v.topKdvTutar || "0"),
+        0
+      ),
+      dosyaSayisi: veriler.length,
+      musteriSayisi: new Set(veriler.map((v) => v.firmaUnvan)).size,
+    }
     : null;
 
   // En çok ciro yapan müşteriler (seçili ay için)
   const musteriCirolari = veriler
     ? Object.entries(
-        veriler.reduce((acc, v) => {
-          const firma = v.firmaUnvan || "Bilinmeyen";
-          acc[firma] = (acc[firma] || 0) + parseFloat(v.topFaturaTutar || "0");
-          return acc;
-        }, {} as Record<string, number>)
-      )
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
+      veriler.reduce((acc, v) => {
+        const firma = v.firmaUnvan || "Bilinmeyen";
+        acc[firma] = (acc[firma] || 0) + parseFloat(v.topFaturaTutar || "0");
+        return acc;
+      }, {} as Record<string, number>)
+    )
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
     : [];
 
   // Çalışan bazında dosya sayıları (seçili ay için)
   const calisanDosyalari = veriler
     ? Object.entries(
-        veriler.reduce((acc, v) => {
-          const calisan = v.girisElemani || "Bilinmeyen";
-          acc[calisan] = (acc[calisan] || 0) + 1;
-          return acc;
-        }, {} as Record<string, number>)
-      )
-        .sort((a, b) => b[1] - a[1])
+      veriler.reduce((acc, v) => {
+        const calisan = v.girisElemani || "Bilinmeyen";
+        acc[calisan] = (acc[calisan] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>)
+    )
+      .sort((a, b) => b[1] - a[1])
     : [];
 
   return (
@@ -437,98 +439,125 @@ export default function Gumruk() {
                 {chartMetric === "dosya" ? (
                   <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
-                      dataKey="ay" 
+                    <XAxis
+                      dataKey="ay"
                       className="text-xs fill-muted-foreground"
                       tick={{ fontSize: 12 }}
                     />
-                    <YAxis 
+                    <YAxis
                       className="text-xs fill-muted-foreground"
                       tickFormatter={getYAxisFormatter}
                       tick={{ fontSize: 11 }}
                       width={50}
                     />
-                    <Tooltip 
+                    <Tooltip
                       formatter={(value: number) => getTooltipFormatter(value)}
                       labelStyle={{ color: "var(--foreground)" }}
-                      contentStyle={{ 
-                        backgroundColor: "hsl(var(--card))", 
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
                         border: "1px solid hsl(var(--border))",
                         borderRadius: "var(--radius)"
                       }}
                     />
-                    <Line 
+                    <Line
                       type="monotone"
-                      dataKey="deger" 
-                      stroke="hsl(var(--primary))" 
+                      dataKey="deger"
+                      stroke="hsl(var(--primary))"
                       strokeWidth={2}
                       dot={{ fill: "hsl(var(--primary))", strokeWidth: 2, r: 4 }}
                       activeDot={{ r: 6, strokeWidth: 0 }}
                     />
                   </LineChart>
                 ) : chartMetric === "eleman" || chartMetric === "gumrukBazli" ? (
-                  <BarChart 
-                    data={chartData} 
+                  <BarChart
+                    data={chartData}
                     layout="vertical"
                     margin={{ top: 10, right: 30, left: 120, bottom: 0 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
+                    <XAxis
                       type="number"
                       className="text-xs fill-muted-foreground"
                       tickFormatter={getYAxisFormatter}
                       tick={{ fontSize: 11 }}
                     />
-                    <YAxis 
+                    <YAxis
                       type="category"
-                      dataKey="isim" 
+                      dataKey="isim"
                       className="text-xs fill-muted-foreground"
                       tick={{ fontSize: 11 }}
                       width={115}
                     />
-                    <Tooltip 
+                    <Tooltip
                       formatter={(value: number) => getTooltipFormatter(value)}
                       labelStyle={{ color: "var(--foreground)" }}
-                      contentStyle={{ 
-                        backgroundColor: "hsl(var(--card))", 
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
                         border: "1px solid hsl(var(--border))",
                         borderRadius: "var(--radius)"
                       }}
                     />
-                    <Bar 
-                      dataKey="deger" 
-                      fill={chartMetric === "gumrukBazli" ? "hsl(var(--chart-4))" : "hsl(var(--chart-3))"} 
+                    <Bar
+                      dataKey="deger"
+                      fill={chartMetric === "gumrukBazli" ? "hsl(var(--chart-4))" : "hsl(var(--chart-3))"}
                       radius={[0, 4, 4, 0]}
                     />
                   </BarChart>
                 ) : (
                   <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <defs>
+                      {chartData.map((entry, index) => {
+                        const values = chartData.map(d => d.deger);
+                        const maxVal = Math.max(...values);
+                        const minVal = Math.min(...values);
+
+                        let color = "hsl(var(--primary))";
+
+                        if (chartMetric === "satis" || chartMetric === "kdv") {
+                          if (maxVal === minVal) {
+                            color = "hsl(120, 80%, 45%)";
+                          } else {
+                            const ratio = (entry.deger - minVal) / (maxVal - minVal);
+                            const hue = ratio * 120;
+                            color = `hsl(${hue}, 80%, 45%)`;
+                          }
+                        }
+
+                        return (
+                          <linearGradient key={`grad-${index}`} id={`grad-${index}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity={1} />
+                            <stop offset="100%" stopColor={color} stopOpacity={0.3} />
+                          </linearGradient>
+                        );
+                      })}
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
-                      dataKey="ay" 
+                    <XAxis
+                      dataKey="ay"
                       className="text-xs fill-muted-foreground"
                       tick={{ fontSize: 12 }}
                     />
-                    <YAxis 
+                    <YAxis
                       className="text-xs fill-muted-foreground"
                       tickFormatter={getYAxisFormatter}
                       tick={{ fontSize: 11 }}
                       width={70}
                     />
-                    <Tooltip 
+                    <Tooltip
                       formatter={(value: number) => getTooltipFormatter(value)}
                       labelStyle={{ color: "var(--foreground)" }}
-                      contentStyle={{ 
-                        backgroundColor: "hsl(var(--card))", 
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
                         border: "1px solid hsl(var(--border))",
                         borderRadius: "var(--radius)"
                       }}
+                      cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                     />
-                    <Bar 
-                      dataKey="deger" 
-                      fill={chartMetric === "kdv" ? "hsl(var(--chart-2))" : "hsl(var(--primary))"} 
-                      radius={[4, 4, 0, 0]}
-                    />
+                    <Bar dataKey="deger" radius={[4, 4, 0, 0]}>
+                      {chartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={`url(#grad-${index})`} />
+                      ))}
+                    </Bar>
                   </BarChart>
                 )}
               </ResponsiveContainer>
@@ -540,6 +569,9 @@ export default function Gumruk() {
             )}
           </CardContent>
         </Card>
+
+        {/* Gelişmiş Grafik Analizi */}
+        <AdvancedChart selectedYil={selectedYil} />
 
         {/* Ay Bazlı Detay Bölümü */}
         <Card>

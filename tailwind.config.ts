@@ -81,6 +81,13 @@ export default {
           busy: "rgb(239 68 68)",
           offline: "rgb(156 163 175)",
         },
+        // Dashboard specific colors
+        "dash-primary": "#00D09C",
+        "background-light": "#F3F4F6",
+        "background-dark": "#13131A",
+        "surface-light": "#FFFFFF",
+        "surface-dark": "#1F1F2B",
+        "secondary-dark": "#272735",
       },
       fontFamily: {
         sans: ["var(--font-sans)"],

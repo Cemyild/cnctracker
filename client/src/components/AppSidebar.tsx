@@ -35,50 +35,15 @@ export function AppSidebar() {
   return (
     <Sidebar className="border-r border-sidebar-border">
       <SidebarHeader className="p-6 border-b border-sidebar-border">
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <svg
-              width="48"
-              height="48"
-              viewBox="0 0 48 48"
-              fill="none"
-              className="text-foreground"
-            >
-              <path
-                d="M8 12 C8 12 12 8 24 8 C36 8 40 12 40 12"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              <path
-                d="M12 20 L12 36"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              <path
-                d="M24 20 L24 36"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              <path
-                d="M36 20 L36 36"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              <circle cx="12" cy="16" r="3" fill="currentColor" />
-              <circle cx="24" cy="16" r="3" fill="currentColor" />
-              <circle cx="36" cy="16" r="3" fill="currentColor" />
-            </svg>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-xl font-bold tracking-tight">CNC</span>
-            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-              Customs Management
-            </span>
-          </div>
+        <div className="flex flex-col items-center justify-center gap-3">
+          <img
+            src="/logo.png"
+            alt="CNC Gümrük Müşavirliği"
+            className="h-16 w-auto object-contain"
+          />
+          <span className="text-xs text-muted-foreground uppercase tracking-widest text-center">
+            CUSTOMS MANAGEMENT
+          </span>
         </div>
       </SidebarHeader>
 

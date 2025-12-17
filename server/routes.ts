@@ -28,7 +28,7 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  
+
   // Yüklü ayları getir (spesifik route - önce tanımlanmalı)
   app.get("/api/gumruk/aylar", async (req, res) => {
     try {
@@ -100,6 +100,68 @@ export async function registerRoutes(
     }
   });
 
+  // Gümrük müdürlükleri listesi getir
+  app.get("/api/gumruk/gumrukler-listesi/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const gumrukler = await storage.getGumrukler(parseInt(yil));
+      res.json(gumrukler);
+    } catch (error) {
+      console.error("Gümrük listesi getirme hatası:", error);
+      res.status(500).json({ error: "Gümrükler alınamadı" });
+    }
+  });
+
+  // Fatura kesenler listesi getir
+  app.get("/api/gumruk/fatura-kesenler/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const kesenler = await storage.getFaturaKesenler(parseInt(yil));
+      res.json(kesenler);
+    } catch (error) {
+      console.error("Fatura kesenler listesi getirme hatası:", error);
+      res.status(500).json({ error: "Fatura kesenler alınamadı" });
+    }
+  });
+
+  // Gelişmiş grafik verilerini getir (spesifik route - önce tanımlanmalı)
+  app.get("/api/gumruk/advanced-chart/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const { groupBy = "month", names } = req.query;
+
+      let namesArray: string[] | undefined;
+      if (names) {
+        namesArray = (names as string).split(',');
+      }
+
+      const veriler = await storage.getAdvancedChartData(parseInt(yil), groupBy as string, namesArray);
+      res.json(veriler);
+    } catch (error) {
+      console.error("Gelişmiş grafik verileri getirme hatası:", error);
+      res.status(500).json({ error: "Veriler alınamadı" });
+    }
+  });
+
+  // Trend grafik verilerini getir (ay bazlı kırılım)
+  app.get("/api/gumruk/advanced-chart-trend/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const { groupBy = "month", names } = req.query;
+
+      let namesArray: string[] | undefined;
+      if (names) {
+        namesArray = (names as string).split(',');
+      }
+
+      const veriler = await storage.getAdvancedChartTrend(parseInt(yil), groupBy as string, namesArray);
+      res.json(veriler);
+    } catch (error) {
+      console.error("Trend grafik verileri getirme hatası:", error);
+      res.status(500).json({ error: "Trend verileri alınamadı" });
+    }
+  });
+
   // Gümrük müdürlüğü bazlı özet getir (spesifik route - önce tanımlanmalı)
   app.get("/api/gumruk/gumruk-ozet/:yil", async (req, res) => {
     try {
@@ -150,11 +212,11 @@ export async function registerRoutes(
 
       // İlk satır başlıklar, 2. satırdan itibaren veriler
       const veriler: InsertGumrukVerisi[] = [];
-      
+
       for (let i = 1; i < data.length; i++) {
         const row = data[i];
         if (!row || row.length === 0) continue;
-        
+
         // Boş satırları atla
         if (!row[1] && !row[2]) continue;
 
@@ -197,13 +259,13 @@ export async function registerRoutes(
 
       // Mevcut row hash'leri al
       const existingHashes = await storage.getExistingRowHashes(ay, yil);
-      
+
       // Sadece yeni satırları filtrele
       const yeniVeriler = veriler.filter(v => !existingHashes.has(v.rowHash));
-      
+
       if (yeniVeriler.length === 0) {
-        return res.json({ 
-          success: true, 
+        return res.json({
+          success: true,
           message: "Tüm veriler zaten mevcut, yeni kayıt eklenmedi",
           eklenen: 0,
           atlanan: veriler.length,
@@ -213,8 +275,8 @@ export async function registerRoutes(
 
       const eklenenVeriler = await storage.insertGumrukVerileri(yeniVeriler);
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: `${eklenenVeriler.length} yeni kayıt eklendi${veriler.length - yeniVeriler.length > 0 ? ` (${veriler.length - yeniVeriler.length} mevcut kayıt atlandı)` : ""}`,
         eklenen: eklenenVeriler.length,
         atlanan: veriler.length - yeniVeriler.length,
