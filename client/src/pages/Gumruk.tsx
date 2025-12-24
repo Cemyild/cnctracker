@@ -32,6 +32,7 @@ import {
   LineChart,
   Line,
   Cell,
+  ComposedChart,
 } from "recharts";
 import type { GumrukVerisi } from "@shared/schema";
 
@@ -504,7 +505,10 @@ export default function Gumruk() {
                     />
                   </BarChart>
                 ) : (
-                  <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <ComposedChart
+                    data={chartData}
+                    margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                  >
                     <defs>
                       {chartData.map((entry, index) => {
                         const values = chartData.map(d => d.deger);
@@ -538,13 +542,25 @@ export default function Gumruk() {
                       tick={{ fontSize: 12 }}
                     />
                     <YAxis
+                      yAxisId="left"
                       className="text-xs fill-muted-foreground"
                       tickFormatter={getYAxisFormatter}
                       tick={{ fontSize: 11 }}
                       width={70}
                     />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      className="text-xs fill-muted-foreground"
+                      tick={{ fontSize: 11 }}
+                      width={40}
+                      label={{ value: 'Dosya', angle: -90, position: 'insideRight' }}
+                    />
                     <Tooltip
-                      formatter={(value: number) => getTooltipFormatter(value)}
+                      formatter={(value: number, name: string) => {
+                        if (name === "dosyaSayisi") return [value, "Dosya Sayısı"];
+                        return getTooltipFormatter(value);
+                      }}
                       labelStyle={{ color: "var(--foreground)" }}
                       contentStyle={{
                         backgroundColor: "hsl(var(--card))",
@@ -553,12 +569,20 @@ export default function Gumruk() {
                       }}
                       cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                     />
-                    <Bar dataKey="deger" radius={[4, 4, 0, 0]}>
+                    <Bar dataKey="deger" yAxisId="left" radius={[4, 4, 0, 0]}>
                       {chartData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={`url(#grad-${index})`} />
                       ))}
                     </Bar>
-                  </BarChart>
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="dosyaSayisi"
+                      stroke="#ff7300"
+                      strokeWidth={3}
+                      dot={{ r: 4, fill: "#ff7300" }}
+                    />
+                  </ComposedChart>
                 )}
               </ResponsiveContainer>
             ) : (

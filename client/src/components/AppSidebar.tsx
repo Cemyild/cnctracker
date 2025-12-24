@@ -19,6 +19,7 @@ import {
   Truck,
   BarChart3,
   LogOut,
+  Wrench,
 } from "lucide-react";
 
 const navItems = [
@@ -27,6 +28,7 @@ const navItems = [
   { title: "Sigorta", icon: Shield, href: "/sigorta" },
   { title: "Nakliye", icon: Truck, href: "/nakliye" },
   { title: "Raporlar", icon: BarChart3, href: "/raporlar" },
+  { title: "Araçlar", icon: Wrench, href: "/araclar" },
 ];
 
 export function AppSidebar() {

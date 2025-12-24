@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, gumrukVerileri } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray } from "drizzle-orm";
@@ -23,7 +23,17 @@ export interface IStorage {
   getGumrukler(yil: number): Promise<string[]>;
   getFaturaKesenler(yil: number): Promise<string[]>;
   getAdvancedChartData(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
+  getAdvancedChartData(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
   getAdvancedChartTrend(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
+  getTips(yil: number): Promise<string[]>;
+  getAraclar(): Promise<Arac[]>;
+  createArac(arac: InsertArac): Promise<Arac>;
+  updateArac(id: string, arac: Partial<InsertArac>): Promise<Arac>;
+  deleteArac(id: string): Promise<void>;
+
+  // Nakliye verileri
+  getNakliyeVerileri(): Promise<NakliyeVerisi[]>;
+  insertNakliyeVerileri(veriler: InsertNakliyeVerisi[]): Promise<NakliyeVerisi[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -241,6 +251,12 @@ export class DatabaseStorage implements IStorage {
       case "issuer":
         groupByColumn = gumrukVerileri.faturayiKesen;
         break;
+      case "issuer":
+        groupByColumn = gumrukVerileri.faturayiKesen;
+        break;
+      case "tip":
+        groupByColumn = gumrukVerileri.tip;
+        break;
       default:
         groupByColumn = gumrukVerileri.ay;
     }
@@ -315,6 +331,12 @@ export class DatabaseStorage implements IStorage {
       case "issuer":
         groupByColumn = gumrukVerileri.faturayiKesen;
         break;
+      case "issuer":
+        groupByColumn = gumrukVerileri.faturayiKesen;
+        break;
+      case "tip":
+        groupByColumn = gumrukVerileri.tip;
+        break;
       default:
         groupByColumn = gumrukVerileri.ay;
     }
@@ -366,6 +388,61 @@ export class DatabaseStorage implements IStorage {
       dosyaSayisi: Number(item.dosyaSayisi) || 0,
     }));
   }
+  async getTips(yil: number): Promise<string[]> {
+    const result = await db
+      .selectDistinct({ tip: gumrukVerileri.tip })
+      .from(gumrukVerileri)
+      .where(eq(gumrukVerileri.yil, yil));
+
+    return result
+      .map(r => r.tip)
+      .filter((t): t is string => t !== null && t !== "");
+  }
+
+  async getAraclar(): Promise<Arac[]> {
+    return await db.select().from(araclar);
+  }
+
+  async createArac(arac: InsertArac): Promise<Arac> {
+    const [newArac] = await db.insert(araclar).values(arac).returning();
+    return newArac;
+  }
+
+  async updateArac(id: string, arac: Partial<InsertArac>): Promise<Arac> {
+    const [updatedArac] = await db
+      .update(araclar)
+      .set(arac)
+      .where(eq(araclar.id, id))
+      .returning();
+    if (!updatedArac) throw new Error("Araç bulunamadı");
+    return updatedArac;
+  }
+
+  async deleteArac(id: string): Promise<void> {
+    await db.delete(araclar).where(eq(araclar.id, id));
+  }
+
+  async getNakliyeVerileri(): Promise<NakliyeVerisi[]> {
+    return await db.select().from(nakliyeVerileri).orderBy(sql`${nakliyeVerileri.olusturmaTarihi} DESC`);
+  }
+
+  async insertNakliyeVerileri(veriler: InsertNakliyeVerisi[]): Promise<NakliyeVerisi[]> {
+    if (veriler.length === 0) return [];
+
+    // Batch insert
+    const results: NakliyeVerisi[] = [];
+    const BATCH_SIZE = 100;
+
+    for (let i = 0; i < veriler.length; i += BATCH_SIZE) {
+      const batch = veriler.slice(i, i + BATCH_SIZE);
+      const inserted = await db.insert(nakliyeVerileri).values(batch).returning();
+      results.push(...inserted);
+    }
+
+    return results;
+  }
 }
+
+
 
 export const storage = new DatabaseStorage();

@@ -8,6 +8,10 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import Dashboard from "@/pages/Dashboard";
 import Gumruk from "@/pages/Gumruk";
+import Nakliye from "@/pages/Nakliye";
+import Sigorta from "@/pages/Sigorta";
+import Raporlar from "@/pages/Raporlar";
+import Tools from "@/pages/Tools";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -16,6 +20,7 @@ const pageTitles: Record<string, string> = {
   "/sigorta": "Sigorta",
   "/nakliye": "Nakliye",
   "/raporlar": "Raporlar",
+  "/araclar": "Araçlar",
 };
 
 function Router() {
@@ -23,9 +28,10 @@ function Router() {
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/gumruk" component={Gumruk} />
-      <Route path="/sigorta" component={Dashboard} />
-      <Route path="/nakliye" component={Dashboard} />
-      <Route path="/raporlar" component={Dashboard} />
+      <Route path="/sigorta" component={Sigorta} />
+      <Route path="/nakliye" component={Nakliye} />
+      <Route path="/raporlar" component={Raporlar} />
+      <Route path="/araclar" component={Tools} />
       <Route component={NotFound} />
     </Switch>
   );

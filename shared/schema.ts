@@ -66,3 +66,49 @@ export const aylar = [
   { value: "kasim", label: "Kasım" },
   { value: "aralik", label: "Aralık" },
 ] as const;
+
+// Araçlar tablosu
+export const araclar = pgTable("araclar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  plaka: text("plaka").notNull().unique(),
+  // Trafik Sigortası
+  trafikPoliceNo: text("trafik_police_no"),
+  trafikBitisTarihi: text("trafik_bitis_tarihi"),
+  // Kasko
+  kaskoPoliceNo: text("kasko_police_no"),
+  kaskoBitisTarihi: text("kasko_bitis_tarihi"),
+});
+
+export const insertAracSchema = createInsertSchema(araclar).omit({
+  id: true,
+});
+
+export type InsertArac = z.infer<typeof insertAracSchema>;
+export type Arac = typeof araclar.$inferSelect;
+
+// Nakliye verileri tablosu
+export const nakliyeVerileri = pgTable("nakliye_verileri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  faturaNo: text("fatura_no"),
+  faturaTarihi: text("fatura_tarihi"),
+  malHizmet: text("mal_hizmet"),
+  miktar: decimal("miktar", { precision: 15, scale: 2 }),
+  birimFiyat: decimal("birim_fiyat", { precision: 15, scale: 2 }),
+  kdvOranı: integer("kdv_orani"),
+  kdvTutarı: decimal("kdv_tutari", { precision: 15, scale: 2 }),
+  malHizmetToplamTutarı: decimal("mal_hizmet_toplam_tutari", { precision: 15, scale: 2 }),
+  hesaplananKdv20: decimal("hesaplanan_kdv_20", { precision: 15, scale: 2 }),
+  hesaplananKdvTevkifat20: decimal("hesaplanan_kdv_tevkifat_20", { precision: 15, scale: 2 }),
+  vergilerDahilToplamTutar: decimal("vergiler_dahil_toplam_tutar", { precision: 15, scale: 2 }),
+  odenecekTutar: decimal("odenecek_tutar", { precision: 15, scale: 2 }),
+  olusturmaTarihi: date("olusturma_tarihi").default(sql`CURRENT_DATE`),
+  rawJson: text("raw_json"), // Her ihtimale karşı tüm veriyi saklamak için
+});
+
+export const insertNakliyeVerisiSchema = createInsertSchema(nakliyeVerileri).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+
+export type InsertNakliyeVerisi = z.infer<typeof insertNakliyeVerisiSchema>;
+export type NakliyeVerisi = typeof nakliyeVerileri.$inferSelect;

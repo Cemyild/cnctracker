@@ -42,7 +42,7 @@ import {
 } from "recharts";
 import { Switch } from "@/components/ui/switch";
 
-type GroupBy = "month" | "employee" | "company" | "customs" | "issuer";
+type GroupBy = "month" | "employee" | "company" | "customs" | "issuer" | "tip";
 type ChartType = "bar" | "line";
 
 // Available metrics to display
@@ -59,13 +59,48 @@ const groupByOptions = [
     { value: "employee", label: "Giriş Elemanına Göre" },
     { value: "company", label: "Firmaya Göre" },
     { value: "customs", label: "Gümrük Müdürlüğüne Göre" },
+
     { value: "issuer", label: "Faturayı Kesene Göre" },
+    { value: "tip", label: "Tip" },
 ];
 
 const monthsList = [
     "ocak", "subat", "mart", "nisan", "mayis", "haziran",
     "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"
 ];
+
+const monthLabels: Record<string, string> = {
+    ocak: "Ocak",
+    subat: "Şubat",
+    mart: "Mart",
+    nisan: "Nisan",
+    mayis: "Mayıs",
+    haziran: "Haziran",
+    temmuz: "Temmuz",
+    agustos: "Ağustos",
+    eylul: "Eylül",
+    ekim: "Ekim",
+    kasim: "Kasım",
+    aralik: "Aralık",
+};
+
+
+
+const tipLabels: Record<string, string> = {
+    "T": "İthalat",
+    "t": "İthalat",
+    "H": "İhracat",
+    "@": "Transit",
+    "A": "Serbest B. Giriş",
+    "B": "Serbest B. Çıkış",
+    "Diğer": "Diğer"
+};
+
+const getLabel = (value: string, type: GroupBy) => {
+    if (type === "month") return monthLabels[value] || value;
+    if (type === "tip") return tipLabels[value] || value;
+    return value;
+};
 
 // Standard chart colors for dynamic lines in trend mode
 const chartColors = [
@@ -93,8 +128,6 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
     // Reset selected items when grouping changes
     useEffect(() => {
         setSelectedItems([]);
-        // Disable trend mode if switching to 'month' as it doesn't make sense
-        if (groupBy === "month") setIsTrendMode(false);
     }, [groupBy]);
 
     // Fetch the list of available items for the selected category
@@ -109,6 +142,8 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                 case "company": url = `/api/gumruk/firmalar/${selectedYil}`; break;
                 case "customs": url = `/api/gumruk/gumrukler-listesi/${selectedYil}`; break;
                 case "issuer": url = `/api/gumruk/fatura-kesenler/${selectedYil}`; break;
+
+                case "tip": url = `/api/gumruk/tips/${selectedYil}`; break;
                 default: return [];
             }
             if (!url) return [];
@@ -143,11 +178,17 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
     const processedData = useMemo(() => {
         if (!rawChartData) return [];
 
-        if (isTrendMode) {
+        const dataWithLabels = rawChartData.map((item: any) => ({
+            ...item,
+            originalName: item.name || item.entity,
+            name: getLabel(item.name || item.entity, groupBy)
+        }));
+
+        if (isTrendMode && groupBy !== "month") {
             // Trend Mode: Pivot data so each entity can have multiple metric values
             const pivotMap = new Map<string, any>();
             // Initialize all months
-            monthsList.forEach(m => pivotMap.set(m, { name: m }));
+            monthsList.forEach(m => pivotMap.set(m, { name: monthLabels[m] || m, originalKey: m }));
 
             rawChartData.forEach((item: any) => {
                 if (pivotMap.has(item.month)) {
@@ -162,13 +203,26 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
             });
             return Array.from(pivotMap.values());
         } else {
-            return rawChartData;
+            if (groupBy === "month") {
+                // Ensure chronological order and proper labeling
+                return monthsList.map(m => {
+                    // Use originalName (which corresponds to 'ocak', 'subat' etc.) for matching
+                    const found = dataWithLabels.find((d: any) => d.originalName === m);
+                    return {
+                        ...found,
+                        name: getLabel(m, "month"),
+                        // Fill with 0 if no data for that month to maintain x-axis continuity
+                        ...(found ? {} : selectedMetrics.reduce((acc, metric) => ({ ...acc, [metric]: 0 }), {}))
+                    };
+                });
+            }
+            return dataWithLabels;
         }
-    }, [rawChartData, isTrendMode, selectedMetrics]);
+    }, [rawChartData, isTrendMode, selectedMetrics, groupBy]);
 
     // Extract unique entities for Trend Mode
     const trendEntities = useMemo(() => {
-        if (!isTrendMode || !rawChartData) return [];
+        if (!isTrendMode || !rawChartData || groupBy === "month") return [];
         const entities = new Set<string>();
         rawChartData.forEach((item: any) => entities.add(item.entity));
         return Array.from(entities);
@@ -221,16 +275,14 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                             Gelişmiş Grafik Analizi
                         </div>
 
-                        {groupBy !== "month" && (
-                            <div className="flex items-center gap-2">
-                                <Label htmlFor="trend-mode" className="text-sm cursor-pointer">Aylık Trend</Label>
-                                <Switch
-                                    id="trend-mode"
-                                    checked={isTrendMode}
-                                    onCheckedChange={setIsTrendMode}
-                                />
-                            </div>
-                        )}
+                        <div className="flex items-center gap-2">
+                            <Label htmlFor="trend-mode" className="text-sm cursor-pointer">Aylık Trend</Label>
+                            <Switch
+                                id="trend-mode"
+                                checked={isTrendMode}
+                                onCheckedChange={setIsTrendMode}
+                            />
+                        </div>
                     </CardTitle>
 
                     <div className="flex flex-wrap items-end gap-4">
@@ -286,7 +338,7 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                                                                     : "opacity-0"
                                                             )}
                                                         />
-                                                        {item}
+                                                        {getLabel(item, groupBy)}
                                                     </CommandItem>
                                                 ))}
                                             </CommandGroup>
@@ -320,7 +372,7 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                             <span className="text-sm text-muted-foreground self-center mr-2">Seçilenler:</span>
                             {selectedItems.map(item => (
                                 <Badge key={item} variant="secondary" className="flex items-center gap-1">
-                                    {item}
+                                    {getLabel(item, groupBy)}
                                     <button
                                         onClick={() => toggleItemSelection(item)}
                                         className="ml-1 ring-offset-background rounded-full outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
@@ -381,12 +433,12 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                         <p>{selectedYil} yılına ait veri bulunamadı</p>
                     </div>
                 ) : (
-                    <ResponsiveContainer width="100%" height={400}>
-                        {isTrendMode ? (
+                    <ResponsiveContainer width="100%" height={550}>
+                        {isTrendMode && groupBy !== "month" ? (
                             // TREND MODE COMPOSITE CHART (Bar + Line for multiple metrics)
                             <ComposedChart
                                 data={processedData}
-                                margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+                                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
                             >
                                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                                 <XAxis
@@ -458,7 +510,7 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                                                     key={uniqueKey}
                                                     dataKey={uniqueKey}
                                                     fill={entityColor}
-                                                    name={`${entityName} (${metricOptions.find(m => m.id === metricId)?.label})`}
+                                                    name={`${getLabel(entityName, groupBy)} (${metricOptions.find(m => m.id === metricId)?.label})`}
                                                     radius={[4, 4, 0, 0]}
                                                     yAxisId={axisId}
                                                 />
@@ -471,7 +523,7 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                                                     dataKey={uniqueKey}
                                                     stroke={entityColor}
                                                     strokeWidth={2}
-                                                    name={`${entityName} (${metricOptions.find(m => m.id === metricId)?.label})`}
+                                                    name={`${getLabel(entityName, groupBy)} (${metricOptions.find(m => m.id === metricId)?.label})`}
                                                     dot={{ fill: entityColor, r: 4 }}
                                                     activeDot={{ r: 6 }}
                                                     yAxisId={axisId}
@@ -485,36 +537,10 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                             // STANDARD MODE CHART (Composed Bar/Line)
                             <ComposedChart
                                 data={processedData}
-                                margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+                                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
                             >
                                 <defs>
-                                    {selectedMetrics.map(metricId => {
-                                        // Skip line-only metrics (e.g. dosyaSayisi) from gradient generation if we want optimisation,
-                                        // but logic below handles 'Bar' rendering. We generate gradients for all just in case.
-
-                                        const values = processedData.map((d: any) => Number(d[metricId]) || 0);
-                                        const maxVal = Math.max(...values);
-                                        const minVal = Math.min(...values);
-
-                                        return processedData.map((entry: any, index: number) => {
-                                            let color = "hsl(var(--primary))";
-                                            if (maxVal === minVal) {
-                                                color = "hsl(120, 80%, 45%)";
-                                            } else {
-                                                const val = Number(entry[metricId]) || 0;
-                                                const ratio = (val - minVal) / (maxVal - minVal);
-                                                const hue = ratio * 120;
-                                                color = `hsl(${hue}, 80%, 45%)`;
-                                            }
-
-                                            return (
-                                                <linearGradient key={`grad-${metricId}-${index}`} id={`grad-${metricId}-${index}`} x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="0%" stopColor={color} stopOpacity={1} />
-                                                    <stop offset="100%" stopColor={color} stopOpacity={0.3} />
-                                                </linearGradient>
-                                            );
-                                        });
-                                    })}
+                                    {/* Gradients removed for clearer metric distinction */}
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                                 <XAxis
@@ -586,20 +612,19 @@ export function AdvancedChart({ selectedYil }: AdvancedChartProps) {
                                                 activeDot={{ r: 6 }}
                                             />
                                         );
-                                    } else {
-                                        return (
-                                            <Bar
-                                                key={metricId}
-                                                dataKey={metricId}
-                                                radius={[4, 4, 0, 0]}
-                                                yAxisId="left"
-                                            >
-                                                {processedData.map((entry: any, index: number) => (
-                                                    <Cell key={`cell-${metricId}-${index}`} fill={`url(#grad-${metricId}-${index})`} />
-                                                ))}
-                                            </Bar>
-                                        );
                                     }
+
+                                    return (
+                                        <Bar
+                                            key={metricId}
+                                            dataKey={metricId}
+                                            fill={metric?.color}
+                                            name={metricId}
+                                            radius={[4, 4, 0, 0]}
+                                            yAxisId="left"
+                                            maxBarSize={50}
+                                        />
+                                    );
                                 })}
                             </ComposedChart>
                         )}

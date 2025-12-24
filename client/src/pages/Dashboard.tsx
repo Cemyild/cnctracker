@@ -28,40 +28,10 @@ export default function Dashboard() {
   return (
     <div className="min-h-full bg-background-light dark:bg-background-dark text-gray-800 dark:text-gray-200 font-sans p-4 lg:p-8 transition-colors duration-300">
 
-      {/* Header */}
-      <header className="flex items-center justify-between mb-8">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Welcome back, Selen Swift</p>
-        </div>
 
-        <div className="flex items-center gap-4 lg:gap-6">
-          <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors bg-surface-light dark:bg-surface-dark rounded-full shadow-sm">
-            <Search className="w-5 h-5" />
-          </button>
-          <button className="p-2 relative text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors bg-surface-light dark:bg-surface-dark rounded-full shadow-sm">
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-background-light dark:border-background-dark"></span>
-          </button>
-
-          <div className="hidden md:flex items-center gap-3 pl-2 border-l border-gray-200 dark:border-gray-700">
-            <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-dash-primary/20">
-              <img
-                alt="Manager Profile"
-                className="w-full h-full object-cover"
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuBq6kbb-lT-1PtAbthshi5AoS9Hrs2rjssc0nbFs2CsDAG9nirF_yq3WXYiG7pBUiRx6qKybeX-xU-YPZqC21mPv6SrZ_GdQrF1CALWcN0bLtKuuSRfEuEBu_zYOVRcGjR1C5iNdgcKuMHmJeb187cc0t9BFxJc7aBGsfpptSoHMsB3uIY_P6x49wZqpdtChhiV8jJtcoRD7nESGl93QLmHkEJ_LhTM3PxWbqK_8MVE68M55LzFwVNv6DoymzO5CGAKfF55UPwUnHo"
-              />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-white">Selen Swift</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Manager</p>
-            </div>
-          </div>
-        </div>
-      </header>
 
       {/* Main Grid */}
-      <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6 max-w-7xl mx-auto">
+      <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6 w-full">
 
         {/* ROW 1 */}
         {/* Card 1: Total Sales */}
