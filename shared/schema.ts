@@ -67,6 +67,14 @@ export const aylar = [
   { value: "aralik", label: "Aralık" },
 ] as const;
 
+export const subeler = [
+  "Bursa",
+  "Gemlik",
+  "İstanbul - Erenköy",
+  "İstanbul - İHL",
+  "Yönetim"
+];
+
 // Araçlar tablosu
 export const araclar = pgTable("araclar", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -102,6 +110,8 @@ export const nakliyeVerileri = pgTable("nakliye_verileri", {
   vergilerDahilToplamTutar: decimal("vergiler_dahil_toplam_tutar", { precision: 15, scale: 2 }),
   odenecekTutar: decimal("odenecek_tutar", { precision: 15, scale: 2 }),
   olusturmaTarihi: date("olusturma_tarihi").default(sql`CURRENT_DATE`),
+  musteri: text("musteri"), // Eşleştirilen/Düzeltilen Müşteri
+  konteynerler: text("konteynerler"), // Eşleştirilen/Düzeltilen Konteynerler (Virgülle ayrılmış)
   rawJson: text("raw_json"), // Her ihtimale karşı tüm veriyi saklamak için
 });
 
@@ -112,3 +122,37 @@ export const insertNakliyeVerisiSchema = createInsertSchema(nakliyeVerileri).omi
 
 export type InsertNakliyeVerisi = z.infer<typeof insertNakliyeVerisiSchema>;
 export type NakliyeVerisi = typeof nakliyeVerileri.$inferSelect;
+
+// Çalışanlar tablosu
+export const calisanlar = pgTable("calisanlar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tcNo: text("tc_no").notNull(),
+  adSoyad: text("ad_soyad").notNull(),
+  isGirisTarihi: text("is_giris_tarihi"),
+  brutUcret: decimal("brut_ucret", { precision: 15, scale: 2 }),
+  netUcret: decimal("net_ucret", { precision: 15, scale: 2 }),
+  sgkMatrahi: decimal("sgk_matrahi", { precision: 15, scale: 2 }),
+  gelirVergisiMatrahi: decimal("gelir_vergisi_matrahi", { precision: 15, scale: 2 }),
+  kumulatifVergiMatrahi: decimal("kumulatif_vergi_matrahi", { precision: 15, scale: 2 }),
+  gelirVergisi: decimal("gelir_vergisi", { precision: 15, scale: 2 }),
+  damgaVergisi: decimal("damga_vergisi", { precision: 15, scale: 2 }),
+  sigortaKesintisi: decimal("sigorta_kesintisi", { precision: 15, scale: 2 }),
+  issizlikSigortasiKesintisi: decimal("issizlik_sigortasi_kesintisi", { precision: 15, scale: 2 }),
+  isverenSgkPayi: decimal("isveren_sgk_payi", { precision: 15, scale: 2 }),
+  isverenIssizlikPayi: decimal("isveren_issizlik_payi", { precision: 15, scale: 2 }),
+  toplamIsverenMaliyeti: decimal("toplam_isveren_maliyeti", { precision: 15, scale: 2 }),
+  sube: text("sube"),
+  statu: text("statu"),
+  ay: text("ay").notNull(),
+  yil: integer("yil").notNull(),
+}, (table) => [
+  uniqueIndex("calisanlar_tc_ay_yil_idx").on(table.tcNo, table.ay, table.yil),
+]);
+
+export const insertCalisanSchema = createInsertSchema(calisanlar).omit({
+  id: true,
+});
+
+export type InsertCalisan = z.infer<typeof insertCalisanSchema>;
+export type Calisan = typeof calisanlar.$inferSelect;
+

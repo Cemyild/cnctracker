@@ -20,6 +20,7 @@ import {
   BarChart3,
   LogOut,
   Wrench,
+  Users,
 } from "lucide-react";
 
 const navItems = [
@@ -29,6 +30,7 @@ const navItems = [
   { title: "Nakliye", icon: Truck, href: "/nakliye" },
   { title: "Raporlar", icon: BarChart3, href: "/raporlar" },
   { title: "Araçlar", icon: Wrench, href: "/araclar" },
+  { title: "Çalışanlar", icon: Users, href: "/calisanlar" },
 ];
 
 export function AppSidebar() {

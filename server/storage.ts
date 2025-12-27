@@ -1,4 +1,4 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray } from "drizzle-orm";
@@ -16,13 +16,13 @@ export interface IStorage {
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
   getAylikOzet(yil: number): Promise<{ ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
   getFirmalar(yil: number): Promise<string[]>;
+  getAllUniqueFirmalar(): Promise<string[]>;
   getFirmaAylikOzet(yil: number, firma: string): Promise<{ ay: string; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
   getGirisElemanlari(yil: number): Promise<string[]>;
   getGirisElemaniOzet(yil: number): Promise<{ eleman: string; toplamSatis: number; dosyaSayisi: number }[]>;
   getGumrukOzet(yil: number): Promise<{ gumruk: string; toplamSatis: number; dosyaSayisi: number }[]>;
   getGumrukler(yil: number): Promise<string[]>;
   getFaturaKesenler(yil: number): Promise<string[]>;
-  getAdvancedChartData(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
   getAdvancedChartData(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
   getAdvancedChartTrend(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
   getTips(yil: number): Promise<string[]>;
@@ -34,6 +34,14 @@ export interface IStorage {
   // Nakliye verileri
   getNakliyeVerileri(): Promise<NakliyeVerisi[]>;
   insertNakliyeVerileri(veriler: InsertNakliyeVerisi[]): Promise<NakliyeVerisi[]>;
+  deleteNakliyeVerisi(id: string): Promise<void>;
+  updateNakliyeVerisi(id: string, veri: Partial<InsertNakliyeVerisi>): Promise<NakliyeVerisi>;
+
+  // Çalışanlar
+  getCalisanlar(ay?: string, yil?: number): Promise<Calisan[]>;
+  insertCalisanlar(veriler: InsertCalisan[]): Promise<Calisan[]>;
+  deleteCalisanlar(ay: string, yil: number): Promise<void>;
+  updateCalisan(id: string, veri: Partial<InsertCalisan>): Promise<Calisan>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -125,6 +133,16 @@ export class DatabaseStorage implements IStorage {
     }, {});
 
     return Object.values(grouped);
+  }
+
+  async getAllUniqueFirmalar(): Promise<string[]> {
+    const result = await db.selectDistinct({ firmaUnvan: gumrukVerileri.firmaUnvan })
+      .from(gumrukVerileri);
+
+    return result
+      .map(r => r.firmaUnvan)
+      .filter((n): n is string => !!n)
+      .sort();
   }
 
   async getFirmalar(yil: number): Promise<string[]> {
@@ -251,11 +269,14 @@ export class DatabaseStorage implements IStorage {
       case "issuer":
         groupByColumn = gumrukVerileri.faturayiKesen;
         break;
-      case "issuer":
-        groupByColumn = gumrukVerileri.faturayiKesen;
-        break;
       case "tip":
-        groupByColumn = gumrukVerileri.tip;
+        groupByColumn = sql`CASE 
+          WHEN ${gumrukVerileri.tip} IN ('T', 't') THEN 'İthalat'
+          WHEN ${gumrukVerileri.tip} IN ('A', 'B') THEN 'Serbest Bölge'
+          WHEN ${gumrukVerileri.tip} = 'H' THEN 'İhracat'
+          WHEN ${gumrukVerileri.tip} = '@' THEN 'Transit'
+          ELSE 'Diğer'
+        END`;
         break;
       default:
         groupByColumn = gumrukVerileri.ay;
@@ -266,7 +287,7 @@ export class DatabaseStorage implements IStorage {
 
     // If specific names are selected, filter by them
     if (names && names.length > 0) {
-      whereClause.push(inArray(groupByColumn, names));
+      whereClause.push(inArray(groupByColumn as any, names));
     }
 
     // Use SQL GROUP BY for aggregation
@@ -283,17 +304,6 @@ export class DatabaseStorage implements IStorage {
       .where(and(...whereClause))
       .groupBy(groupByColumn)
       .orderBy(sql`sum(${gumrukVerileri.malBedeli}) desc`);
-
-    // If no names selected, stick to top 15 default behavior (client side slice for now as we fetched all groups in query if no filtering)
-    // Actually, to be safe on performance, if NO names are selected, we should LIMIT the query.
-    // However, since we removed .limit() from the chain above, we might get ALL groups (e.g. 500 companies).
-    // Let's optimize: if names is empty, use limit.
-
-    // Re-implementing limit logic safely:
-    // We can't easily conditionally add .limit() in method chain without a variable for the query builder.
-    // Instead, let's just slice the result array. 
-    // Grouping 50,000 records into ~500 companies is fast enough (few ms). Returning 500 rows is fine.
-    // Client can decide to show top 15 if no filter is active.
 
     let finalResult = result;
     if (!names || names.length === 0) {
@@ -316,7 +326,6 @@ export class DatabaseStorage implements IStorage {
     let groupByColumn;
     switch (groupBy) {
       case "month":
-        // For 'month', trend view is just standard monthly data, effectively same as default view but we return standardized structure
         groupByColumn = gumrukVerileri.ay;
         break;
       case "employee":
@@ -331,11 +340,14 @@ export class DatabaseStorage implements IStorage {
       case "issuer":
         groupByColumn = gumrukVerileri.faturayiKesen;
         break;
-      case "issuer":
-        groupByColumn = gumrukVerileri.faturayiKesen;
-        break;
       case "tip":
-        groupByColumn = gumrukVerileri.tip;
+        groupByColumn = sql`CASE 
+          WHEN ${gumrukVerileri.tip} IN ('T', 't') THEN 'İthalat'
+          WHEN ${gumrukVerileri.tip} IN ('A', 'B') THEN 'Serbest Bölge'
+          WHEN ${gumrukVerileri.tip} = 'H' THEN 'İhracat'
+          WHEN ${gumrukVerileri.tip} = '@' THEN 'Transit'
+          ELSE 'Diğer'
+        END`;
         break;
       default:
         groupByColumn = gumrukVerileri.ay;
@@ -343,11 +355,9 @@ export class DatabaseStorage implements IStorage {
 
     const whereClause = [eq(gumrukVerileri.yil, yil)];
 
-    // If groupBy is NOT month, handle filtering logic
     if (groupBy !== "month") {
       let filterNames = names;
 
-      // If specific names NOT selected, default to TOP 5 to prevent overload
       if (!names || names.length === 0) {
         const topEntities = await db.select({ name: groupByColumn, val: sql`sum(${gumrukVerileri.malBedeli})` })
           .from(gumrukVerileri)
@@ -360,7 +370,7 @@ export class DatabaseStorage implements IStorage {
       }
 
       if (filterNames && filterNames.length > 0) {
-        whereClause.push(inArray(groupByColumn, filterNames));
+        whereClause.push(inArray(groupByColumn as any, filterNames));
       }
     }
 
@@ -388,15 +398,25 @@ export class DatabaseStorage implements IStorage {
       dosyaSayisi: Number(item.dosyaSayisi) || 0,
     }));
   }
+
   async getTips(yil: number): Promise<string[]> {
+    const tipExpr = sql`CASE 
+      WHEN ${gumrukVerileri.tip} IN ('T', 't') THEN 'İthalat'
+      WHEN ${gumrukVerileri.tip} IN ('A', 'B') THEN 'Serbest Bölge'
+      WHEN ${gumrukVerileri.tip} = 'H' THEN 'İhracat'
+      WHEN ${gumrukVerileri.tip} = '@' THEN 'Transit'
+      ELSE 'Diğer'
+    END`;
+
     const result = await db
-      .selectDistinct({ tip: gumrukVerileri.tip })
+      .selectDistinct({ tip: tipExpr })
       .from(gumrukVerileri)
       .where(eq(gumrukVerileri.yil, yil));
 
     return result
       .map(r => r.tip)
-      .filter((t): t is string => t !== null && t !== "");
+      .filter((t): t is string => t !== null && t !== "")
+      .sort();
   }
 
   async getAraclar(): Promise<Arac[]> {
@@ -429,7 +449,6 @@ export class DatabaseStorage implements IStorage {
   async insertNakliyeVerileri(veriler: InsertNakliyeVerisi[]): Promise<NakliyeVerisi[]> {
     if (veriler.length === 0) return [];
 
-    // Batch insert
     const results: NakliyeVerisi[] = [];
     const BATCH_SIZE = 100;
 
@@ -441,8 +460,91 @@ export class DatabaseStorage implements IStorage {
 
     return results;
   }
+
+  async deleteNakliyeVerisi(id: string): Promise<void> {
+    await db.delete(nakliyeVerileri).where(eq(nakliyeVerileri.id, id));
+  }
+
+  async updateNakliyeVerisi(id: string, veri: Partial<InsertNakliyeVerisi>): Promise<NakliyeVerisi> {
+    const [updated] = await db
+      .update(nakliyeVerileri)
+      .set(veri)
+      .where(eq(nakliyeVerileri.id, id))
+      .returning();
+    if (!updated) throw new Error("Nakliye verisi bulunamadı");
+    return updated;
+  }
+
+  async getCalisanlar(ay?: string, yil?: number): Promise<Calisan[]> {
+    const filters = [];
+    if (ay) filters.push(eq(calisanlar.ay, ay));
+    if (yil) filters.push(eq(calisanlar.yil, yil));
+
+    if (filters.length > 0) {
+      return await db.select().from(calisanlar).where(and(...filters)).orderBy(calisanlar.adSoyad);
+    }
+    return await db.select().from(calisanlar).orderBy(calisanlar.adSoyad);
+  }
+
+  async insertCalisanlar(veriler: InsertCalisan[]): Promise<Calisan[]> {
+    if (veriler.length === 0) return [];
+
+    // Upsert (Conflict on tc_no, ay, yil)
+    const results: Calisan[] = [];
+    for (const data of veriler) {
+      const [inserted] = await db
+        .insert(calisanlar)
+        .values(data)
+        .onConflictDoUpdate({
+          target: [calisanlar.tcNo, calisanlar.ay, calisanlar.yil],
+          set: {
+            brutUcret: data.brutUcret,
+            netUcret: data.netUcret,
+            sgkMatrahi: data.sgkMatrahi,
+            gelirVergisiMatrahi: data.gelirVergisiMatrahi,
+            kumulatifVergiMatrahi: data.kumulatifVergiMatrahi,
+            gelirVergisi: data.gelirVergisi,
+            damgaVergisi: data.damgaVergisi,
+            sigortaKesintisi: data.sigortaKesintisi,
+            issizlikSigortasiKesintisi: data.issizlikSigortasiKesintisi,
+            isverenSgkPayi: data.isverenSgkPayi,
+            isverenIssizlikPayi: data.isverenIssizlikPayi,
+            toplamIsverenMaliyeti: data.toplamIsverenMaliyeti,
+            isGirisTarihi: data.isGirisTarihi,
+            statu: data.statu,
+          }
+        })
+        .returning();
+      results.push(inserted);
+    }
+    return results;
+  }
+
+  async deleteCalisanlar(ay: string, yil: number): Promise<void> {
+    await db.delete(calisanlar).where(
+      and(eq(calisanlar.ay, ay), eq(calisanlar.yil, yil))
+    );
+  }
+
+  async updateCalisan(id: string, veri: Partial<InsertCalisan>): Promise<Calisan> {
+    const [existing] = await db.select().from(calisanlar).where(eq(calisanlar.id, id));
+    if (!existing) throw new Error("Çalışan bulunamadı");
+
+    // If sube is updated, update for all records of this person (TC based)
+    if (veri.sube) {
+      await db
+        .update(calisanlar)
+        .set({ sube: veri.sube })
+        .where(eq(calisanlar.tcNo, existing.tcNo));
+    }
+
+    const [updated] = await db
+      .update(calisanlar)
+      .set(veri)
+      .where(eq(calisanlar.id, id))
+      .returning();
+    return updated;
+  }
 }
-
-
 
 export const storage = new DatabaseStorage();

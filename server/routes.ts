@@ -128,6 +128,39 @@ export async function registerRoutes(
     }
   });
 
+  // Çalışanlar Endpoints
+  app.get("/api/calisanlar", async (req, res) => {
+    try {
+      const { ay, yil } = req.query;
+      const veriler = await storage.getCalisanlar(ay as string, yil ? parseInt(yil as string) : undefined);
+      res.json(veriler);
+    } catch (err) {
+      console.error("Çalışanlar listelenirken hata:", err);
+      res.status(500).json({ error: "Çalışanlar listelenirken bir hata oluştu" });
+    }
+  });
+
+  app.patch("/api/calisanlar/:id", async (req, res) => {
+    try {
+      const updated = await storage.updateCalisan(req.params.id, req.body);
+      res.json(updated);
+    } catch (err) {
+      console.error("Çalışan güncellenirken hata:", err);
+      res.status(500).json({ error: "Çalışan güncellenirken bir hata oluştu" });
+    }
+  });
+
+  app.delete("/api/calisanlar/:ay/:yil", async (req, res) => {
+    try {
+      const { ay, yil } = req.params;
+      await storage.deleteCalisanlar(ay, parseInt(yil));
+      res.json({ success: true, message: "Veriler silindi" });
+    } catch (err) {
+      console.error("Çalışan siliinirken hata:", err);
+      res.status(500).json({ error: "Veriler silinemedi" });
+    }
+  });
+
   // Yüklü ayları getir (spesifik route - önce tanımlanmalı)
   app.get("/api/gumruk/aylar", async (req, res) => {
     try {
@@ -159,6 +192,17 @@ export async function registerRoutes(
       res.json(firmalar);
     } catch (error) {
       console.error("Firma listesi getirme hatası:", error);
+      res.status(500).json({ error: "Firmalar alınamadı" });
+    }
+  });
+
+  // Tüm benzersiz firmaları getir
+  app.get("/api/gumruk/tum-firmalar", async (_req, res) => {
+    try {
+      const firmalar = await storage.getAllUniqueFirmalar();
+      res.json(firmalar);
+    } catch (error) {
+      console.error("Tüm firmalar listesi getirme hatası:", error);
       res.status(500).json({ error: "Firmalar alınamadı" });
     }
   });
@@ -519,6 +563,31 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Nakliye kaydetme hatası:", error);
       res.status(500).json({ error: "Veriler kaydedilirken bir hata oluştu." });
+    }
+  });
+
+  // Nakliye verisi sil
+  app.delete("/api/nakliye/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteNakliyeVerisi(id);
+      res.json({ success: true, message: "Kayıt silindi" });
+    } catch (error) {
+      console.error("Nakliye silme hatası:", error);
+      res.status(500).json({ error: "Kayıt silinemedi" });
+    }
+  });
+
+  // Nakliye verisi güncelle
+  app.put("/api/nakliye/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const veri = req.body;
+      const updated = await storage.updateNakliyeVerisi(id, veri);
+      res.json({ success: true, message: "Kayıt güncellendi", data: updated });
+    } catch (error) {
+      console.error("Nakliye güncelleme hatası:", error);
+      res.status(500).json({ error: "Kayıt güncellenemedi" });
     }
   });
 
