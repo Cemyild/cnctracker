@@ -1,10 +1,56 @@
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { type Calisan, type Gider, type GumrukVerisi } from "@shared/schema";
+import { 
+  TrendingUp, 
+  FileSpreadsheet, 
+  Users, 
+  Upload, 
+  Loader2, 
+  BarChart3, 
+  Building2, 
+  ArrowUpDown, 
+  ArrowUp, 
+  ArrowDown 
+} from "lucide-react";
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow, 
+  TableFooter 
+} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { type Calisan } from "@shared/schema";
-
-// ... (existing imports, ensure Calisan is imported)
-
-// ...
+import { 
+  ResponsiveContainer, 
+  LineChart, 
+  Line, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ComposedChart,
+  Cell
+} from "recharts";
+import { ExcelUploadModal } from "@/components/ExcelUploadModal";
+import { FinancialOverview } from "@/components/FinancialOverview";
+import { BackgroundPaths } from "@/components/BackgroundPaths";
+import { AdvancedChart } from "@/components/AdvancedChart";
 
         const aylar = [
         {value: "ocak", label: "Ocak", sira: 1 },
@@ -67,6 +113,8 @@ import { type Calisan } from "@shared/schema";
         {value: "eleman", label: "Giriş Elemanı" },
         {value: "gumrukBazli", label: "Gümrük Bazlı" },
         ] as const;
+
+        type ChartMetric = typeof chartMetricOptions[number]["value"];
 
         export default function Gumruk() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
