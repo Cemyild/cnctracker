@@ -17,9 +17,7 @@ import {
   type MonthlyCalculation
 } from "@shared/salaryCalculations";
 
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const { PDFParse } = require('pdf-parse');
+import { PDFParse } from "pdf-parse";
 import { getTCMBExchangeRate } from "./currency"; // Helper added
 
 
