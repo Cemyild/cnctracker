@@ -13,6 +13,7 @@ import Sigorta from "@/pages/Sigorta";
 import Raporlar from "@/pages/Raporlar";
 import Tools from "@/pages/Tools";
 import Calisanlar from "@/pages/Calisanlar";
+import Hesaplamalar from "@/pages/Hesaplamalar";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -23,6 +24,7 @@ const pageTitles: Record<string, string> = {
   "/raporlar": "Raporlar",
   "/araclar": "Araçlar",
   "/calisanlar": "Çalışanlar",
+  "/hesaplamalar": "Hesaplamalar",
 };
 
 function Router() {
@@ -35,6 +37,7 @@ function Router() {
       <Route path="/raporlar" component={Raporlar} />
       <Route path="/araclar" component={Tools} />
       <Route path="/calisanlar" component={Calisanlar} />
+      <Route path="/hesaplamalar" component={Hesaplamalar} />
       <Route component={NotFound} />
     </Switch>
   );

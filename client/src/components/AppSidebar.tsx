@@ -21,6 +21,7 @@ import {
   LogOut,
   Wrench,
   Users,
+  Calculator,
 } from "lucide-react";
 
 const navItems = [
@@ -31,6 +32,7 @@ const navItems = [
   { title: "Raporlar", icon: BarChart3, href: "/raporlar" },
   { title: "Araçlar", icon: Wrench, href: "/araclar" },
   { title: "Çalışanlar", icon: Users, href: "/calisanlar" },
+  { title: "Hesaplamalar", icon: Calculator, href: "/hesaplamalar" },
 ];
 
 export function AppSidebar() {

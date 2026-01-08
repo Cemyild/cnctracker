@@ -156,3 +156,30 @@ export const insertCalisanSchema = createInsertSchema(calisanlar).omit({
 export type InsertCalisan = z.infer<typeof insertCalisanSchema>;
 export type Calisan = typeof calisanlar.$inferSelect;
 
+
+// Giderler tablosu (Gümrük Sayfası için)
+export const giderler = pgTable("giderler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tarih: text("tarih"), // dd.mm.yyyy formatında
+  firma: text("firma"), // Fatura kesen firma
+  faturaNo: text("fatura_no"),
+  malBedeli: decimal("mal_bedeli", { precision: 15, scale: 2 }), // KDV Hariç
+  kdvTutari: decimal("kdv_tutari", { precision: 15, scale: 2 }),
+  toplamTutar: decimal("toplam_tutar", { precision: 15, scale: 2 }), // KDV Dahil
+  paraBirimi: text("para_birimi").default("TRY"), // TRY, USD, EUR
+  kur: decimal("kur", { precision: 10, scale: 4 }).default("1"), // Kullanılan kur
+  tryTutar: decimal("try_tutar", { precision: 15, scale: 2 }), // TRY karşılığı (Toplam Tutar * Kur)
+  ay: text("ay").notNull(),
+  yil: integer("yil").notNull(),
+  olusturmaTarihi: date("olusturma_tarihi").default(sql`CURRENT_DATE`),
+}, (table) => [
+  uniqueIndex("giderler_fatura_no_idx").on(table.faturaNo, table.firma),
+]);
+
+export const insertGiderlerSchema = createInsertSchema(giderler).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+
+export type InsertGiderler = z.infer<typeof insertGiderlerSchema>;
+export type Gider = typeof giderler.$inferSelect;

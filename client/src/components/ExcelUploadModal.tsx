@@ -18,6 +18,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Upload, FileSpreadsheet, Loader2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 
 const aylar = [
@@ -38,15 +39,29 @@ const aylar = [
 const currentYear = new Date().getFullYear();
 const yillar = Array.from({ length: 5 }, (_, i) => currentYear - i);
 
-interface ExcelUploadModalProps {
+export interface ExcelUploadModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  uploadUrl?: string;
+  title?: string;
+  description?: string;
+  hideDateSelectors?: boolean;
 }
 
-export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadModalProps) {
+
+export function ExcelUploadModal({
+  open,
+  onOpenChange,
+  onSuccess,
+  uploadUrl = "/api/gumruk/yukle",
+  title = "Excel Yükle",
+  description = "Gümrük verilerini içeren Excel dosyasını yükleyin",
+  hideDateSelectors = false
+}: ExcelUploadModalProps) {
   const [selectedAy, setSelectedAy] = useState<string>("");
   const [selectedYil, setSelectedYil] = useState<string>(String(currentYear));
+  const [isBulk, setIsBulk] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
@@ -67,10 +82,11 @@ export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadM
   };
 
   const handleUpload = async () => {
-    if (!selectedAy || !selectedYil || !file) {
+    const needsDates = !hideDateSelectors && !isBulk;
+    if ((needsDates && (!selectedAy || !selectedYil)) || !file) {
       toast({
         title: "Hata",
-        description: "Lütfen ay, yıl seçin ve Excel dosyası yükleyin",
+        description: "Lütfen tüm alanları doldurun ve dosya seçin",
         variant: "destructive",
       });
       return;
@@ -80,11 +96,13 @@ export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadM
 
     const formData = new FormData();
     formData.append("excel", file);
-    formData.append("ay", selectedAy);
-    formData.append("yil", selectedYil);
+    if (!hideDateSelectors && !isBulk) {
+      formData.append("ay", selectedAy);
+      formData.append("yil", selectedYil);
+    }
 
     try {
-      const response = await fetch("/api/gumruk/yukle", {
+      const response = await fetch(uploadUrl, {
         method: "POST",
         body: formData,
       });
@@ -92,7 +110,7 @@ export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadM
       const result = await response.json();
 
       if (response.ok) {
-        const description = result.atlanan > 0 
+        const description = result.atlanan > 0
           ? `${result.eklenen} yeni kayıt eklendi, ${result.atlanan} mevcut kayıt atlandı`
           : `${result.eklenen} kayıt başarıyla eklendi`;
         toast({
@@ -117,6 +135,7 @@ export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadM
       });
     } finally {
       setIsUploading(false);
+      resetForm();
     }
   };
 
@@ -124,6 +143,7 @@ export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadM
     setSelectedAy("");
     setSelectedYil(String(currentYear));
     setFile(null);
+    setIsBulk(false);
   };
 
   return (
@@ -132,47 +152,64 @@ export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadM
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileSpreadsheet className="w-5 h-5" />
-            Excel Yükle
+            {title}
           </DialogTitle>
           <DialogDescription>
-            Gümrük verilerini içeren Excel dosyasını yükleyin
+            {description}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="ay">Ay</Label>
-              <Select value={selectedAy} onValueChange={setSelectedAy}>
-                <SelectTrigger id="ay" data-testid="select-ay">
-                  <SelectValue placeholder="Ay seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {aylar.map((ay) => (
-                    <SelectItem key={ay.value} value={ay.value}>
-                      {ay.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {!hideDateSelectors && (
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="bulk-mode"
+                  checked={isBulk}
+                  onCheckedChange={(checked) => setIsBulk(checked as boolean)}
+                />
+                <Label htmlFor="bulk-mode" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                  Dosya tüm yılı içeriyor (Otomatik Tarih)
+                </Label>
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="yil">Yıl</Label>
-              <Select value={selectedYil} onValueChange={setSelectedYil}>
-                <SelectTrigger id="yil" data-testid="select-yil">
-                  <SelectValue placeholder="Yıl seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {yillar.map((yil) => (
-                    <SelectItem key={yil} value={String(yil)}>
-                      {yil}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {!isBulk && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ay">Ay</Label>
+                    <Select value={selectedAy} onValueChange={setSelectedAy}>
+                      <SelectTrigger id="ay" data-testid="select-ay">
+                        <SelectValue placeholder="Ay seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {aylar.map((ay) => (
+                          <SelectItem key={ay.value} value={ay.value}>
+                            {ay.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="yil">Yıl</Label>
+                    <Select value={selectedYil} onValueChange={setSelectedYil}>
+                      <SelectTrigger id="yil" data-testid="select-yil">
+                        <SelectValue placeholder="Yıl seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {yillar.map((yil) => (
+                          <SelectItem key={yil} value={String(yil)}>
+                            {yil}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="excel">Excel Dosyası</Label>
@@ -207,7 +244,7 @@ export function ExcelUploadModal({ open, onOpenChange, onSuccess }: ExcelUploadM
           </Button>
           <Button
             onClick={handleUpload}
-            disabled={!selectedAy || !selectedYil || !file || isUploading}
+            disabled={((!hideDateSelectors && !isBulk) && (!selectedAy || !selectedYil)) || !file || isUploading}
             data-testid="button-upload"
           >
             {isUploading ? (

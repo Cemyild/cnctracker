@@ -1,4 +1,4 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray } from "drizzle-orm";
@@ -42,6 +42,30 @@ export interface IStorage {
   insertCalisanlar(veriler: InsertCalisan[]): Promise<Calisan[]>;
   deleteCalisanlar(ay: string, yil: number): Promise<void>;
   updateCalisan(id: string, veri: Partial<InsertCalisan>): Promise<Calisan>;
+  deleteCalisanlar(ay: string, yil: number): Promise<void>;
+  updateCalisan(id: string, veri: Partial<InsertCalisan>): Promise<Calisan>;
+
+  // Giderler
+  getGiderler(ay?: string, yil?: number): Promise<Gider[]>;
+  insertGiderler(veriler: InsertGiderler[]): Promise<Gider[]>;
+  deleteGiderler(ay: string, yil: number): Promise<void>;
+  updateGider(id: string, veri: Partial<InsertGiderler>): Promise<Gider>;
+  getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }>;
+
+  // Özet Summary
+  getOzetSummary(yil: number): Promise<{
+    ay: string;
+    satisKdvHaric: number;
+    satisKdv: number;
+    satisToplam: number;
+    giderKdvHaric: number;
+    giderKdv: number;
+    giderToplam: number;
+    calisanBrut: number;
+    calisanNet: number;
+    calisanIsverenSgk: number;
+    calisanMaliyet: number;
+  }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -544,7 +568,176 @@ export class DatabaseStorage implements IStorage {
       .where(eq(calisanlar.id, id))
       .returning();
     return updated;
+    return updated;
   }
+
+  // ==========================================================
+  // GIDERLER IMPLEMENTATION
+  // ==========================================================
+  async getGiderler(ay?: string, yil?: number): Promise<Gider[]> {
+    const filters = [];
+    if (ay && ay !== "toplam") filters.push(eq(giderler.ay, ay));
+    if (yil) filters.push(eq(giderler.yil, yil));
+
+    if (filters.length > 0) {
+      return await db.select().from(giderler).where(and(...filters)).orderBy(giderler.tarih);
+    }
+    return await db.select().from(giderler).orderBy(giderler.tarih);
+  }
+
+  async insertGiderler(veriler: InsertGiderler[]): Promise<Gider[]> {
+    if (veriler.length === 0) return [];
+
+    // Verileri 100'lük parçalar halinde ekle
+    const BATCH_SIZE = 100;
+    const results: Gider[] = [];
+
+    for (let i = 0; i < veriler.length; i += BATCH_SIZE) {
+      const batch = veriler.slice(i, i + BATCH_SIZE);
+      const inserted = await db.insert(giderler).values(batch).onConflictDoNothing().returning(); // Ignore duplicates based on index
+      results.push(...inserted);
+    }
+
+    return results;
+  }
+
+  async deleteGiderler(ay: string, yil: number): Promise<void> {
+    if (ay === 'toplam') {
+      await db.delete(giderler).where(eq(giderler.yil, yil));
+    } else {
+      await db.delete(giderler).where(and(eq(giderler.ay, ay), eq(giderler.yil, yil)));
+    }
+  }
+
+  async updateGider(id: string, veri: Partial<InsertGiderler>): Promise<Gider> {
+    const [updated] = await db
+      .update(giderler)
+      .set(veri)
+      .where(eq(giderler.id, id))
+      .returning();
+    if (!updated) throw new Error("Gider bulunamadı");
+    return updated;
+  }
+
+  async getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }> {
+    const filters = [];
+    if (yil) filters.push(eq(giderler.yil, yil));
+    if (ay && ay !== "toplam") filters.push(eq(giderler.ay, ay));
+
+    const result = await db
+      .select({
+
+        count: sql<number>`count(*)`,
+        totalBase: sql<number>`sum(${giderler.malBedeli} * ${giderler.kur})`,
+        totalVAT: sql<number>`sum(${giderler.kdvTutari} * ${giderler.kur})`,
+        totalTRY: sql<number>`sum(${giderler.tryTutar})`,
+      })
+      .from(giderler)
+      .where(and(...filters));
+
+    const stats = result[0];
+    return {
+      toplamCount: Number(stats?.count || 0),
+      toplamMalBedeli: Number(stats?.totalBase || 0),
+      toplamKdv: Number(stats?.totalVAT || 0),
+      toplamTryTutar: Number(stats?.totalTRY || 0),
+    };
+  }
+
+  async getOzetSummary(yil: number): Promise<{
+    ay: string;
+    satisKdvHaric: number;
+    satisKdv: number;
+    satisToplam: number;
+    giderKdvHaric: number;
+    giderKdv: number;
+    giderToplam: number;
+    calisanBrut: number;
+    calisanNet: number;
+    calisanIsverenSgk: number;
+    calisanMaliyet: number;
+  }[]> {
+    const aylar = ["ocak", "subat", "mart", "nisan", "mayis", "haziran", "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"];
+
+    // Get sales data grouped by month
+    const salesData = await db
+      .select({
+        ay: gumrukVerileri.ay,
+        malBedeli: sql<string>`sum(${gumrukVerileri.malBedeli})`,
+        topKdvTutar: sql<string>`sum(${gumrukVerileri.topKdvTutar})`,
+      })
+      .from(gumrukVerileri)
+      .where(eq(gumrukVerileri.yil, yil))
+      .groupBy(gumrukVerileri.ay);
+
+    // Get expenses data grouped by month
+    const expensesData = await db
+      .select({
+        ay: giderler.ay,
+        malBedeli: sql<string>`sum(${giderler.malBedeli} * ${giderler.kur})`,
+        kdvTutari: sql<string>`sum(${giderler.kdvTutari} * ${giderler.kur})`,
+        toplamTutar: sql<string>`sum(${giderler.tryTutar})`,
+      })
+      .from(giderler)
+      .where(eq(giderler.yil, yil))
+      .groupBy(giderler.ay);
+
+    // Get employee data grouped by month (calculating total cost on-the-fly)
+    const employeeData = await db
+      .select({
+        ay: calisanlar.ay,
+        brutUcret: sql<string>`sum(${calisanlar.brutUcret})`,
+        netUcret: sql<string>`sum(${calisanlar.netUcret})`,
+        isverenSgkPayi: sql<string>`sum(${calisanlar.isverenSgkPayi})`,
+        // Calculate total cost as brut + employer SGK (like the other pages do)
+        toplamIsverenMaliyeti: sql<string>`sum(${calisanlar.brutUcret}) + sum(${calisanlar.isverenSgkPayi})`,
+      })
+      .from(calisanlar)
+      .where(eq(calisanlar.yil, yil))
+      .groupBy(calisanlar.ay);
+
+    // Create lookup maps
+    const salesMap = new Map(salesData.map(s => [s.ay, s]));
+    const expensesMap = new Map(expensesData.map(e => [e.ay, e]));
+
+    // Create month number to name mapping (1-12 to "ocak"-"aralik")
+    const monthNumToName: Record<string, string> = {};
+    aylar.forEach((name, idx) => {
+      monthNumToName[String(idx + 1)] = name;
+    });
+
+    // Create employee map with month name keys
+    const employeeMap = new Map<string, typeof employeeData[0]>();
+    employeeData.forEach(e => {
+      const monthName = monthNumToName[e.ay] || e.ay;
+      employeeMap.set(monthName, e);
+    });
+
+    // Build result for all 12 months
+    return aylar.map(ay => {
+      const sales = salesMap.get(ay);
+      const expenses = expensesMap.get(ay);
+      const employee = employeeMap.get(ay);
+
+      const satisKdvHaric = parseFloat(sales?.malBedeli || "0");
+      const satisKdv = parseFloat(sales?.topKdvTutar || "0");
+
+      return {
+        ay,
+        satisKdvHaric,
+        satisKdv,
+        satisToplam: satisKdvHaric + satisKdv,
+        giderKdvHaric: parseFloat(expenses?.malBedeli || "0"),
+        giderKdv: parseFloat(expenses?.kdvTutari || "0"),
+        giderToplam: parseFloat(expenses?.toplamTutar || "0"),
+        calisanBrut: parseFloat(employee?.brutUcret || "0"),
+        calisanNet: parseFloat(employee?.netUcret || "0"),
+        calisanIsverenSgk: parseFloat(employee?.isverenSgkPayi || "0"),
+        calisanMaliyet: parseFloat(employee?.toplamIsverenMaliyeti || "0"),
+      };
+    });
+  }
+
 }
 
 export const storage = new DatabaseStorage();

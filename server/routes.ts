@@ -4,9 +4,24 @@ import { storage } from "./storage";
 import multer from "multer";
 import { type IStorage } from "./storage";
 import * as XLSX from "xlsx";
+
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema } from "@shared/schema";
 import { createHash } from "crypto";
 import { z } from "zod";
+import {
+  aylikHesapla,
+  yillikHesapla,
+  belirliAyHesapla,
+  PARAMETRELER_2025,
+  type CalisanStatu,
+  type MonthlyCalculation
+} from "@shared/salaryCalculations";
+
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { PDFParse } = require('pdf-parse');
+import { getTCMBExchangeRate } from "./currency"; // Helper added
+
 
 // Row hash oluştur - satırı benzersiz tanımlamak için
 function createRowHash(row: any[]): string {
@@ -132,11 +147,87 @@ export async function registerRoutes(
   app.get("/api/calisanlar", async (req, res) => {
     try {
       const { ay, yil } = req.query;
+
+      // If 'ay' is 'toplam', verify aggregation
+      if (ay === 'toplam') {
+        const allRecords = await storage.getCalisanlar(undefined, yil ? parseInt(yil as string) : undefined);
+
+        // Aggregate by TC No
+        const aggMap = new Map<string, any>();
+
+        for (const rec of allRecords) {
+          if (!rec.tcNo) continue;
+
+          if (!aggMap.has(rec.tcNo)) {
+            // Initialize with first record found (to keep static fields like name, sube, job title)
+            // Reset numeric fields to 0
+            aggMap.set(rec.tcNo, {
+              ...rec,
+              brutUcret: 0,
+              netUcret: 0,
+              sgkMatrahi: 0,
+              gelirVergisiMatrahi: 0,
+              kumulatifVergiMatrahi: 0, // Should this be summed or max? Usually Max of year. But let's sum for now? No, Cumulative is cumulative. Max is better.
+              gelirVergisi: 0,
+              damgaVergisi: 0,
+              sigortaKesintisi: 0,
+              issizlikSigortasiKesintisi: 0,
+              isverenSgkPayi: 0,
+              isverenIssizlikPayi: 0,
+              toplamIsverenMaliyeti: 0,
+              ay: "toplam"
+            });
+          }
+
+          const agg = aggMap.get(rec.tcNo);
+
+          // Sum Financials
+          agg.brutUcret += Number(rec.brutUcret || 0);
+          agg.netUcret += Number(rec.netUcret || 0);
+          agg.sgkMatrahi += Number(rec.sgkMatrahi || 0);
+          agg.gelirVergisi += Number(rec.gelirVergisi || 0);
+          agg.damgaVergisi += Number(rec.damgaVergisi || 0);
+          agg.sigortaKesintisi += Number(rec.sigortaKesintisi || 0);
+          agg.issizlikSigortasiKesintisi += Number(rec.issizlikSigortasiKesintisi || 0);
+          agg.isverenSgkPayi += Number(rec.isverenSgkPayi || 0);
+          agg.isverenIssizlikPayi += Number(rec.isverenIssizlikPayi || 0);
+          agg.toplamIsverenMaliyeti += Number(rec.toplamIsverenMaliyeti || 0);
+
+          // Max for Cumulative Base
+          agg.kumulatifVergiMatrahi = Math.max(agg.kumulatifVergiMatrahi, Number(rec.kumulatifVergiMatrahi || 0));
+
+          // Update static fields to latest month (if sorted? allRecords might not be sorted)
+          // Assuming logic requires latest status/branch
+          // parsing month:
+          const curMonth = parseInt(rec.ay);
+          const aggMonth = parseInt(agg.lastMonth || "0");
+          if (!isNaN(curMonth) && curMonth > aggMonth) {
+            agg.sube = rec.sube;
+            agg.statu = rec.statu;
+            agg.lastMonth = rec.ay;
+          }
+        }
+
+        return res.json(Array.from(aggMap.values()));
+      }
+
       const veriler = await storage.getCalisanlar(ay as string, yil ? parseInt(yil as string) : undefined);
       res.json(veriler);
     } catch (err) {
       console.error("Çalışanlar listelenirken hata:", err);
       res.status(500).json({ error: "Çalışanlar listelenirken bir hata oluştu" });
+    }
+  });
+
+  // Çalışanları ekle (POST)
+  app.post("/api/calisanlar", async (req, res) => {
+    try {
+      const veriler = Array.isArray(req.body) ? req.body : [req.body];
+      const eklenen = await storage.insertCalisanlar(veriler);
+      res.json({ success: true, count: eklenen.length, data: eklenen });
+    } catch (err) {
+      console.error("Çalışan eklenirken hata:", err);
+      res.status(500).json({ error: "Çalışan eklenirken bir hata oluştu" });
     }
   });
 
@@ -161,6 +252,400 @@ export async function registerRoutes(
     }
   });
 
+  // Fix January 2025 employee costs (one-time fix endpoint)
+  app.post("/api/calisanlar/fix-january-2025", async (req, res) => {
+    try {
+      // Get all January 2025 employees
+      const employees = await storage.getCalisanlar("1", 2025);
+
+      let fixed = 0;
+      for (const emp of employees) {
+        // Only fix if total cost is 0 but brut and sgk exist
+        const totalMaliyet = Number(emp.toplamIsverenMaliyeti || 0);
+        const brut = Number(emp.brutUcret || 0);
+        const sgk = Number(emp.isverenSgkPayi || 0);
+
+        if (totalMaliyet === 0 && (brut > 0 || sgk > 0)) {
+          const correctTotal = brut + sgk;
+
+          if (correctTotal > 0) {
+            await storage.updateCalisan(emp.id, {
+              toplamIsverenMaliyeti: correctTotal.toString()
+            });
+            fixed++;
+          }
+        }
+      }
+
+      res.json({ success: true, fixed, total: employees.length });
+    } catch (err) {
+      console.error("Fix January costs error:", err);
+      res.status(500).json({ error: "Fix failed" });
+    }
+  });
+
+  // ============================================================================
+  // B ORDRO YÜKLEME VE KAYDETME API'LERİ
+  // ============================================================================
+
+  // Bordro PDF/Excel Yükle ve Önizle
+  // Helper to apply branch history
+  const applyBranchHistory = async (newEmployees: any[]) => {
+    try {
+      const allHistory = await storage.getCalisanlar();
+      // Sort by Year asc, Month asc to get latest at the end
+      allHistory.sort((a, b) => {
+        const yDiff = (a.yil || 0) - (b.yil || 0);
+        if (yDiff !== 0) return yDiff;
+        return parseInt(a.ay || "0") - parseInt(b.ay || "0");
+      });
+
+      const branchMap = new Map<string, string>();
+      for (const h of allHistory) {
+        if (h.sube && h.tcNo) branchMap.set(h.tcNo, h.sube);
+      }
+
+      for (const emp of newEmployees) {
+        if (emp.tcNo && branchMap.has(emp.tcNo)) {
+          emp.sube = branchMap.get(emp.tcNo);
+        }
+      }
+    } catch (e) {
+      console.error("Şube geçmişi uygulanırken hata:", e);
+    }
+    return newEmployees;
+  };
+
+  app.post("/api/bordro/upload", upload.single("excel"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Dosya yüklenmedi" });
+      }
+
+      // 1. PDF Parsing Logic
+      if (req.file.mimetype === 'application/pdf' || req.file.originalname.toLowerCase().endsWith('.pdf')) {
+        try {
+          const parser = new PDFParse({ data: req.file.buffer });
+          const pdfData = await parser.getText();
+          const text = pdfData.text;
+
+          // Parsing Logic
+          const lines = text.split('\n');
+          const employees: any[] = [];
+
+          let currentEmployee: any = null;
+
+          // Helper to parse Turkish currency "1.234,56" -> 1234.56
+          const parseMoney = (str: string) => {
+            if (!str) return 0;
+            return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
+          };
+
+          let currentOffice = "Merkez";
+
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+
+            // Check for Office Name changes in header lines
+            // Check for Office Name changes in header lines
+            // March PDF: "AKPINAR ... BURSA Merkez" (Merkez Adres might be split)
+            if (line.includes("Merkez Adres") || (line.includes("Merkez") && line.includes("BURSA"))) currentOffice = "Merkez";
+            else if (line.includes("Yönetim") || line.includes("YÖNETİM")) currentOffice = "Yönetim";
+            else if (line.includes("Gemlik")) currentOffice = "Gemlik";
+            else if (line.includes("İstanbul") || line.includes("Istanbul")) currentOffice = "İstanbul";
+
+            // Detect Start of Employee Block: Starts with Date, ends with Name
+            // e.g. "10.01.2025 ... 0 NAME" or "10.01.2025 ... 2,5 NAME"
+            const startsWithDate = /^\d{2}\.\d{2}\.\d{4}/.test(line);
+
+            // Relaxed regex: match ANY digit/symbol chars followed by Name
+            const nameMatch = line.match(/\s+[\d.,]+\s+([A-ZĞÜŞİÖÇ\s]{2,})$/);
+
+            if (startsWithDate && nameMatch) {
+              // Save previous student if exists
+              if (currentEmployee) {
+                employees.push(currentEmployee);
+              }
+
+              // Initialize new employee
+              currentEmployee = {
+                adSoyad: nameMatch[1].trim(),
+                sube: currentOffice,
+                rawLines: []
+              };
+
+              // Try to find Join Date "DD.MM.YYYY" in the same line
+              const dateMatch = line.match(/(\d{2}\.\d{2}\.\d{4})\s+/);
+              if (dateMatch) currentEmployee.isGirisTarihi = dateMatch[1];
+            }
+
+            if (currentEmployee) {
+              // Check for Footer start to prevent massive totals from being included in the last employee
+              if (line.includes("TOPLAM :") || line.includes("TAHAKKUK BİLGİLERİ")) {
+                employees.push(currentEmployee);
+                currentEmployee = null;
+                continue; // Skip the rest of the loop for this line and future lines effectively (as currentEmployee is null)
+              }
+
+              currentEmployee.rawLines.push(line);
+
+              // Try to find TC Identity Number (11 digits) 
+              if (!currentEmployee.tcNo) {
+                const tcMatch = line.match(/^\d{11}$/);
+                if (tcMatch) currentEmployee.tcNo = tcMatch[0];
+              }
+
+              // Try to find Join Date "DD.MM.YYYY"
+              if (!currentEmployee.isGirisTarihi) {
+                const dateMatch = line.match(/(\d{2}\.\d{2}\.\d{4})\s+\d{2}\s+\d{2}/);
+                if (dateMatch) currentEmployee.isGirisTarihi = dateMatch[1];
+              }
+            }
+          }
+          // Push last one
+          if (currentEmployee) employees.push(currentEmployee);
+
+          // Second Pass: Process raw lines to extract financials
+          const parsedData = employees.map(emp => {
+            const allMoney: number[] = [];
+            emp.rawLines.forEach((l: string) => {
+              // Match all numbers like X.XXX,XX
+              const matches = l.match(/\d{1,3}(\.\d{3})*,\d{2}/g);
+              if (matches) {
+                matches.forEach(m => allMoney.push(parseMoney(m)));
+              }
+            });
+
+            // Heuristics:
+            // 1. Find TC line index
+            let tcIndex = -1;
+            for (let i = 0; i < emp.rawLines.length; i++) {
+              if (/^\d{11}$/.test(emp.rawLines[i].trim())) {
+                tcIndex = i;
+                break;
+              }
+            }
+
+            // 2. Brut is locally the first number relative to TC
+            let foundBrut = 0;
+            if (tcIndex !== -1 && tcIndex + 1 < emp.rawLines.length) {
+              // Check next few lines for a valid number
+              // Usually it is immediately next line
+              for (let k = 1; k <= 3; k++) {
+                if (tcIndex + k >= emp.rawLines.length) break;
+                const valStr = emp.rawLines[tcIndex + k];
+                const moneys = valStr.match(/\d{1,3}(\.\d{3})*,\d{2}/g);
+                if (moneys && moneys.length > 0) {
+                  foundBrut = parseMoney(moneys[0]);
+                  break;
+                }
+              }
+            }
+
+            // 3. Fallback to Max if not found, but prefer foundBrut if available
+            // Note: Total Cost is typically the MAX in the list, so picking MAX as Brut is incorrect if Total Cost is present.
+            // If foundBrut is available, we use it.
+            let brut = foundBrut;
+            if (!brut) {
+              // Heuristic Fallback: 2nd largest value? Or just Max if no Total Cost?
+              const maxVal = Math.max(...allMoney, 0);
+              const possibleBrut = allMoney.find(m => m < maxVal && m > maxVal * 0.4);
+              brut = possibleBrut || maxVal; // Risky but fallback
+            }
+
+            // 4. Net is the LAST value that is > 30% of Brut
+            // (Filters out small artifacts at the end)
+            let net = 0;
+            for (let i = allMoney.length - 1; i >= 0; i--) {
+              // Net must be smaller than Brut usually (unless tax rebate etc makes it distinct? No)
+              if (allMoney[i] > brut * 0.30 && (allMoney[i] < brut || brut === 0)) {
+                net = allMoney[i];
+                break;
+              }
+            }
+            if (!net) net = allMoney.length > 0 ? allMoney[allMoney.length - 1] : 0;
+
+            // Status Logic determined by 05510 code and specific names
+            const managers = [
+              "NEŞE YILDIRIM", "CENGİZ ÜNER", "COŞKUN YILDIRIM",
+              "ÖZCAN EREN", "ÖZGÜR KÖSE", "CEM YILDIRIM", "ENİS ÜNER"
+            ];
+
+            let statu = "NORMAL";
+
+            // 1. Check Manager List
+            if (managers.some(m => emp.adSoyad.includes(m))) {
+              statu = "YÖNETİCİ";
+            } else {
+              // 2. Check Kanun No in raw lines
+              const hasNormalCode = emp.rawLines.some((l: string) => l.includes("05510"));
+              const hasRetiredCode = emp.rawLines.some((l: string) => l.includes("00000"));
+
+              if (hasRetiredCode) statu = "EMEKLİ";
+              else if (hasNormalCode) statu = "NORMAL";
+            }
+            // Calculate Worker SGK Share (User defined as Gross - Net)
+            const workerSgkShare = Number((brut - net).toFixed(2));
+
+            // Calculate Employer SGK Share
+            // Calculate Employer SGK Share
+            let employerSgkShare = 0;
+            // Determine month from req.body (from formData) or default
+            // Note: Multer middleware handling 'ay' field should ideally make it available in req.body
+            // If not available, default to 1 (January rates)
+            const monthVal = req.body.ay ? parseInt(req.body.ay) : 1;
+
+            if (statu === "NORMAL") {
+              const rate = (monthVal > 1) ? 0.1875 : 0.1775;
+              employerSgkShare = Number((brut * rate).toFixed(2));
+            } else if (statu === "EMEKLİ") {
+              employerSgkShare = Number((brut * 0.2475).toFixed(2));
+            } else if (statu === "YÖNETİCİ") {
+              employerSgkShare = 0;
+            }
+
+            return {
+              tcNo: emp.tcNo || "",
+              adSoyad: emp.adSoyad,
+              statu: statu,
+              sube: emp.sube || "Merkez",
+              isGirisTarihi: emp.isGirisTarihi || "",
+
+              brutUcret: brut,
+              netUcret: net,
+              sgkMatrahi: brut,
+              gelirVergisiMatrahi: 0,
+              kumulatifVergiMatrahi: 0,
+              gelirVergisi: 0,
+              damgaVergisi: 0,
+              sigortaKesintisi: workerSgkShare,
+              issizlikSigortasiKesintisi: 0,
+              isverenSgkPayi: employerSgkShare,
+              isverenIssizlikPayi: 0,
+              toplamIsverenMaliyeti: Number((brut + employerSgkShare).toFixed(2))
+            };
+          });
+
+          const withHistory = await applyBranchHistory(parsedData);
+          return res.json(withHistory);
+
+        } catch (error) {
+          console.error("PDF Parsing error:", error);
+          return res.status(500).json({ error: "PDF işlenirken hata oluştu: " + (error as Error).message });
+        }
+      }
+
+      // 2. Excel Parsing Logic (Fallback)
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(sheet) as any[];
+
+      if (data.length === 0) {
+        return res.status(400).json({ error: "Dosya boş" });
+      }
+
+      const parsedData = data.map((row: any) => {
+        const parseNum = (val: any) => {
+          if (typeof val === 'number') return val;
+          if (typeof val === 'string') {
+            let clean = val.replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '');
+            return parseFloat(clean) || 0;
+          }
+          return 0;
+        };
+
+        return {
+          tcNo: String(row["TC No"] || row["TC"] || row["T.C."] || row["tcNo"] || ""),
+          adSoyad: String(row["Ad Soyad"] || row["Adı Soyadı"] || row["Personel Adı"] || row["adSoyad"] || ""),
+          statu: String(row["Statü"] || row["Statu"] || row["Durum"] || "NORMAL").toUpperCase(),
+          sube: String(row["Şube"] || row["Sube"] || row["Bölüm"] || "Bursa"),
+          isGirisTarihi: String(row["İşe Giriş"] || row["İşe Giriş Tarihi"] || row["Giriş Tarihi"] || ""),
+
+          brutUcret: parseNum(row["Brüt Ücret"] || row["Brüt"] || row["Aylık Brüt"] || 0),
+          netUcret: parseNum(row["Net Ücret"] || row["Net"] || row["Aylık Net"] || 0),
+          sgkMatrahi: parseNum(row["SGK Matrahı"] || row["SGK Matrah"] || 0),
+          gelirVergisiMatrahi: parseNum(row["GV Matrahı"] || row["Gelir Vergisi Matrahı"] || 0),
+          kumulatifVergiMatrahi: parseNum(row["Kümülatif GV Matrahı"] || row["Kümülatif Vergi Matrahı"] || 0),
+          gelirVergisi: parseNum(row["Gelir Vergisi"] || row["Kesilen GV"] || 0),
+          damgaVergisi: parseNum(row["Damga Vergisi"] || row["Kesilen DV"] || 0),
+          sigortaKesintisi: parseNum(row["SGK İşçi Payı"] || row["İşçi SGK"] || 0),
+          issizlikSigortasiKesintisi: parseNum(row["İşsizlik İşçi Payı"] || row["İşçi İşsizlik"] || 0),
+          isverenSgkPayi: parseNum(row["SGK İşveren Payı"] || row["İşveren SGK"] || 0),
+          isverenIssizlikPayi: parseNum(row["İşsizlik İşveren Payı"] || row["İşveren İşsizlik"] || 0),
+          toplamIsverenMaliyeti: parseNum(row["Toplam İşveren Maliyeti"] || row["İşveren Maliyeti"] || 0)
+        };
+      }).filter(p => p.adSoyad && p.adSoyad.length > 2);
+
+      const withHistory = await applyBranchHistory(parsedData);
+      res.json(withHistory);
+    } catch (error) {
+      console.error("Bordro yükleme hatası:", error);
+      res.status(500).json({ error: "Dosya işlenirken hata oluştu" });
+    }
+  });
+
+  // Bordro Verilerini Kaydet (Toplu)
+  app.post("/api/bordro/save", async (req, res) => {
+    try {
+      const { ay, yil, data } = req.body;
+
+      if (!ay || !yil || !data || !Array.isArray(data)) {
+        return res.status(400).json({ error: "Geçersiz veri formatı" });
+      }
+
+      // String 'ay' değerini sayısal olarak kontrol etmemiz gerekebilir ama 
+      // şemada 'text' olarak tutuluyor ("ocak" gibi değil, "1", "2" gibi string mi, yoksa ay ismi mi?)
+      // Front-end "1", "2" gönderiyor. Şema "text". Uygun. 
+      // Ancak eski verilerde "ocak", "subat" gibi de olabilir. 
+      // Biz "1", "2" gibi tutacağız artık.
+
+      // 1. O ay ve yıla ait eski kayıtları sil
+      await storage.deleteCalisanlar(String(ay), parseInt(yil));
+
+      // 2. Yeni kayıtları ekle
+      const calisanlarVerisi = data.map((item: any) => ({
+        ...item,
+        ay: String(ay),
+        yil: parseInt(yil),
+        // Eksik alanlar için varsayılanlar veya hesaplamalar (basit toplama)
+        // Eğer excel'den gelmeyen bir alan varsa hesaplamak yerine 0 veriyoruz 
+        // çünkü artık otomatik hesaplama yok.
+      }));
+
+      const saved = await storage.insertCalisanlar(calisanlarVerisi);
+
+      res.json({ success: true, count: saved.length });
+    } catch (error) {
+      console.error("Bordro kaydetme hatası:", error);
+      res.status(500).json({ error: "Veriler kaydedilirken hata oluştu" });
+    }
+  });
+
+
+  // Hesaplama parametrelerini getir
+  app.get("/api/calculations/parameters", async (_req, res) => {
+    res.json({
+      asgariUcret: {
+        brut: PARAMETRELER_2025.BRUT_ASGARI_UCRET,
+        net: PARAMETRELER_2025.NET_ASGARI_UCRET
+      },
+      sgkTavan: PARAMETRELER_2025.SGK_AYLIK_TAVAN,
+      oranlar: {
+        isciSgkNormal: PARAMETRELER_2025.ISCI_SGK_ORANI,
+        isciSgkEmekli: PARAMETRELER_2025.ISCI_SGK_ORANI_EMEKLI,
+        isciIssizlik: PARAMETRELER_2025.ISCI_ISSIZLIK_ORANI,
+        isverenSgkNormal: PARAMETRELER_2025.ISVEREN_SGK_ORANI,
+        isverenSgkTesvikli: PARAMETRELER_2025.ISVEREN_SGK_ORANI_TESVIKLI,
+        isverenSgkEmekli: PARAMETRELER_2025.ISVEREN_SGK_ORANI_EMEKLI,
+        isverenIssizlik: PARAMETRELER_2025.ISVEREN_ISSIZLIK_ORANI,
+        damgaVergisi: PARAMETRELER_2025.DAMGA_VERGISI_ORANI,
+        hazineTesviki: PARAMETRELER_2025.HAZINE_TESVIKI_ORANI
+      },
+      gelirVergisiDilimleri: PARAMETRELER_2025.GELIR_VERGISI_DILIMLERI
+    });
+  });
+
   // Yüklü ayları getir (spesifik route - önce tanımlanmalı)
   app.get("/api/gumruk/aylar", async (req, res) => {
     try {
@@ -181,6 +666,18 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Özet getirme hatası:", error);
       res.status(500).json({ error: "Özet alınamadı" });
+    }
+  });
+
+  // Dashboard Aggregated Summary Endpoint
+  app.get("/api/dashboard/summary/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const summary = await storage.getOzetSummary(parseInt(yil));
+      res.json(summary);
+    } catch (error) {
+      console.error("Dashboard summary error:", error);
+      res.status(500).json({ error: "Dashboard verileri alınamadı" });
     }
   });
 
@@ -331,6 +828,18 @@ export async function registerRoutes(
     }
   });
 
+  // Özet summary - combined sales, expenses, and employee data by month (spesifik route - önce tanımlanmalı)
+  app.get("/api/gumruk/ozet-summary/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const ozet = await storage.getOzetSummary(parseInt(yil));
+      res.json(ozet);
+    } catch (error) {
+      console.error("Özet summary getirme hatası:", error);
+      res.status(500).json({ error: "Özet summary alınamadı" });
+    }
+  });
+
   // Gümrük verilerini getir (parametrik route - en son tanımlanmalı)
   app.get("/api/gumruk/:ay/:yil", async (req, res) => {
     try {
@@ -343,7 +852,151 @@ export async function registerRoutes(
     }
   });
 
-  // Excel yükle
+
+
+  // ============================================================================
+  // GIDERLER API
+  // ============================================================================
+
+  // Giderler Listesi
+  app.get("/api/giderler", async (req, res) => {
+    try {
+      const { ay, yil } = req.query;
+      const giderler = await storage.getGiderler(ay as string, yil ? parseInt(yil as string) : undefined);
+      res.json(giderler);
+    } catch (error) {
+      console.error("Giderler listelenirken hata:", error);
+      res.status(500).json({ error: "Giderler alınamadı" });
+    }
+  });
+
+  // Gider İstatistikleri
+  app.get("/api/giderler/stats", async (req, res) => {
+    try {
+      const { ay, yil } = req.query;
+      const stats = await storage.getGiderStats(
+        yil ? parseInt(yil as string) : undefined,
+        ay as string
+      );
+      res.json(stats);
+    } catch (error) {
+      console.error("Gider istatistikleri alınırken hata:", error);
+      res.status(500).json({ error: "İstatistikler alınamadı" });
+    }
+  });
+
+  // Gider Excel Yükle
+  app.post("/api/giderler/upload", upload.single("excel"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Dosya yüklenmedi" });
+      }
+
+      // Read Excel
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[];
+
+      // Skip first row (header)
+      const dataRows = rawData.slice(1);
+
+      const parsedVeriler: any[] = [];
+      const currentYear = new Date().getFullYear(); // Default if needed, but we look at date
+
+      // A: Tarih, B: Firma, C: Fatura No, D: Mal Bedeli, E: KDV, F: Toplam, G: Para Birimi
+      for (const row of dataRows) {
+        if (!row[0] || !row[1]) continue; // Skip empty rows
+
+
+
+        let tarihStr = "";
+        let yil = currentYear;
+        let ay = "ocak"; // Default
+
+        const safeParseFloat = (val: any) => {
+          if (typeof val === 'number') return val;
+          if (!val) return 0;
+          const clean = String(val).replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, ''); // Remove thousands separator dots, replace decimal comma
+          const num = parseFloat(clean);
+          return isNaN(num) ? 0 : num;
+        };
+
+        const firma = String(row[1] || "").trim();
+        const faturaNo = String(row[2] || "").trim();
+        const malBedeli = safeParseFloat(row[3]);
+        const kdvTutari = safeParseFloat(row[4]);
+        const toplamTutar = safeParseFloat(row[5]);
+        const paraBirimi = String(row[6] || "TRY").trim().toUpperCase();
+
+        // Date Parsing Logic
+        if (typeof row[0] === 'number') {
+          // Excel Date (Serial Number)
+          const date = new Date(Math.round((row[0] - 25569) * 86400 * 1000));
+          const day = String(date.getDate()).padStart(2, '0');
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const year = date.getFullYear();
+          tarihStr = `${day}.${month}.${year}`;
+          yil = year;
+        } else if (typeof row[0] === 'string') {
+          tarihStr = row[0].trim();
+          const dateParts = tarihStr.split('.');
+          if (dateParts.length === 3) {
+            yil = parseInt(dateParts[2]);
+          }
+        } else {
+          tarihStr = String(row[0] || "");
+        }
+
+        // Determine month name from date
+        const parts = tarihStr.split('.');
+        if (parts.length === 3) {
+          const monthNum = parseInt(parts[1]);
+          const ayMap = ["", "ocak", "subat", "mart", "nisan", "mayis", "haziran", "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"];
+          if (monthNum >= 1 && monthNum <= 12) ay = ayMap[monthNum];
+        }
+
+        let kur = 1;
+        let tryTutar = toplamTutar;
+
+        if (paraBirimi !== 'TRY' && paraBirimi !== 'TL' && tarihStr) {
+          try {
+            // Fetch Rate
+            kur = await getTCMBExchangeRate(tarihStr, paraBirimi);
+            tryTutar = toplamTutar * kur;
+          } catch (e) {
+            console.error(`Rate fetch error for ${tarihStr} ${paraBirimi}:`, e);
+          }
+        }
+
+        parsedVeriler.push({
+          tarih: tarihStr,
+          firma,
+          faturaNo,
+          malBedeli,
+          kdvTutari,
+          toplamTutar,
+          paraBirimi,
+          kur,
+          tryTutar,
+          ay,
+          yil
+        });
+      }
+
+      console.log(`Parsed ${parsedVeriler.length} rows. First row example:`, parsedVeriler[0]);
+
+      const inserted = await storage.insertGiderler(parsedVeriler);
+      res.json({ success: true, count: inserted.length });
+
+    } catch (error) {
+      console.error("Giderler yüklenirken hata:", error);
+      res.status(500).json({ error: "Dosya işlenirken hata oluştu: " + (error as Error).message });
+    }
+  });
+
+
+  // Excel yükle (Eski Gumruk)
   app.post("/api/gumruk/yukle", upload.single("excel"), async (req, res) => {
     try {
       if (!req.file) {
