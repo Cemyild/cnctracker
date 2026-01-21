@@ -183,3 +183,60 @@ export const insertGiderlerSchema = createInsertSchema(giderler).omit({
 
 export type InsertGiderler = z.infer<typeof insertGiderlerSchema>;
 export type Gider = typeof giderler.$inferSelect;
+
+// Sigorta Poliçeleri tablosu
+export const sigortaPoliceleri = pgTable("sigorta_policeleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  brans: text("brans"),
+  policeNo: text("police_no").notNull(),
+  sigortali: text("sigortali"),
+  tanzimTarihi: text("tanzim_tarihi"),
+  netPrim: decimal("net_prim", { precision: 15, scale: 2 }),
+  brutPrim: decimal("brut_prim", { precision: 15, scale: 2 }),
+  komisyon: decimal("komisyon", { precision: 15, scale: 2 }),
+  sigortaBedeli: decimal("sigorta_bedeli", { precision: 15, scale: 2 }),
+  dekontDurumu: text("dekont_durumu"), // EVET, HAYIR, ÖDENEN (veya null)
+  sirket: text("sirket").notNull(), // Mapfre, Ray Sigorta
+  ay: text("ay"),
+  yil: integer("yil"),
+  olusturmaTarihi: date("olusturma_tarihi").default(sql`CURRENT_DATE`),
+}, (table) => [
+  uniqueIndex("sigorta_policeleri_no_idx").on(table.policeNo, table.sirket),
+]);
+
+export const insertSigortaPoliceSchema = createInsertSchema(sigortaPoliceleri).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+
+export type InsertSigortaPolice = z.infer<typeof insertSigortaPoliceSchema>;
+export type SigortaPolice = typeof sigortaPoliceleri.$inferSelect;
+
+// Sigorta Muhasebe Kayıtları tablosu
+export const sigortaMuhasebeKayitlari = pgTable("sigorta_muhasebe_kayitlari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tarih: text("tarih"),
+  aciklama: text("aciklama"),
+  belgeNo: text("belge_no"),
+  borc: decimal("borc", { precision: 15, scale: 2 }),
+  alacak: decimal("alacak", { precision: 15, scale: 2 }),
+  bakiye: decimal("bakiye", { precision: 15, scale: 2 }),
+  eslestiMi: integer("eslesti_mi").default(0), // 0: Hayır, 1: Evet
+  eslesenPolicyId: text("eslesen_policy_id"),
+  sirket: text("sirket").notNull(), // Mapfre, Ray Sigorta
+  ay: text("ay"),
+  yil: integer("yil"),
+  rowHash: text("row_hash").notNull(), // Tekrarlı yüklemeleri önlemek için
+  olusturmaTarihi: date("olusturma_tarihi").default(sql`CURRENT_DATE`),
+}, (table) => [
+  uniqueIndex("sigorta_muhasebe_hash_idx").on(table.sirket, table.yil, table.rowHash),
+]);
+
+export const insertSigortaMuhasebeSchema = createInsertSchema(sigortaMuhasebeKayitlari).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+
+export type InsertSigortaMuhasebe = z.infer<typeof insertSigortaMuhasebeSchema>;
+export type SigortaMuhasebe = typeof sigortaMuhasebeKayitlari.$inferSelect;
+

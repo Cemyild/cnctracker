@@ -1,5 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
     TrendingUp,
     TrendingDown,
@@ -32,12 +34,15 @@ type FinancialOverviewProps = {
         giderKdvHaric: number;
         giderKdv: number;
         calisanMaliyet: number;
+        yonetimNetUcret?: number;
     }[];
     year: string;
     selectedMonth?: string;
 };
 
 export function FinancialOverview({ data, year, selectedMonth }: FinancialOverviewProps) {
+    const [excludeManagement, setExcludeManagement] = useState(false);
+
     const stats = useMemo(() => {
         // Filter data if a month is selected
         const activeData = selectedMonth
@@ -46,7 +51,16 @@ export function FinancialOverview({ data, year, selectedMonth }: FinancialOvervi
 
         const totalRevenue = activeData.reduce((sum, item) => sum + item.satisKdvHaric, 0);
         const totalExpenses = activeData.reduce((sum, item) => sum + item.giderKdvHaric, 0);
-        const totalLabor = activeData.reduce((sum, item) => sum + item.calisanMaliyet, 0);
+        
+        // Calculate Total Labor
+        let totalLabor = activeData.reduce((sum, item) => sum + item.calisanMaliyet, 0);
+
+        // If exclusion is active, subtract management NET salaries
+        // Note: We only subtract the NET component. SGK/Tax remains as a cost.
+        if (excludeManagement) {
+            const managementReduction = activeData.reduce((sum, item) => sum + (item.yonetimNetUcret || 0), 0);
+            totalLabor -= managementReduction;
+        }
 
         // Total Costs (Expenses + Labor)
         const totalCosts = totalExpenses + totalLabor;
@@ -79,7 +93,7 @@ export function FinancialOverview({ data, year, selectedMonth }: FinancialOvervi
             netVAT,
             costDistribution
         };
-    }, [data, selectedMonth]);
+    }, [data, selectedMonth, excludeManagement]);
 
     const monthLabels = {
         "ocak": "Oca", "subat": "Şub", "mart": "Mar", "nisan": "Nis",
@@ -88,18 +102,39 @@ export function FinancialOverview({ data, year, selectedMonth }: FinancialOvervi
     };
 
     const chartData = useMemo(() => {
-        return data.map(item => ({
-            name: monthLabels[item.ay as keyof typeof monthLabels] || item.ay,
-            gelir: item.satisKdvHaric,
-            gider: item.giderKdvHaric + item.calisanMaliyet,
-            kar: item.satisKdvHaric - (item.giderKdvHaric + item.calisanMaliyet),
-            kdvOdenecek: item.satisKdv,
-            kdvIndirilecek: item.giderKdv
-        }));
-    }, [data]);
+        return data.map(item => {
+            let itemLabor = item.calisanMaliyet;
+            if (excludeManagement) {
+                itemLabor -= (item.yonetimNetUcret || 0);
+            }
+            
+            return {
+                name: monthLabels[item.ay as keyof typeof monthLabels] || item.ay,
+                gelir: item.satisKdvHaric,
+                gider: item.giderKdvHaric + itemLabor,
+                kar: item.satisKdvHaric - (item.giderKdvHaric + itemLabor),
+                kdvOdenecek: item.satisKdv,
+                kdvIndirilecek: item.giderKdv
+            };
+        });
+    }, [data, excludeManagement]);
 
     return (
         <div className="space-y-6 mb-8">
+            <div className="flex justify-end items-center space-x-2">
+                <Checkbox 
+                    id="excludeManagement" 
+                    checked={excludeManagement}
+                    onCheckedChange={(checked) => setExcludeManagement(checked as boolean)}
+                />
+                <Label 
+                    htmlFor="excludeManagement" 
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                    Yönetim Maaşlarını Hariç Tut (Net Ücret)
+                </Label>
+            </div>
+
             {/* Top Level Key Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Net Profit Card */}

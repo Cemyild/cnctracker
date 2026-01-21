@@ -1,4 +1,4 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray } from "drizzle-orm";
@@ -65,7 +65,22 @@ export interface IStorage {
     calisanNet: number;
     calisanIsverenSgk: number;
     calisanMaliyet: number;
+    yonetimNetUcret: number;
   }[]>;
+
+  // Sigorta Poliçeleri
+  getSigortaPoliceleri(sirket?: string, ay?: string, yil?: number): Promise<SigortaPolice[]>;
+  insertSigortaPoliceleri(veriler: InsertSigortaPolice[]): Promise<SigortaPolice[]>;
+  deleteSigortaPoliceleri(sirket: string, ay?: string, yil?: number): Promise<void>;
+  getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number }[]>;
+
+  // Sigorta Muhasebe Kayıtları
+  getSigortaMuhasebeKayitlari(sirket?: string, ay?: string, yil?: number): Promise<SigortaMuhasebe[]>;
+  insertSigortaMuhasebeKayitlari(veriler: InsertSigortaMuhasebe[]): Promise<SigortaMuhasebe[]>;
+  deleteSigortaMuhasebeKayitlari(sirket: string, ay?: string, yil?: number): Promise<void>;
+  updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe>;
+  deleteSigortaMuhasebeKaydi(id: string): Promise<void>;
+  deleteMapfreMuhasebe(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -656,6 +671,7 @@ export class DatabaseStorage implements IStorage {
     calisanNet: number;
     calisanIsverenSgk: number;
     calisanMaliyet: number;
+    yonetimNetUcret: number;
   }[]> {
     const aylar = ["ocak", "subat", "mart", "nisan", "mayis", "haziran", "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"];
 
@@ -696,6 +712,31 @@ export class DatabaseStorage implements IStorage {
       .where(eq(calisanlar.yil, yil))
       .groupBy(calisanlar.ay);
 
+    // Calculate Management Net Wages specifically
+    const managerNames = ["CEM YILDIRIM", "ENİS ÜNER", "NEŞE YILDIRIM", "COŞKUN YILDIRIM", "CENGİZ ÜNER"];
+    
+    // Create a SQL OR condition for names using ILIKE for robustness
+    const nameConditions = managerNames.map(name => sql`${calisanlar.adSoyad} ILIKE ${'%' + name + '%'}`);
+    
+    // Check if we have any conditions before querying
+    let managementData: { ay: string; yonetimNet: string }[] = [];
+    
+    if (nameConditions.length > 0) {
+      managementData = await db
+        .select({
+          ay: calisanlar.ay,
+          yonetimNet: sql<string>`sum(${calisanlar.netUcret})`,
+        })
+        .from(calisanlar)
+        .where(
+          and(
+            eq(calisanlar.yil, yil),
+            sql`(${sql.join(nameConditions, sql` OR `)})`
+          )
+        )
+        .groupBy(calisanlar.ay);
+    }
+
     // Create lookup maps
     const salesMap = new Map(salesData.map(s => [s.ay, s]));
     const expensesMap = new Map(expensesData.map(e => [e.ay, e]));
@@ -711,6 +752,13 @@ export class DatabaseStorage implements IStorage {
     employeeData.forEach(e => {
       const monthName = monthNumToName[e.ay] || e.ay;
       employeeMap.set(monthName, e);
+    });
+
+    const managementMap = new Map(managementData.map(m => [m.ay, m]));
+    // Map management data by month name as well
+    managementData.forEach(m => {
+        const monthName = monthNumToName[m.ay] || m.ay;
+        managementMap.set(monthName, m);
     });
 
     // Build result for all 12 months
@@ -734,10 +782,150 @@ export class DatabaseStorage implements IStorage {
         calisanNet: parseFloat(employee?.netUcret || "0"),
         calisanIsverenSgk: parseFloat(employee?.isverenSgkPayi || "0"),
         calisanMaliyet: parseFloat(employee?.toplamIsverenMaliyeti || "0"),
+        yonetimNetUcret: parseFloat(managementMap.get(ay)?.yonetimNet || "0"),
       };
     });
   }
 
+  async getSigortaPoliceleri(sirket?: string, ay?: string, yil?: number): Promise<SigortaPolice[]> {
+    const filters = [];
+    if (sirket) filters.push(eq(sigortaPoliceleri.sirket, sirket));
+    if (ay) filters.push(eq(sigortaPoliceleri.ay, ay));
+    if (yil) filters.push(eq(sigortaPoliceleri.yil, yil));
+
+    if (filters.length > 0) {
+      return await db.select().from(sigortaPoliceleri).where(and(...filters)).orderBy(sigortaPoliceleri.tanzimTarihi);
+    }
+    return await db.select().from(sigortaPoliceleri).orderBy(sigortaPoliceleri.tanzimTarihi);
+  }
+
+  async insertSigortaPoliceleri(veriler: InsertSigortaPolice[]): Promise<SigortaPolice[]> {
+    if (veriler.length === 0) return [];
+
+    const BATCH_SIZE = 100;
+    const results: SigortaPolice[] = [];
+
+    for (let i = 0; i < veriler.length; i += BATCH_SIZE) {
+      const batch = veriler.slice(i, i + BATCH_SIZE);
+      const inserted = await db.insert(sigortaPoliceleri).values(batch)
+        .onConflictDoUpdate({
+           target: [sigortaPoliceleri.policeNo, sigortaPoliceleri.sirket],
+           set: {
+             // Update logic: fields that might change?
+             // Usually reload overwrites, so let's update financials
+             netPrim: sql`excluded.net_prim`,
+             brutPrim: sql`excluded.brut_prim`,
+             komisyon: sql`excluded.komisyon`,
+             sigortaBedeli: sql`excluded.sigorta_bedeli`,
+             dekontDurumu: sql`excluded.dekont_durumu`,
+             tanzimTarihi: sql`excluded.tanzim_tarihi`,
+             brans: sql`excluded.brans`,
+             sigortali: sql`excluded.sigortali`,
+             ay: sql`excluded.ay`,
+             yil: sql`excluded.yil`,
+           }
+        })
+        .returning();
+      results.push(...inserted);
+    }
+    return results;
+  }
+
+  async deleteSigortaPoliceleri(sirket: string, ay?: string, yil?: number): Promise<void> {
+     const filters = [eq(sigortaPoliceleri.sirket, sirket)];
+     if (ay) filters.push(eq(sigortaPoliceleri.ay, ay));
+     if (yil) filters.push(eq(sigortaPoliceleri.yil, yil)); // Corrected to use yil filter if provided.
+     // WARNING: Original prompt logic mentioned matching "Veri Yükleme" page where users upload files.
+     // Usually people re-upload a month. So deleting by month/year/company before insert is wise, or using upsert (which we did).
+     
+     // Let's rely on standard delete logic if requested explicitly. 
+     await db.delete(sigortaPoliceleri).where(and(...filters));
+  }
+
+  async getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number }[]> {
+    const result = await db.select({
+      ay: sigortaPoliceleri.ay,
+      sirket: sigortaPoliceleri.sirket,
+      policeSayisi: sql<number>`count(*)`,
+      toplamPrim: sql<string>`sum(${sigortaPoliceleri.netPrim})`,
+      toplamKomisyon: sql<string>`sum(${sigortaPoliceleri.komisyon})`,
+    })
+    .from(sigortaPoliceleri)
+    .where(eq(sigortaPoliceleri.yil, yil))
+    .groupBy(sigortaPoliceleri.ay, sigortaPoliceleri.sirket);
+
+    return result.map(r => ({
+      ay: r.ay || "",
+      sirket: r.sirket,
+      policeSayisi: Number(r.policeSayisi),
+      toplamPrim: parseFloat(r.toplamPrim || "0"),
+      toplamKomisyon: parseFloat(r.toplamKomisyon || "0"),
+    }));
+  }
+
+
+  // ==========================================================
+  // SİGORTA MUHASEBE KAYITLARI IMPLEMENTATION
+  // ==========================================================
+
+  async getSigortaMuhasebeKayitlari(sirket?: string, ay?: string, yil?: number): Promise<SigortaMuhasebe[]> {
+    const filters = [];
+    if (sirket) filters.push(eq(sigortaMuhasebeKayitlari.sirket, sirket));
+    if (ay && ay !== "ALL") filters.push(eq(sigortaMuhasebeKayitlari.ay, ay));
+    if (yil) filters.push(eq(sigortaMuhasebeKayitlari.yil, yil));
+
+    if (filters.length > 0) {
+      return await db.select().from(sigortaMuhasebeKayitlari).where(and(...filters)).orderBy(sigortaMuhasebeKayitlari.tarih);
+    }
+    return await db.select().from(sigortaMuhasebeKayitlari).orderBy(sigortaMuhasebeKayitlari.tarih);
+  }
+
+  async insertSigortaMuhasebeKayitlari(veriler: InsertSigortaMuhasebe[]): Promise<SigortaMuhasebe[]> {
+    if (veriler.length === 0) return [];
+    
+    const results: SigortaMuhasebe[] = [];
+    const BATCH_SIZE = 100;
+
+    for (let i = 0; i < veriler.length; i += BATCH_SIZE) {
+      const batch = veriler.slice(i, i + BATCH_SIZE);
+      const inserted = await db
+        .insert(sigortaMuhasebeKayitlari)
+        .values(batch)
+        .onConflictDoNothing() // Ignore duplicates if re-uploaded
+        .returning();
+      results.push(...inserted);
+    }
+
+    return results;
+  }
+
+  async deleteSigortaMuhasebeKayitlari(sirket: string, ay?: string, yil?: number): Promise<void> {
+    const filters = [eq(sigortaMuhasebeKayitlari.sirket, sirket)];
+    
+    if (ay && ay !== "ALL") filters.push(eq(sigortaMuhasebeKayitlari.ay, ay));
+    if (yil) filters.push(eq(sigortaMuhasebeKayitlari.yil, yil));
+
+    await db.delete(sigortaMuhasebeKayitlari).where(and(...filters));
+  }
+
+  async updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe> {
+      const [updated] = await db
+      .update(sigortaMuhasebeKayitlari)
+      .set(veri)
+      .where(eq(sigortaMuhasebeKayitlari.id, id))
+      .returning();
+      
+      if (!updated) throw new Error("Muhasebe kaydı bulunamadı");
+      return updated;
+  }
+
+  async deleteSigortaMuhasebeKaydi(id: string): Promise<void> {
+    await db.delete(sigortaMuhasebeKayitlari).where(eq(sigortaMuhasebeKayitlari.id, id));
+  }
+
+  async deleteMapfreMuhasebe(): Promise<void> {
+    await db.delete(sigortaMuhasebeKayitlari).where(eq(sigortaMuhasebeKayitlari.sirket, "Mapfre"));
+  }
 }
 
 export const storage = new DatabaseStorage();

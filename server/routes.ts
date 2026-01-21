@@ -5,7 +5,7 @@ import multer from "multer";
 import { type IStorage } from "./storage";
 import * as XLSX from "xlsx";
 
-import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema } from "@shared/schema";
+import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema } from "@shared/schema";
 import { createHash } from "crypto";
 import { z } from "zod";
 import {
@@ -138,6 +138,201 @@ export async function registerRoutes(
     } catch (err) {
       console.error("Araç silinirken hata:", err);
       res.status(500).json({ error: "Araç silinirken bir hata oluştu" });
+    }
+  });
+
+
+  // ============================================================================
+  // SİGORTA API'LERİ
+  // ============================================================================
+
+  app.get("/api/sigorta/policeler", async (req, res) => {
+    try {
+      const { sirket, ay, yil } = req.query;
+      const results = await storage.getSigortaPoliceleri(
+        sirket as string,
+        ay as string,
+        yil ? parseInt(yil as string) : undefined
+      );
+      res.json(results);
+    } catch (err) {
+      console.error("Poliçeler listelenirken hata:", err);
+      if (err instanceof Error) console.error(err.stack);
+      res.status(500).json({ error: "Poliçeler listelenirken hata oluştu: " + (err as Error).message });
+    }
+  });
+
+  app.post("/api/sigorta/policeler", async (req, res) => {
+    try {
+      // Expecting array of policies
+      const body = Array.isArray(req.body) ? req.body : [req.body];
+      
+      // Basic validation via schema is tricky for array directly with `safeParse`, loop it
+      const validItems = [];
+      for (const item of body) {
+         const parsed = insertSigortaPoliceSchema.safeParse(item);
+         if (parsed.success) {
+            validItems.push(parsed.data);
+         } else {
+            console.warn("Invalid policy item:", item, parsed.error);
+         }
+      }
+
+      if (validItems.length === 0 && body.length > 0) {
+        console.warn("All policy items failed validation. First error:", insertSigortaPoliceSchema.safeParse(body[0]));
+        return res.status(400).json({ 
+            error: "Hiçbir poliçe geçerli formatta değil. Lütfen veri türlerini kontrol edin.",
+            details: insertSigortaPoliceSchema.safeParse(body[0]) 
+        });
+      }
+
+      const inserted = await storage.insertSigortaPoliceleri(validItems);
+      res.json({ success: true, count: inserted.length });
+    } catch (err) {
+      console.error("Poliçe eklenirken hata:", err);
+      if (err instanceof Error) console.error(err.stack);
+      res.status(500).json({ error: "Poliçe eklenirken hata oluştu: " + (err as Error).message });
+    }
+  });
+
+  app.delete("/api/sigorta/policeler", async (req, res) => {
+    try {
+       const { sirket, ay, yil } = req.query;
+       if (!sirket) return res.status(400).json({ error: "Şirket seçilmeli" });
+       
+       await storage.deleteSigortaPoliceleri(
+         sirket as string, 
+         ay as string, 
+         yil ? parseInt(yil as string) : undefined
+       );
+       res.json({ success: true });
+    } catch (err) {
+       console.error("Poliçe silinirken hata:", err);
+       res.status(500).json({ error: "Poliçe silinirken hata oluştu" });
+    }
+  });
+
+  // ============================================================================
+  // SİGORTA MUHASEBE API'LERİ
+  // ============================================================================
+
+  app.get("/api/sigorta/muhasebe", async (req, res) => {
+    try {
+      const { sirket, ay, yil } = req.query;
+      const results = await storage.getSigortaMuhasebeKayitlari(
+        sirket as string,
+        ay as string,
+        yil ? parseInt(yil as string) : undefined
+      );
+      res.json(results);
+    } catch (err) {
+      console.error("Muhasebe kayıtları listelenirken hata:", err);
+      res.status(500).json({ error: "Kayıtlar listelenirken hata oluştu" });
+    }
+  });
+
+  app.post("/api/sigorta/muhasebe", async (req, res) => {
+    try {
+        const body = Array.isArray(req.body) ? req.body : [req.body];
+        
+        const validItems = [];
+        for (const item of body) {
+            // Auto-generate row hash
+            const rowHash = createRowHash([
+                item.tarih, 
+                item.aciklama, 
+                item.belgeNo, 
+                item.borc, 
+                item.alacak, 
+                item.bakiye,
+                item.sirket
+            ]);
+
+            const itemWithHash = { ...item, rowHash };
+            
+            const parsed = insertSigortaMuhasebeSchema.safeParse(itemWithHash);
+            if (parsed.success) {
+                validItems.push(parsed.data);
+            } else {
+                console.warn("Invalid muhasebe item:", item, parsed.error);
+            }
+        }
+
+        if (validItems.length === 0 && body.length > 0) {
+            return res.status(400).json({ error: "Hiçbir kayıt geçerli formatta değil." });
+        }
+
+        const inserted = await storage.insertSigortaMuhasebeKayitlari(validItems);
+        res.json({ success: true, count: inserted.length });
+    } catch (err) {
+        console.error("Muhasebe kaydı eklenirken hata:", err);
+        res.status(500).json({ error: "Kayıt eklenirken hata oluştu: " + (err as Error).message });
+    }
+  });
+
+  app.delete("/api/sigorta/muhasebe", async (req, res) => {
+    try {
+       const { sirket, ay, yil } = req.query;
+       if (!sirket) return res.status(400).json({ error: "Şirket seçilmeli" });
+       
+       await storage.deleteSigortaMuhasebeKayitlari(
+         sirket as string, 
+         ay as string, 
+         yil ? parseInt(yil as string) : undefined
+       );
+       res.json({ success: true });
+    } catch (err) {
+       console.error("Muhasebe kayıtları silinirken hata:", err);
+       res.status(500).json({ error: "Kayıtlar silinirken hata oluştu" });
+    }
+  });
+
+  app.put("/api/sigorta/muhasebe/:id/match", async (req, res) => {
+      try {
+          const { eslestiMi, eslesenPolicyId } = req.body;
+          const updated = await storage.updateSigortaMuhasebeKaydi(req.params.id, {
+              eslestiMi: eslestiMi ? 1 : 0,
+              eslesenPolicyId: eslesenPolicyId || null
+          });
+          res.json(updated);
+      } catch (err) {
+          console.error("Eşleştirme güncellenirken hata:", err);
+          res.status(500).json({ error: "Eşleştirme sırasında hata oluştu" });
+      }
+  });
+
+  app.delete("/api/sigorta/muhasebe/:id", async (req, res) => {
+    try {
+        await storage.deleteSigortaMuhasebeKaydi(req.params.id);
+        res.sendStatus(204);
+    } catch (err) {
+        console.error("Muhasebe kaydı silinirken hata:", err);
+        res.status(500).json({ error: "Silme işlemi başarısız" });
+    }
+  });
+
+  app.delete("/api/sigorta/muhasebe-clear/mapfre", async (req, res) => {
+    try {
+        await storage.deleteMapfreMuhasebe();
+        res.json({ success: true });
+    } catch (err) {
+        console.error("Mapfre temizleme hatası:", err);
+        res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.get("/api/sigorta/ozet/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const summary = await storage.getSigortaOzet(parseInt(yil));
+      res.json(summary);
+    } catch (err) {
+      console.error("Sigorta özeti alınırken hata:", err);
+      // Log detailed error
+      if (err instanceof Error) {
+        console.error("Stack:", err.stack);
+      }
+      res.status(500).json({ error: "Özet alınırken hata oluştu: " + (err as Error).message });
     }
   });
 
