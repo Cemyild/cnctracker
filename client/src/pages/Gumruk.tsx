@@ -11,7 +11,8 @@ import {
   Building2, 
   ArrowUpDown, 
   ArrowUp, 
-  ArrowDown 
+  ArrowDown,
+  Bot
 } from "lucide-react";
 import { 
   Select, 
@@ -51,6 +52,7 @@ import { ExcelUploadModal } from "@/components/ExcelUploadModal";
 import { FinancialOverview } from "@/components/FinancialOverview";
 import { BackgroundPaths } from "@/components/BackgroundPaths";
 import { AdvancedChart } from "@/components/AdvancedChart";
+import { AIChat } from "@/components/AIChat";
 
         const aylar = [
         {value: "ocak", label: "Ocak", sira: 1 },
@@ -421,10 +423,18 @@ import { AdvancedChart } from "@/components/AdvancedChart";
                             <TabsTrigger value="satis">Satışlar</TabsTrigger>
                             <TabsTrigger value="giderler">Giderler</TabsTrigger>
                             <TabsTrigger value="calisanlar">
-                              <Users className="w-4 h-4" />
+                              <Users className="w-4 h-4 ml-2" />
                               Çalışanlar
                             </TabsTrigger>
+                            <TabsTrigger value="ai-asistan" className="gap-2">
+                                <Bot className="w-4 h-4" />
+                                AI Asistan
+                            </TabsTrigger>
                           </TabsList>
+
+                          <TabsContent value="ai-asistan" className="space-y-6">
+                            <AIChat />
+                          </TabsContent>
 
                           <TabsContent value="ozet" className="space-y-6">
                             {/* Filter Selectors */}

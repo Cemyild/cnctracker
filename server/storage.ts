@@ -81,6 +81,9 @@ export interface IStorage {
   updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe>;
   deleteSigortaMuhasebeKaydi(id: string): Promise<void>;
   deleteMapfreMuhasebe(): Promise<void>;
+  
+  // RAW SQL EXECUTION
+  executeRawSql(query: string): Promise<any[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -925,6 +928,15 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMapfreMuhasebe(): Promise<void> {
     await db.delete(sigortaMuhasebeKayitlari).where(eq(sigortaMuhasebeKayitlari.sirket, "Mapfre"));
+  }
+  async executeRawSql(query: string): Promise<any[]> {
+    try {
+      const result = await db.execute(sql.raw(query));
+      return result.rows;
+    } catch (error) {
+      console.error("Execute Raw SQL Error:", error);
+      throw error;
+    }
   }
 }
 

@@ -17,8 +17,10 @@ import {
   type MonthlyCalculation
 } from "@shared/salaryCalculations";
 
+
 import { PDFParse } from "pdf-parse";
 import { getTCMBExchangeRate } from "./currency"; // Helper added
+import { processUserQuery, generateNaturalLanguageResponse } from "./lib/openai";
 
 
 // Row hash oluştur - satırı benzersiz tanımlamak için
@@ -1450,6 +1452,45 @@ export async function registerRoutes(
       res.status(500).json({ error: "Veriler silinemedi" });
     }
   });
+  
+  // AI Chat Endpoint
+  app.post("/api/chat", async (req, res) => {
+    try {
+      const { message } = req.body;
+      if (!message) return res.status(400).json({ error: "Mesaj boş olamaz" });
+
+      // 1. Generate SQL
+      const { answer, sql, data } = await processUserQuery(message);
+      
+      // If direct answer (no SQL generated)
+      if (!sql) {
+        return res.json({ message: answer });
+      }
+
+      // 2. Execute SQL
+      let result = [];
+      try {
+         result = await storage.executeRawSql(sql); 
+      } catch (sqlError: any) {
+         console.error("SQL Execution Error:", sqlError);
+         return res.json({ message: "Sorgu çalıştırılırken hata oluştu: " + sqlError.message });
+      }
+
+      // 3. Generate Natural Language Response
+      const finalResponse = await generateNaturalLanguageResponse(message, sql, result);
+      
+      res.json({ 
+        message: finalResponse, 
+        sql: sql, 
+        data: result 
+      });
+
+    } catch (error: any) {
+      console.error("AI Chat Error:", error);
+      res.status(500).json({ error: "AI servisi hatası: " + error.message });
+    }
+  });
 
   return httpServer;
+
 }
