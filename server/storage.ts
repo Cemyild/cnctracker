@@ -1,7 +1,7 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, isNotNull } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -9,7 +9,8 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
 
   // Gümrük verileri
-  getGumrukVerileri(ay: string, yil: number): Promise<GumrukVerisi[]>;
+  getGumrukVerileri(ay: string, yil: number): Promise<GumrukVerisi[]>
+  getAllGumrukVerileri(): Promise<GumrukVerisi[]>;
   insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]>;
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
@@ -51,6 +52,7 @@ export interface IStorage {
   deleteGiderler(ay: string, yil: number): Promise<void>;
   updateGider(id: string, veri: Partial<InsertGiderler>): Promise<Gider>;
   getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }>;
+  getHistoricalMappings(): Promise<{ firma: string; sube: string; kategori: string }[]>;
 
   // Özet Summary
   getOzetSummary(yil: number): Promise<{
@@ -84,6 +86,22 @@ export interface IStorage {
   
   // RAW SQL EXECUTION
   executeRawSql(query: string): Promise<any[]>;
+
+  // Raporlar ve Analizler
+  getBranchProfitability(yil: number, ay?: string): Promise<any[]>;
+  getVehicleExpenses(plaka: string): Promise<any[]>;
+  getVehicleExpenses(plaka: string): Promise<any[]>;
+  getUpcomingPolicies(deadlineDays: number): Promise<any[]>;
+
+  // Maaş Planlama
+  getSalaryPlans(year: number): Promise<SalaryPlan[]>;
+  insertSalaryPlans(plans: InsertSalaryPlan[]): Promise<SalaryPlan[]>;
+
+  // Expense Categories
+  getExpenseCategories(): Promise<ExpenseCategory[]>;
+  createExpenseCategory(category: InsertExpenseCategory): Promise<ExpenseCategory>;
+  deleteExpenseCategory(id: string): Promise<void>;
+  seedExpenseCategories(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -105,6 +123,10 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(gumrukVerileri).where(
       and(eq(gumrukVerileri.ay, ay), eq(gumrukVerileri.yil, yil))
     );
+  }
+
+  async getAllGumrukVerileri(): Promise<GumrukVerisi[]> {
+    return await db.select().from(gumrukVerileri);
   }
 
   async insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]> {
@@ -740,9 +762,11 @@ export class DatabaseStorage implements IStorage {
         .groupBy(calisanlar.ay);
     }
 
-    // Create lookup maps
-    const salesMap = new Map(salesData.map(s => [s.ay, s]));
-    const expensesMap = new Map(expensesData.map(e => [e.ay, e]));
+    // Create lookup maps with normalization
+    const normalizeKey = (k: string | null) => (k || "").trim().toLowerCase();
+
+    const salesMap = new Map(salesData.map(s => [normalizeKey(s.ay), s]));
+    const expensesMap = new Map(expensesData.map(e => [normalizeKey(e.ay), e]));
 
     // Create month number to name mapping (1-12 to "ocak"-"aralik")
     const monthNumToName: Record<string, string> = {};
@@ -753,22 +777,22 @@ export class DatabaseStorage implements IStorage {
     // Create employee map with month name keys
     const employeeMap = new Map<string, typeof employeeData[0]>();
     employeeData.forEach(e => {
-      const monthName = monthNumToName[e.ay] || e.ay;
-      employeeMap.set(monthName, e);
+      const monthName = monthNumToName[e.ay || ""] || e.ay;
+      employeeMap.set(normalizeKey(monthName), e);
     });
 
-    const managementMap = new Map(managementData.map(m => [m.ay, m]));
-    // Map management data by month name as well
+    const managementMap = new Map<string, typeof managementData[0]>();
     managementData.forEach(m => {
-        const monthName = monthNumToName[m.ay] || m.ay;
-        managementMap.set(monthName, m);
+        const monthName = monthNumToName[m.ay || ""] || m.ay;
+        managementMap.set(normalizeKey(monthName), m);
     });
 
     // Build result for all 12 months
     return aylar.map(ay => {
-      const sales = salesMap.get(ay);
-      const expenses = expensesMap.get(ay);
-      const employee = employeeMap.get(ay);
+      const normalizedAy = normalizeKey(ay);
+      const sales = salesMap.get(normalizedAy);
+      const expenses = expensesMap.get(normalizedAy);
+      const employee = employeeMap.get(normalizedAy);
 
       const satisKdvHaric = parseFloat(sales?.malBedeli || "0");
       const satisKdv = parseFloat(sales?.topKdvTutar || "0");
@@ -785,7 +809,7 @@ export class DatabaseStorage implements IStorage {
         calisanNet: parseFloat(employee?.netUcret || "0"),
         calisanIsverenSgk: parseFloat(employee?.isverenSgkPayi || "0"),
         calisanMaliyet: parseFloat(employee?.toplamIsverenMaliyeti || "0"),
-        yonetimNetUcret: parseFloat(managementMap.get(ay)?.yonetimNet || "0"),
+        yonetimNetUcret: parseFloat(managementMap.get(normalizedAy)?.yonetimNet || "0"),
       };
     });
   }
@@ -936,6 +960,298 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Execute Raw SQL Error:", error);
       throw error;
+    }
+  }
+
+  async getBranchProfitability(yil: number, ay?: string): Promise<any[]> {
+    // 1. Get Income by Branch (Gümrük verileri)
+    // Join with calisanlar to get branch
+    // Note: This matches girisElemani with calisanlar.adSoyad
+    const filters = [eq(gumrukVerileri.yil, yil)];
+    if (ay && ay !== "ALL") filters.push(eq(gumrukVerileri.ay, ay));
+
+    const gumrukResult = await db.select({
+        eleman: gumrukVerileri.girisElemani,
+        malBedeli: gumrukVerileri.malBedeli,
+        gumruk: gumrukVerileri.gumruk,
+    }).from(gumrukVerileri).where(and(...filters));
+
+    // Get Employees to map element -> branch
+    const employees = await db.select({
+        adSoyad: calisanlar.adSoyad,
+        sube: calisanlar.sube,
+        maliyet: calisanlar.toplamIsverenMaliyeti,
+    }).from(calisanlar).where(and(eq(calisanlar.yil, yil), ay && ay !== "ALL" ? eq(calisanlar.ay, ay) : undefined));
+
+    const employeeMap = new Map();
+    const branchCosts = new Map();
+
+    employees.forEach(e => {
+        employeeMap.set(e.adSoyad, e.sube || "Belirsiz");
+        const maliyet = parseFloat(e.maliyet || "0");
+        branchCosts.set(e.sube || "Belirsiz", (branchCosts.get(e.sube || "Belirsiz") || 0) + maliyet);
+    });
+
+    // Customs mapping for Bursa
+    const bursaGumrukleri = [
+        "ADNAN MENDERES GÜM MÜD",
+        "ALİAĞA GÜMRÜK MÜDÜRLÜĞÜ",
+        "AYVALIK GÜMRÜK MÜDÜRLÜĞÜ",
+        "BANDIRMA GÜMRÜK MÜDÜRLÜĞÜ",
+        "BURSA GÜMRÜK MÜDÜRLÜĞÜ",
+        "EGE SERB BÖL GÜM MÜD",
+        "İNEGÖL GÜMRÜK MÜDÜRLÜĞÜ",
+        "İZMİR SERBEST BÖLGE GÜM.MÜD.",
+        "MANİSA GÜMRÜK MÜDÜRLÜĞÜ",
+        "MUDANYA GÜMRÜK MÜDÜRLÜĞÜ",
+        "KONYA GÜMRÜK MÜDÜRLÜĞÜ",
+        "ANTALYA H.L. GÜMRÜK MÜDÜRLÜĞÜ",
+        "ADANA GÜMRÜK MÜDÜRLÜĞÜ",
+        "ANKARA GÜMRÜK MÜDÜRLÜĞÜ",
+        "KAPIKULE GAR GÜMRÜK MÜDÜRLÜĞÜ",
+        "MERSİN GÜMRÜK MÜDÜRLÜĞÜ",
+        "İZMİR GÜMRÜK MÜDÜRLÜĞÜ",
+        "ESENBOĞA GÜMRÜK MÜDÜRLÜĞÜ",
+        "SİLOPİ GÜMRÜK MÜDÜRLÜĞÜ",
+        "GAZİANTEP GÜMRÜK MÜDÜRLÜĞÜ",
+        "İSKENDERUN GÜMRÜK MÜDÜRLÜĞÜ",
+        "DENİZLİ GÜMRÜK MÜDÜRLÜĞÜ",
+        "ANTAKYA GÜMRÜK MÜDÜRLÜĞÜ",
+        "HOPA GÜMRÜK MÜDÜRLÜĞÜ"
+    ];
+
+    // Customs mapping for İstanbul - İHL
+    const istIhlGumrukleri = [
+        "AHL KARGO GÜMRÜK MÜDÜRLÜĞÜ",
+        "AMBARLI GÜMRÜK MÜDÜRLÜĞÜ",
+        "AMBARLI  GÜMRÜK MÜDÜRLÜGÜ",
+        "AVRUPA SERB.BÖLGE GÜM.MÜD.",
+        "HALKALI GAR GÜMRÜK MÜD.",
+        "İSTANBUL HAVALİMANI GÜMRÜK MÜDÜRLÜĞÜ",
+        "İSTANBUL HAVALİMANI YOLCU SALONU GÜMRÜK MÜDÜRLÜĞÜ"
+    ];
+
+    // Customs mapping for Muratbey
+    const muratbeyGumrukleri = [
+        "MURATBEY GÜMRÜK MÜDÜRLÜĞÜ",
+        "TRAKYA SERB BÖL GÜM MÜD.",
+        "TEKİRDAĞ GÜMRÜK MÜDÜRLÜĞÜ",
+        "ÇERKEZKÖY GÜMRÜK MÜDÜRLÜĞÜ",
+        "MARMARA EREĞLİSİ GÜMRÜK MÜDÜRLÜĞÜ",
+        "İST. ENDÜSTRİ VE TİCARET SERBEST BÖLGE GÜM. MÜD.",
+        "İSTANBUL İHTİSAS SERBEST BÖLGE GÜMRÜK MÜDÜRLÜĞÜ"
+    ];
+
+    // Customs mapping for İstanbul - Erenköy
+    const erenkoyGumrukleri = [
+        "DERİNCE GÜMRÜK MÜDÜRLÜĞÜ",
+        "DİLOVASI GÜMRÜK MÜDÜRLÜĞÜ",
+        "ERENKÖY GÜMRÜK MÜDÜRLÜĞÜ",
+        "GEBZE GÜMRÜK MÜDÜRLÜĞÜ",
+        "HAYDARPAŞA GÜMRÜK MÜDÜRLÜĞÜ",
+        "İST DERİ SERB BÖL GÜM MÜD.",
+        "KÖRFEZ PETROKİMYA GÜMRÜK MÜD.",
+        "İZMİT GÜMRÜK MÜDÜRLÜĞÜ",
+        "SABİHA GÖKÇEN HAVALİMANI GÜM.MD.",
+        "PENDİK GÜMRÜK MÜDÜRLÜĞÜ"
+    ];
+
+    const branchIncome = new Map();
+    gumrukResult.forEach(g => {
+        let branch = "Belirsiz";
+        const gumrukUpper = (g.gumruk || "").toUpperCase();
+        
+        if (bursaGumrukleri.some(bg => gumrukUpper.includes(bg))) {
+            branch = "Bursa";
+        } else if (gumrukUpper.includes("GEMLİK")) {
+            branch = "Gemlik";
+        } else if (muratbeyGumrukleri.some(mg => gumrukUpper.includes(mg)) || gumrukUpper.includes("MURATBEY")) {
+            branch = "Muratbey";
+        } else if (erenkoyGumrukleri.some(eg => gumrukUpper.includes(eg)) || gumrukUpper.includes("ERENKÖY")) {
+            branch = "İstanbul - Erenköy";
+        } else if (istIhlGumrukleri.some(ig => gumrukUpper.includes(ig)) || gumrukUpper.includes("İHL") || gumrukUpper.includes("HAVAALANI")) {
+            branch = "İstanbul - İHL";
+        }
+
+        const gelir = parseFloat(g.malBedeli || "0");
+        branchIncome.set(branch, (branchIncome.get(branch) || 0) + gelir);
+    });
+
+    // Combine
+    const finalResult: { sube: string; gelir: number; gider: number; kar: number }[] = [];
+    const allBranches = new Set<string>([...Array.from(branchIncome.keys()), ...Array.from(branchCosts.keys())]);
+
+    allBranches.forEach(branch => {
+        const gelir = branchIncome.get(branch) || 0;
+        const gider = branchCosts.get(branch) || 0;
+        finalResult.push({
+            sube: branch,
+            gelir,
+            gider,
+            kar: gelir - gider
+        });
+    });
+
+    return finalResult;
+  }
+
+  async getVehicleExpenses(plaka: string): Promise<any[]> {
+    // Get Sigorta Policeleri for this vehicle
+    // We search the 'sigortali' or 'brans' field for the plate? 
+    // In current data, plates might be in 'sigortali' or specialized table.
+    // The user had a seed_vehicles script with plates.
+    // Let's assume we search sigortali field for plaka or use a like pattern.
+    
+    const policeler = await db.select()
+        .from(sigortaPoliceleri)
+        .where(sql`${sigortaPoliceleri.sigortali} ILIKE ${'%' + plaka + '%'}`);
+        
+    return policeler.map(p => ({
+        id: p.id,
+        policeNo: p.policeNo,
+        brans: p.brans,
+        prim: p.netPrim,
+        tarih: p.tanzimTarihi,
+        sirket: p.sirket
+    }));
+  }
+
+  async getUpcomingPolicies(deadlineDays: number): Promise<any[]> {
+    const today = new Date();
+    const futureDate = new Date();
+    futureDate.setDate(today.getDate() + deadlineDays);
+    
+    const todayStr = today.toISOString().split('T')[0];
+    const futureStr = futureDate.toISOString().split('T')[0];
+
+    // 1. Vehicle policies (trafik/kasko)
+    const araclarList = await db.select().from(araclar);
+    const reminders: { tip: string; baslik: string; tarih: string; id: string }[] = [];
+
+    araclarList.forEach(arac => {
+        if (arac.trafikBitisTarihi && arac.trafikBitisTarihi >= todayStr && arac.trafikBitisTarihi <= futureStr) {
+            reminders.push({
+                tip: "Araç (Trafik)",
+                baslik: `${arac.plaka} - Trafik Sigortası`,
+                tarih: arac.trafikBitisTarihi,
+                id: arac.id
+            });
+        }
+        if (arac.kaskoBitisTarihi && arac.kaskoBitisTarihi >= todayStr && arac.kaskoBitisTarihi <= futureStr) {
+            reminders.push({
+                tip: "Araç (Kasko)",
+                baslik: `${arac.plaka} - Kasko`,
+                tarih: arac.kaskoBitisTarihi,
+                id: arac.id
+            });
+        }
+    });
+
+    // 2. Generic policies from sigorta_policeleri? 
+    // We don't have bitisTarihi in sigorta_policeleri schema viewed above. 
+    // Let's check schema again. Oh, it only has tanzimTarihi.
+    // Usually policies are 1 year. 
+    // If user didn't ask for generic policy expiry yet, we focus on vehicles.
+    
+    return reminders.sort((a, b) => a.tarih.localeCompare(b.tarih));
+  }
+
+  // ==========================================================
+  // SALARY PLANS IMPLEMENTATION
+  // ==========================================================
+  async getSalaryPlans(year: number): Promise<SalaryPlan[]> {
+    return await db.select().from(salaryPlans).where(eq(salaryPlans.year, year));
+  }
+
+  async insertSalaryPlans(plans: InsertSalaryPlan[]): Promise<SalaryPlan[]> {
+    if (plans.length === 0) return [];
+    
+    const results: SalaryPlan[] = [];
+    // PostgreSQL Upsert
+    for (const plan of plans) {
+        const [inserted] = await db
+            .insert(salaryPlans)
+            .values(plan)
+            .onConflictDoUpdate({
+                target: [salaryPlans.tcNo, salaryPlans.year],
+                set: {
+                    netSalary: plan.netSalary,
+                    employeeType: plan.employeeType,
+                    branch: plan.branch,
+                    updatedAt: sql`CURRENT_DATE`
+                }
+            })
+            .returning();
+        results.push(inserted);
+    }
+    return results;
+  }
+
+  async getHistoricalMappings(): Promise<{ firma: string; sube: string; kategori: string }[]> {
+    const all = await db
+      .select({
+        firma: giderler.firma,
+        sube: giderler.sube,
+        kategori: giderler.kategori,
+        tarih: giderler.olusturmaTarihi
+      })
+      .from(giderler)
+      .where(
+        and(
+          isNotNull(giderler.sube), 
+          isNotNull(giderler.kategori),
+          isNotNull(giderler.firma)
+        )
+      )
+      .orderBy(desc(giderler.olusturmaTarihi));
+
+    const map = new Map<string, { firma: string; sube: string; kategori: string }>();
+    
+    for (const item of all) {
+      if (!item.firma) continue;
+      if (!map.has(item.firma)) {
+         map.set(item.firma, { 
+             firma: item.firma, 
+             sube: item.sube!, 
+             kategori: item.kategori! 
+         });
+      }
+    }
+
+    return Array.from(map.values());
+  }
+
+  // ==========================================================
+  // EXPENSE CATEGORIES IMPLEMENTATION
+  // ==========================================================
+  async getExpenseCategories(): Promise<ExpenseCategory[]> {
+    return await db.select().from(expenseCategories).orderBy(expenseCategories.name);
+  }
+
+  async createExpenseCategory(category: InsertExpenseCategory): Promise<ExpenseCategory> {
+    const [inserted] = await db.insert(expenseCategories).values(category).returning();
+    return inserted;
+  }
+
+  async deleteExpenseCategory(id: string): Promise<void> {
+    await db.delete(expenseCategories).where(eq(expenseCategories.id, id));
+  }
+
+  async seedExpenseCategories(): Promise<void> {
+    const defaults = [
+      "SU", "İNTERNET", "KARGO", "KIRTASİYE", "ELEKTRİK", "MUHASEBE", "KİRA", 
+      "YAZICI", "YEMEK", "ARAÇ BAKIM", "BİLGİSAYAR BAKIM", "SODEXO", "ARAÇ ŞARJ", 
+      "CEZA", "YAZILIM", "ARAÇ MUAYENE", "OFİS MASRAF", "DOĞALGAZ", "TONER", 
+      "FOTOKOPİ", "TELEFON", "İNDİRİM", "KAĞIT", "OTOPARK", "ISINMA", 
+      "YOL ÜCRETİ", "ARAÇ KİRA", "OFİX", "İADE", "BEYANNAME", "MESAİ YEMEK", 
+      "KURYE", "ARAÇ ALIM"
+    ];
+
+    for (const name of defaults) {
+      await db.insert(expenseCategories)
+        .values({ name })
+        .onConflictDoNothing()
+        .returning();
     }
   }
 }

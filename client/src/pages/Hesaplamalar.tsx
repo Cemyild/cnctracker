@@ -9,8 +9,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Calculator } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import type { Calisan } from "@shared/schema";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { Calisan, SalaryPlan } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 
 function formatCurrency(amount: number) {
     return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(amount);
@@ -69,8 +70,7 @@ export default function Hesaplamalar() {
 
 // --- 2026 PLANLAMA MODÜLÜ ---
 function SalaryPlanning2026() {
-    // 1. Çalışanları Çek (Aralık 2025 var mı? Yoksa en son veriyi kullanacağız)
-    // Şimdilik tüm çalışan listesini çekip benzersiz TC'ye göre filtreleyelim.
+    // 1. Çalışanları Çek
     const { data: employees, isLoading } = useQuery<Calisan[]>({
         queryKey: ["/api/calisanlar"],
         queryFn: async () => {
@@ -82,12 +82,24 @@ function SalaryPlanning2026() {
         },
     });
 
-    // Benzersiz çalışan listesi (Son kayıtlara göre)
+    const { toast } = useToast();
+    const queryClient = useQueryClient();
+
+    // 2026 Planlarını Çek
+    const { data: existingPlans } = useQuery<SalaryPlan[]>({
+        queryKey: ["/api/salary-plans/2026"],
+        queryFn: async () => {
+             const res = await fetch("/api/salary-plans/2026");
+             if (!res.ok) return [];
+             return res.json();
+        }
+    });
+
+    // Benzersiz çalışan listesi
     const uniqueEmployees = React.useMemo(() => {
         if (!employees) return [];
         const map = new Map<string, Calisan>();
         employees.forEach(emp => {
-            // Varsa üzerine yaz (Son kayıt gelsin diye umuyoruz veya tarihe bakmak lazım ama şimdilik basit tutalım)
             map.set(emp.tcNo, emp);
         });
         return Array.from(map.values());
@@ -97,9 +109,75 @@ function SalaryPlanning2026() {
     const [plannerState, setPlannerState] = React.useState<{
         [tcNo: string]: {
             netSalary: string;
-            type: "normal" | "retired";
+            type: "normal" | "retired" | "management";
         }
     }>({});
+    const [selectedBranch, setSelectedBranch] = React.useState<string>("all");
+    const [increaseRate, setIncreaseRate] = React.useState<string>("");
+
+    // Toplu Zam Uygula
+    const handleApplyIncrease = () => {
+        const rate = parseFloat(increaseRate);
+        if (isNaN(rate) || rate <= 0) return;
+
+        setPlannerState(prev => {
+            const newState = { ...prev };
+            filteredEmployees.forEach(emp => {
+                const currentNet = historical2025[emp.tcNo]?.decNet || 0;
+                if (currentNet > 0) {
+                    const newNet = currentNet + (currentNet * rate / 100);
+                    // Mevcut tipleri koru, sadece maaşı güncelle
+                    newState[emp.tcNo] = {
+                        ...newState[emp.tcNo],
+                        netSalary: newNet.toFixed(2)
+                    };
+                }
+            });
+            return newState;
+        });
+    };
+
+
+    // Kaydetme Fonksiyonu
+    const saveMutation = useMutation({
+        mutationFn: async (payload: any) => {
+             const res = await fetch("/api/salary-plans", {
+                 method: "POST",
+                 headers: { "Content-Type": "application/json" },
+                 body: JSON.stringify(payload)
+             });
+             if (!res.ok) throw new Error("Kaydetme hatası");
+             return res.json();
+        },
+        onSuccess: () => {
+             toast({
+                 title: "Başarılı",
+                 description: "2026 Maaş Planlaması kaydedildi.",
+                 variant: "default",
+                 className: "bg-green-600 text-white"
+             });
+             queryClient.invalidateQueries({ queryKey: ["/api/salary-plans/2026"] });
+        },
+        onError: () => {
+             toast({
+                 title: "Hata",
+                 description: "Kaydedilirken bir sorun oluştu.",
+                 variant: "destructive"
+             });
+        }
+    });
+
+    const handleSave = () => {
+        const data = Object.entries(plannerState).map(([tcNo, val]) => ({
+            tcNo,
+            year: 2026,
+            netSalary: val.netSalary,
+            employeeType: val.type,
+            branch: uniqueEmployees.find(e => e.tcNo === tcNo)?.sube || "Merkez"
+        }));
+
+        saveMutation.mutate({ year: 2026, data });
+    };
 
     // Varsayılanları Yükle
     React.useEffect(() => {
@@ -108,12 +186,12 @@ function SalaryPlanning2026() {
                 const newState = { ...prev };
                 uniqueEmployees.forEach(emp => {
                     if (!newState[emp.tcNo]) {
-                        // Statüye göre varsayılan tipi belirle
                         const isRetired = emp.statu === "EMEKLİ";
+                        const isManagement = emp.statu === "YÖNETİM" || emp.statu === "YÖNETİCİ";
                         
                         newState[emp.tcNo] = {
                             netSalary: "",
-                            type: isRetired ? "retired" : "normal"
+                            type: isManagement ? "management" : (isRetired ? "retired" : "normal")
                         };
                     }
                 });
@@ -121,6 +199,64 @@ function SalaryPlanning2026() {
             });
         }
     }, [uniqueEmployees]);
+
+    // Kayıtlı Verileri State'e Yükle (Eğer varsa)
+    React.useEffect(() => {
+        if (existingPlans && existingPlans.length > 0 && uniqueEmployees.length > 0) {
+             setPlannerState(prev => {
+                 const newState = { ...prev };
+                 existingPlans.forEach(plan => {
+                     // Check if employee valid
+                     const emp = uniqueEmployees.find(e => e.tcNo === plan.tcNo);
+                     if (emp) {
+                         newState[emp.tcNo] = {
+                             netSalary: plan.netSalary ? String(plan.netSalary) : "",
+                             type: (plan.employeeType as any) || "normal"
+                         };
+                     }
+                 });
+                 return newState;
+             });
+        }
+    }, [existingPlans, uniqueEmployees]);
+
+    // Filtrelenmiş Liste
+    const filteredEmployees = React.useMemo(() => {
+        if (selectedBranch === "all") return uniqueEmployees;
+        return uniqueEmployees.filter(emp => emp.sube === selectedBranch);
+    }, [uniqueEmployees, selectedBranch]);
+
+    // 2025 Geçmiş Verilerini Hazırla (Maaş ve Toplam Maliyet)
+    const historical2025 = React.useMemo(() => {
+        const data: Record<string, { decNet: number; yearlyTotalCost: number }> = {};
+        uniqueEmployees.forEach(emp => {
+            let decNet = 0;
+            // Manuel düzeltmeler (Kullanıcı isteği)
+            if (emp.adSoyad.toUpperCase().includes("CİHANGİR ÖZDEN")) {
+                decNet = 45000;
+            } else if (emp.adSoyad.toUpperCase().includes("ERCAN KAAN EREN")) {
+                decNet = 66000;
+            } else if (emp.adSoyad.toUpperCase().includes("AHMET GENCER")) {
+                decNet = 84100;
+            } else {
+                // Veritabanından Aralık 2025 verisini bul
+                const decRec = employees?.find(e => e.tcNo === emp.tcNo && (e.ay === "12" || e.ay === "aralik") && e.yil === 2025);
+                decNet = Number(decRec?.netUcret || 0);
+            }
+
+            // 2025 Yıllık Toplam Maliyet (Brüt + İşveren Payları Toplamı)
+            const yearlyRecs = employees?.filter(e => e.tcNo === emp.tcNo && e.yil === 2025) || [];
+            const yearlyTotalCost = yearlyRecs.reduce((sum, r) => {
+                const brut = Number(r.brutUcret || 0);
+                const sgk = Number(r.isverenSgkPayi || 0);
+                const issizlik = Number(r.isverenIssizlikPayi || 0);
+                return sum + brut + sgk + issizlik;
+            }, 0);
+
+            data[emp.tcNo] = { decNet, yearlyTotalCost };
+        });
+        return data;
+    }, [employees, uniqueEmployees]);
 
     // Hesaplama
     const calculations = React.useMemo(() => {
@@ -133,41 +269,74 @@ function SalaryPlanning2026() {
             const netInput = parseFloat(state.netSalary);
             
             if (!isNaN(netInput) && netInput > 0) {
-                // 12 Ay için aynı maaş
                 const monthlyNets = Array(12).fill(netInput);
                 const params: CalculationParams = {
                     employeeType: state.type,
-                    hasBes: false, // Varsayılan kapalı
-                    disabilityDegree: 0, // Varsayılan yok
-                    isTreasuryIncentiveApplied: true // Varsayılan açık (5510 %5 İndirim)
+                    hasBes: false,
+                    disabilityDegree: 0,
+                    isTreasuryIncentiveApplied: true
                 };
                 
                 const yearlyResult = calculateYearlySalary(monthlyNets, params);
                 const totalCost = yearlyResult.reduce((sum, m) => sum + m.employerCost, 0);
+                const totalGross = yearlyResult.reduce((sum, m) => sum + m.gross, 0);
+                const totalEmployerShare = yearlyResult.reduce((sum, m) => sum + (m.employerCost - m.gross), 0);
                 
                 results.push({
                     tcNo: emp.tcNo,
-                    totalCost
+                    totalCost,
+                    totalGross,
+                    totalEmployerShare
                 });
             }
         });
         return results;
     }, [uniqueEmployees, plannerState]);
 
-    const getCost = (tcNo: string) => calculations.find(c => c.tcNo === tcNo)?.totalCost || 0;
+    const getResult = (tcNo: string) => calculations.find(c => c.tcNo === tcNo);
 
     if (isLoading) return <div>Yükleniyor...</div>;
 
     return (
         <Card className="border-t-4 border-t-purple-600 shadow-lg">
             <div className="p-6 border-b bg-slate-50/50 flex justify-between items-center">
-                 <div>
+                <div>
                     <h2 className="text-xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
                         2026 Maaş Planlaması
                     </h2>
                     <p className="text-sm text-muted-foreground mt-1">
                         Aralık 2025 personel listesi baz alınmıştır.
                     </p>
+                </div>
+                <div className="flex items-end gap-4">
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs font-semibold text-slate-500 uppercase">Toplu Zam %</Label>
+                        <div className="flex items-center gap-2">
+                            <Input 
+                                className="w-20 h-9" 
+                                placeholder="%" 
+                                type="number"
+                                value={increaseRate}
+                                onChange={(e) => setIncreaseRate(e.target.value)}
+                            />
+                            <Button variant="secondary" size="sm" onClick={handleApplyIncrease} className="h-9">Uygula</Button>
+                        </div>
+                    </div>
+                    <div className="w-px h-10 bg-slate-200 mx-2"></div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs font-semibold text-slate-500 uppercase">Şube Filtresi</Label>
+                        <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+                        <SelectTrigger className="w-[200px] h-9">
+                            <SelectValue placeholder="Tüm Şubeler" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Tüm Şubeler</SelectItem>
+                            {Array.from(new Set(uniqueEmployees.map(e => e.sube))).filter(Boolean).map(sube => (
+                                <SelectItem key={sube!} value={sube!}>{sube}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    </div>
                 </div>
             </div>
 
@@ -177,14 +346,19 @@ function SalaryPlanning2026() {
                         <TableRow>
                             <TableHead className="w-[200px]">Ad Soyad</TableHead>
                             <TableHead className="w-[150px]">Çalışan Tipi</TableHead>
+                            <TableHead className="w-[150px]">2025 Net Maaş</TableHead>
                             <TableHead className="w-[150px]">2026 Net Maaş</TableHead>
-                            <TableHead className="text-right">Yıllık Toplam İşveren Maliyeti</TableHead>
+                            <TableHead className="w-[100px] text-center">Fark %</TableHead>
+                            <TableHead className="w-[150px] text-right">Yıllık Toplam Brüt</TableHead>
+                            <TableHead className="w-[150px] text-right">Yıllık İşveren Payı</TableHead>
+                            <TableHead className="w-[150px] text-right text-slate-500">2025 Yıllık Maliyet</TableHead>
+                            <TableHead className="w-[150px] text-right">2026 Yıllık Maliyet</TableHead>
+                            <TableHead className="w-[100px] text-center">Değişim %</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {uniqueEmployees.map(emp => {
+                        {filteredEmployees.map(emp => {
                             const state = plannerState[emp.tcNo] || { netSalary: "", type: "normal" };
-                            const cost = getCost(emp.tcNo);
 
                             return (
                                 <TableRow key={emp.tcNo}>
@@ -205,8 +379,14 @@ function SalaryPlanning2026() {
                                             <SelectContent>
                                                 <SelectItem value="normal">Normal</SelectItem>
                                                 <SelectItem value="retired">Emekli (SGDP)</SelectItem>
+                                                <SelectItem value="management">Yönetim (Huzur Hakkı)</SelectItem>
                                             </SelectContent>
                                         </Select>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="text-sm font-semibold text-slate-600 bg-slate-100 p-1 px-2 rounded text-center">
+                                            {historical2025[emp.tcNo]?.decNet > 0 ? formatCurrency(historical2025[emp.tcNo].decNet) : "-"}
+                                        </div>
                                     </TableCell>
                                     <TableCell>
                                         <Input 
@@ -221,21 +401,116 @@ function SalaryPlanning2026() {
                                             }
                                         />
                                     </TableCell>
+                                    <TableCell className="text-center font-semibold text-slate-500">
+                                        {(() => {
+                                            const net26 = parseFloat(state.netSalary);
+                                            const net25 = historical2025[emp.tcNo]?.decNet;
+                                            if (!isNaN(net26) && net25 > 0) {
+                                                const diff = ((net26 / net25) - 1) * 100;
+                                                return <span className={diff > 0 ? "text-green-600" : "text-blue-600"}>%{diff.toFixed(1)}</span>;
+                                            }
+                                            return "-";
+                                        })()}
+                                    </TableCell>
+                                    <TableCell className="text-right text-muted-foreground">
+                                        {getResult(emp.tcNo)?.totalGross ? formatCurrency(getResult(emp.tcNo)!.totalGross) : "-"}
+                                    </TableCell>
+                                    <TableCell className="text-right text-muted-foreground">
+                                        {getResult(emp.tcNo)?.totalEmployerShare ? formatCurrency(getResult(emp.tcNo)!.totalEmployerShare) : "-"}
+                                    </TableCell>
+                                    <TableCell className="text-right text-slate-400">
+                                        {historical2025[emp.tcNo]?.yearlyTotalCost > 0 ? formatCurrency(historical2025[emp.tcNo].yearlyTotalCost) : "-"}
+                                    </TableCell>
                                     <TableCell className="text-right font-bold text-blue-700">
-                                        {cost > 0 ? formatCurrency(cost) : "-"}
+                                        {getResult(emp.tcNo)?.totalCost ? formatCurrency(getResult(emp.tcNo)!.totalCost) : "-"}
+                                    </TableCell>
+                                    <TableCell className="text-center font-bold">
+                                        {(() => {
+                                            const cost26 = getResult(emp.tcNo)?.totalCost;
+                                            const cost25 = historical2025[emp.tcNo]?.yearlyTotalCost;
+                                            if (cost26 && cost25 > 0) {
+                                                const diff = ((cost26 / cost25) - 1) * 100;
+                                                return <span className={diff > 30 ? "text-red-600" : "text-slate-600"}>%{diff.toFixed(1)}</span>;
+                                            }
+                                            return "-";
+                                        })()}
                                     </TableCell>
                                 </TableRow>
                             );
                         })}
                         {/* TOPLAM SATIRI */}
+                        {/* TOTAL COMPARISON ROWS */}
+                        {/* 1. MONTHLY NET TOTALS */}
                         <TableRow className="bg-slate-100 font-bold border-t-2 border-slate-400">
-                            <TableCell colSpan={3} className="text-right">GENEL TOPLAM:</TableCell>
+                             <TableCell colSpan={2} className="text-right text-slate-500 italic pb-0 pt-4">Aylık Net Toplamlar:</TableCell>
+                             
+                             {/* 2025 Dec Net Sum (Col 2) */}
+                             <TableCell className="text-center text-slate-600 underline pb-0 pt-4">
+                                 {formatCurrency(filteredEmployees.reduce((sum, emp) => sum + (historical2025[emp.tcNo]?.decNet || 0), 0))}
+                             </TableCell>
+                             
+                             {/* 2026 Monthly Net Sum (Col 3) */}
+                             <TableCell className="text-center text-blue-700 underline pb-0 pt-4">
+                                {formatCurrency(filteredEmployees.reduce((sum, emp) => {
+                                    const val = parseFloat(plannerState[emp.tcNo]?.netSalary || "0");
+                                    return sum + (isNaN(val) ? 0 : val);
+                                }, 0))}
+                             </TableCell>
+
+                             {/* Change % (Col 4) */}
+                             <TableCell className="text-center text-slate-500 pb-0 pt-4">
+                                {(() => {
+                                    const net26 = filteredEmployees.reduce((sum, emp) => {
+                                        const val = parseFloat(plannerState[emp.tcNo]?.netSalary || "0");
+                                        return sum + (isNaN(val) ? 0 : val);
+                                    }, 0);
+                                    const net25 = filteredEmployees.reduce((sum, emp) => sum + (historical2025[emp.tcNo]?.decNet || 0), 0);
+                                    if (net26 > 0 && net25 > 0) {
+                                        const diff = ((net26 / net25) - 1) * 100;
+                                        return <span className={diff > 30 ? "text-red-600" : "text-slate-600"}>%{diff.toFixed(1)}</span>;
+                                    }
+                                    return "-";
+                                })()}
+                             </TableCell>
+                             
+                             <TableCell colSpan={5} className="pb-0 pt-4"></TableCell>
+                        </TableRow>
+
+                        {/* 2. ANNUAL TOTALS */}
+                        <TableRow className="bg-slate-100 font-bold">
+                            <TableCell colSpan={7} className="text-right text-slate-500 italic">Yıllık Toplam Maliyetler:</TableCell>
+                            
+                            {/* 2025 Annual Cost (Col 7) */}
+                            <TableCell className="text-right text-slate-500">
+                                {formatCurrency(filteredEmployees.reduce((sum, emp) => sum + (historical2025[emp.tcNo]?.yearlyTotalCost || 0), 0))}
+                            </TableCell>
+
+                            {/* 2026 Annual Cost (Col 8) */}
                             <TableCell className="text-right text-blue-900 text-lg">
-                                {formatCurrency(calculations.reduce((a, b) => a + b.totalCost, 0))}
+                                {formatCurrency(calculations.filter(c => filteredEmployees.some(e => e.tcNo === c.tcNo)).reduce((a, b) => a + b.totalCost, 0))}
+                            </TableCell>
+                            
+                            {/* Comparison % (Col 9) */}
+                            <TableCell className="text-center">
+                                {(() => {
+                                    const c26 = calculations.filter(c => filteredEmployees.some(e => e.tcNo === c.tcNo)).reduce((a, b) => a + b.totalCost, 0);
+                                    const c25 = filteredEmployees.reduce((sum, emp) => sum + (historical2025[emp.tcNo]?.yearlyTotalCost || 0), 0);
+                                    if (c26 > 0 && c25 > 0) {
+                                        const diff = ((c26 / c25) - 1) * 100;
+                                        return <span className="text-blue-900 underline">%{diff.toFixed(1)}</span>;
+                                    }
+                                    return "-";
+                                })()}
                             </TableCell>
                         </TableRow>
                     </TableBody>
                 </Table>
+            </div>
+            
+            <div className="p-4 bg-slate-50 border-t flex justify-end">
+                <Button onClick={handleSave} disabled={saveMutation.isPending} className="bg-green-600 hover:bg-green-700 text-white w-40">
+                    {saveMutation.isPending ? "Kaydediliyor..." : "Kaydet"}
+                </Button>
             </div>
         </Card>
     );
@@ -286,7 +561,7 @@ function SalaryCalculator() {
                             <Label>Çalışan Tipi</Label>
                             <Select 
                                 value={params.employeeType} 
-                                onValueChange={(v: "normal" | "retired") => setParams({...params, employeeType: v})}
+                                onValueChange={(v: "normal" | "retired" | "management") => setParams({...params, employeeType: v})}
                             >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Seçiniz" />
@@ -294,6 +569,7 @@ function SalaryCalculator() {
                                 <SelectContent>
                                     <SelectItem value="normal">Normal Çalışan</SelectItem>
                                     <SelectItem value="retired">Emekli (SGDP)</SelectItem>
+                                    <SelectItem value="management">Yönetim (Huzur Hakkı)</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -481,12 +757,15 @@ function SalaryCalculator() {
                                         </TableRow>
                                         
                                         <TableRow>
-                                            <TableCell className="border-r sticky left-0 bg-background font-semibold">İşveren SGK Payı ({params.employeeType === 'retired'? '24.75%' : (params.isTreasuryIncentiveApplied ? '19.75%' : '21.75%')})</TableCell>
-                                            {results.map((r, i) => <TableCell key={i} className="text-right text-slate-700">{formatCurrency(r.employerCost - r.gross - (params.employeeType === 'retired' ? 0 : r.gross * 0.02))}</TableCell>)}
+                                            <TableCell className="border-r sticky left-0 bg-background font-semibold">İşveren SGK Payı ({
+                                                params.employeeType === 'management' ? '%0' : 
+                                                (params.employeeType === 'retired' ? '24.75%' : (params.isTreasuryIncentiveApplied ? '19.75%' : '21.75%'))
+                                            })</TableCell>
+                                            {results.map((r, i) => <TableCell key={i} className="text-right text-slate-700">{formatCurrency(r.employerCost - r.gross - (params.employeeType === 'retired' || params.employeeType === 'management' ? 0 : r.gross * 0.02))}</TableCell>)}
                                             <TableCell className="text-right text-slate-700 font-bold">-</TableCell> 
                                         </TableRow>
 
-                                        {params.employeeType !== 'retired' && (
+                                        {params.employeeType !== 'retired' && params.employeeType !== 'management' && (
                                             <TableRow>
                                                 <TableCell className="border-r sticky left-0 bg-background font-semibold">İşveren İşsizlik Payı (%2)</TableCell>
                                                 {results.map((r, i) => <TableCell key={i} className="text-right text-slate-700">{formatCurrency(r.gross * 0.02)}</TableCell>)}

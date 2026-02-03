@@ -5,7 +5,7 @@ import multer from "multer";
 import { type IStorage } from "./storage";
 import * as XLSX from "xlsx";
 
-import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema } from "@shared/schema";
+import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, aylar } from "@shared/schema";
 import { createHash } from "crypto";
 import { z } from "zod";
 import {
@@ -44,6 +44,217 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // Trend Analysis Endpoint
+  app.get("/api/gumruk/analiz", async (req, res) => {
+    try {
+      const churnMonths = req.query.churnMonths ? parseInt(req.query.churnMonths as string) : 2;
+      const allData = await storage.getAllGumrukVerileri();
+      
+      const parseBalance = (val: string | null | undefined): number => {
+          if (!val) return 0;
+          // If it's already a clean number-like string (no dots/commas mixed weirdly), Number() might work
+          // But to be safe for "1.234,56":
+          // 1. Remove dots (thousands)
+          // 2. Replace comma with dot
+          
+          let v = String(val).trim();
+          if (!v) return 0;
+
+          // Check format
+          if (v.includes(",") && v.includes(".")) {
+             // Likely 1.234,56 (TR) or 1,234.56 (US)
+             // Determine which is last.
+             const lastDot = v.lastIndexOf(".");
+             const lastComma = v.lastIndexOf(",");
+             
+             if (lastComma > lastDot) {
+                 // 1.234,56 -> TR format
+                 v = v.replace(/\./g, "").replace(",", ".");
+             } else {
+                 // 1,234.56 -> US format
+                 v = v.replace(/,/g, "");
+             }
+          } else if (v.includes(",")) {
+              // 123,56 -> TR decimal? or 123,456 US thousand?
+              // Usually in this app context, comma is decimal.
+              v = v.replace(",", ".");
+          }
+          // If only dots? "1.200" -> TR thousand? or US low decimal? 
+          // Assuming TR app: dots are thousands remover.
+          // BUT wait, if val is "1200.50" (standard DB decimal string), removing dot makes it 120050.
+          else if (v.includes(".")) {
+               // Standard DB return for decimal type is "1234.56".
+               // So if we have JUST dots, it's ambiguous without context, but valid JS number string is dot-decimal.
+               // We will trust Number() for dot-only strings unless we know it's TR formatting.
+               // For safety in this specific DB context: `decimal` type returns "1234.56".
+               // So we typically don't need to strip dots if it comes from DB driver as `decimal`.
+               // HOWEVER, if it was saved as text "1.234", then it's problem.
+               // Given schema is `decimal`, Drizzle/PG returns "1234.56".
+          }
+
+          const parsed = parseFloat(v);
+          return isNaN(parsed) ? 0 : parsed;
+      };
+
+      if (allData.length === 0) {
+        return res.json({ alerts: [], risingTrends: [], fallingTrends: [] });
+      }
+
+      // 1. Determine "Current" Date (Max Date in DB)
+      let maxYil = 0;
+      let maxAyIndex = -1;
+
+      const getAyIndex = (ayStr: string) => aylar.findIndex(a => a.value === ayStr);
+
+      allData.forEach(d => {
+        if (d.yil > maxYil) {
+          maxYil = d.yil;
+          maxAyIndex = getAyIndex(d.ay);
+        } else if (d.yil === maxYil) {
+          const idx = getAyIndex(d.ay);
+          if (idx > maxAyIndex) maxAyIndex = idx;
+        }
+      });
+      
+      // If no valid date found
+      if (maxYil === 0 || maxAyIndex === -1) {
+         return res.json({ alerts: [], risingTrends: [], fallingTrends: [] });
+      }
+
+      // Convert a date (year, monthIdx) to absolute month count for easy diff
+      const toAbsMonth = (y: number, mIdx: number) => y * 12 + mIdx;
+      
+      const currentAbs = toAbsMonth(maxYil, maxAyIndex);
+      
+      // Define Periods
+      // Current Period: Last 3 Months (inclusive of current) -> [current-2, current]
+      // Previous Period: The 3 months before that -> [current-5, current-3]
+      
+      const firms = new Map<string, {
+         name: string;
+         volCurrent: number; // Last 3 months
+         volPrev: number;    // Previous 3 months
+         lastSeenAbs: number;
+         firstSeenAbs: number;
+         totalVol: number;
+      }>();
+
+      for (const d of allData) {
+         if (!d.firmaUnvan) continue;
+         const fName = d.firmaUnvan;
+         
+         if (!firms.has(fName)) {
+            firms.set(fName, { 
+                name: fName, 
+                volCurrent: 0, 
+                volPrev: 0, 
+                lastSeenAbs: -1, 
+                firstSeenAbs: 9999999,
+                totalVol: 0
+            });
+         }
+         
+         const firm = firms.get(fName)!;
+         const dAyIdx = getAyIndex(d.ay);
+         if (dAyIdx === -1) continue;
+         
+         const dAbs = toAbsMonth(d.yil, dAyIdx);
+         
+         // Use robust parsing
+         const vol = parseBalance(d.malBedeli); 
+
+         firm.totalVol += vol;
+
+         // Update Last/First Seen
+         if (dAbs > firm.lastSeenAbs) firm.lastSeenAbs = dAbs;
+         if (dAbs < firm.firstSeenAbs) firm.firstSeenAbs = dAbs;
+
+         // Bin into periods
+         // Current: [currentAbs - 2, currentAbs]
+         if (dAbs >= currentAbs - 2 && dAbs <= currentAbs) {
+            firm.volCurrent += vol;
+         }
+         // Previous: [currentAbs - 5, currentAbs - 3]
+         else if (dAbs >= currentAbs - 5 && dAbs <= currentAbs - 3) {
+            firm.volPrev += vol;
+         }
+      }
+
+      const alerts: any[] = [];
+      const trends: any[] = [];
+
+      firms.forEach(f => {
+         // ALERTS
+         
+         // 1. Churn Risk: Active before (LastSeen < current-churnMonths)
+         // But within a relevant window so we don't show ancient history for short queries.
+         // Sliding window: Look back (churnMonths + 3) max.
+         // e.g. If churn=3, show inactive for 3..6 months. (Excludes 9mo).
+         const lookbackLimit = currentAbs - (churnMonths + 3);
+         
+         const isRelevant = f.lastSeenAbs >= lookbackLimit;
+         const isInactive = f.lastSeenAbs <= (currentAbs - churnMonths); 
+         
+         if (isRelevant && isInactive) {
+             const inactiveMonths = Math.floor(currentAbs - f.lastSeenAbs);
+             alerts.push({
+                 type: "churn_risk",
+                 company: f.name,
+                 message: `Son işlem: ${inactiveMonths} ay önce`,
+                 severity: "high"
+             });
+         }
+
+         // 2. New Customer: First seen in last 3 months
+         if (f.firstSeenAbs >= (currentAbs - 2)) {
+             alerts.push({
+                 type: "new_customer",
+                 company: f.name,
+                 message: "Yeni Müşteri",
+                 severity: "success"
+             });
+         }
+         
+         // TRENDS
+         // Calculate Growth if volume exists in both periods or at least current
+         if (f.volCurrent > 0 || f.volPrev > 0) {
+             let growthPct = 0;
+             if (f.volPrev > 0) {
+                 growthPct = ((f.volCurrent - f.volPrev) / f.volPrev) * 100;
+             } else if (f.volCurrent > 0) {
+                 growthPct = 100; // New or reactivated
+             }
+
+             // Only relevant if significant volume (e.g. > 1000 TL to avoid noise)
+             if (f.volCurrent + f.volPrev > 1000) { 
+                 trends.push({
+                     company: f.name,
+                     currentVol: f.volCurrent,
+                     prevVol: f.volPrev,
+                     growth: growthPct,
+                     absGrowth: f.volCurrent - f.volPrev
+                 });
+             }
+         }
+      });
+
+      // Sort and Split Trends
+      const risingTrends = trends.filter(t => t.growth > 0).sort((a, b) => b.growth - a.growth).slice(0, 50);
+      const fallingTrends = trends.filter(t => t.growth < 0).sort((a, b) => a.growth - b.growth).slice(0, 50);
+
+      res.json({
+         currentPeriodLabel: "Son 3 Ay",
+         alerts,
+         risingTrends,
+         fallingTrends
+      });
+
+    } catch (e) {
+      console.error("Analiz hatası:", e);
+      res.status(500).json({ error: "Analiz yapılamadı" });
+    }
+  });
 
   // N8N Webhook Receiver (Gelen otomatik verileri dinler) - EN USTTE OLMALI
   app.post("/api/nakliye/webhook-receiver", async (req, res) => {
@@ -446,6 +657,75 @@ export async function registerRoutes(
       res.status(500).json({ error: "Veriler silinemedi" });
     }
   });
+
+
+  
+  // ============================================================================
+  // MAAŞ PLANLAMA API'LERİ
+  // ============================================================================
+  
+  app.get("/api/salary-plans/:year", async (req, res) => {
+    try {
+      const year = parseInt(req.params.year);
+      const plans = await storage.getSalaryPlans(year);
+      res.json(plans);
+    } catch (err) {
+      console.error("Maaş planları alınırken hata:", err);
+      res.status(500).json({ error: "Veriler alınamadı" });
+    }
+  });
+
+  app.post("/api/salary-plans", async (req, res) => {
+    try {
+      // Body: { year: 2026, data: [{ tcNo: "123", netSalary: 50000, ... }] }
+      const { year, data } = req.body;
+      
+      if (!year || !data || !Array.isArray(data)) {
+        return res.status(400).json({ error: "Geçersiz format" });
+      }
+
+      const validItems = [];
+      const _year = parseInt(year);
+
+      for (let index = 0; index < data.length; index++) {
+        const item = data[index];
+         // Decimal fields should be strings for precision in Drizzle/Zod usually,
+         // but let's handle both. toFixed(2) ensures string format "123.45"
+         
+         const planItem = {
+            ...item,
+            year: _year,
+            netSalary: item.netSalary ? Number(item.netSalary).toFixed(2) : "0.00",
+            // branch: item.sube ?? item.branch 
+         };
+         
+         // Basic validation
+         const parsed = insertSalaryPlanSchema.safeParse(planItem);
+         if (parsed.success) {
+            validItems.push(parsed.data);
+         } else {
+            console.warn(`Invalid salary plan item at index ${index}:`, parsed.error);
+            // Collect errors to debug
+            if (index < 3) console.log("Sample invalid item:", planItem); 
+         }
+      }
+
+      if (validItems.length > 0) {
+        console.log(`Saving ${validItems.length} salary plans for ${year}...`);
+        const result = await storage.insertSalaryPlans(validItems);
+        console.log(`Saved ${result.length} plans.`);
+        res.json({ success: true, count: result.length });
+      } else {
+        console.warn("No valid salary plans found in payload.");
+        res.json({ success: false, count: 0, message: "Kaydedilecek geçerli veri bulunamadı. Lütfen veri formatını kontrol edin." });
+      }
+
+    } catch (err) {
+      console.error("Maaş planları kaydedilirken hata:", err);
+      res.status(500).json({ error: "Kaydetme başarısız" });
+    }
+  });
+
 
   // Fix January 2025 employee costs (one-time fix endpoint)
   app.post("/api/calisanlar/fix-january-2025", async (req, res) => {
@@ -1080,6 +1360,64 @@ export async function registerRoutes(
     }
   });
 
+  // Expense Categories Endpoints
+  // Get all categories
+  app.get("/api/categories", async (req, res) => {
+    try {
+      // Ensure seed logic runs (lite version of idempotency)
+      // Usually better to run on server start, but to avoid modifying index.ts heavily, we trigger here if empty?
+      // Actually storage.seedExpenseCategories uses ON CONFLICT DO NOTHING, so it's safe to call.
+      // Or we just rely on calling it once. Let's call it here for the first time to ensure user sees data.
+      await storage.seedExpenseCategories(); 
+      const categories = await storage.getExpenseCategories();
+      res.json(categories);
+    } catch (error) {
+      console.error("Kategoriler alınırken hata:", error);
+      res.status(500).json({ error: "Kategoriler alınamadı" });
+    }
+  });
+
+  // Add category
+  app.post("/api/categories", async (req, res) => {
+    try {
+      const parsed = insertExpenseCategorySchema.parse(req.body);
+      const newCategory = await storage.createExpenseCategory(parsed);
+      res.json(newCategory);
+    } catch (error) {
+      console.error("Kategori eklenirken hata:", error);
+      // Handle unique constraint error
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+         return res.status(409).json({ error: "Bu kategori zaten mevcut" });
+      }
+      res.status(500).json({ error: "Kategori eklenemedi" });
+    }
+  });
+
+  // Delete category
+  app.delete("/api/categories/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteExpenseCategory(id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Kategori silinirken hata:", error);
+      res.status(500).json({ error: "Kategori silinemedi" });
+    }
+  });
+
+  // Gider Güncelleme
+  app.put("/api/giderler/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const veri = req.body;
+      const updated = await storage.updateGider(id, veri);
+      res.json(updated);
+    } catch (error) {
+      console.error("Gider güncellenirken hata:", error);
+      res.status(500).json({ error: "Gider güncellenemedi" });
+    }
+  });
+
   // Gider Excel Yükle
   app.post("/api/giderler/upload", upload.single("excel"), async (req, res) => {
     try {
@@ -1099,7 +1437,10 @@ export async function registerRoutes(
       const parsedVeriler: any[] = [];
       const currentYear = new Date().getFullYear(); // Default if needed, but we look at date
 
-      // A: Tarih, B: Firma, C: Fatura No, D: Mal Bedeli, E: KDV, F: Toplam, G: Para Birimi
+      // Fetch Historical Mappings once
+      const historicalMappings = await storage.getHistoricalMappings();
+
+      // A: Tarih, B: Firma, C: Fatura No, D: Mal Bedeli, E: KDV, F: Toplam, G: Para Birimi, H: Şube, I: Kategori
       for (const row of dataRows) {
         if (!row[0] || !row[1]) continue; // Skip empty rows
 
@@ -1123,6 +1464,17 @@ export async function registerRoutes(
         const kdvTutari = safeParseFloat(row[4]);
         const toplamTutar = safeParseFloat(row[5]);
         const paraBirimi = String(row[6] || "TRY").trim().toUpperCase();
+        let sube = row[7] ? String(row[7]).trim() : null;
+        let kategori = row[8] ? String(row[8]).trim() : null;
+
+        // Auto-Categorization Logic
+        if (!sube || !kategori) {
+           const map = historicalMappings.find((m: { firma: string }) => m.firma === firma);
+           if (map) {
+             if (!sube && map.sube) sube = map.sube;
+             if (!kategori && map.kategori) kategori = map.kategori;
+           }
+        }
 
         // Date Parsing Logic
         if (typeof row[0] === 'number') {
@@ -1174,6 +1526,8 @@ export async function registerRoutes(
           paraBirimi,
           kur,
           tryTutar,
+          sube,
+          kategori,
           ay,
           yil
         });
@@ -1209,62 +1563,116 @@ export async function registerRoutes(
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+      const data = XLSX.utils.sheet_to_json(sheet) as any[]; // Row objects
 
-      if (data.length < 2) {
+      if (data.length === 0) {
         return res.status(400).json({ error: "Excel dosyası boş veya geçersiz" });
       }
 
-      // İlk satır başlıklar, 2. satırdan itibaren veriler
       const veriler: InsertGumrukVerisi[] = [];
 
-      for (let i = 1; i < data.length; i++) {
-        const row = data[i];
-        if (!row || row.length === 0) continue;
+      for (const row of data) {
+         // Skip empty-ish rows (must have basics)
+         if (!row["FİRMA ÜNVAN"] && !row["FATURA NO"]) continue;
 
-        // Boş satırları atla
-        if (!row[1] && !row[2]) continue;
+         const parseNumber = (val: any): string | null => {
+           if (val === undefined || val === null || val === "") return null;
+           if (typeof val === 'number') return val.toFixed(2);
+           const str = String(val).trim();
+           if (!str) return null;
+           // Handle 1.234,56 (TR) vs 1234.56
+           // If dot and comma exist, assume dot=thousand, comma=decimal (TR) or vice versa? 
+           // Standard approach for this user's locale seems to be TR (comma decimal)
+           // If clean number in string, parseFloat works. 
+           // If "1.000,50" -> replace dots, replace comma with dot -> "1000.50"
+           let clean = str;
+           if (str.includes(",") && str.includes(".")) {
+              // Likely TR
+              clean = str.replace(/\./g, "").replace(",", ".");
+           } else if (str.includes(",")) {
+              clean = str.replace(",", ".");
+           }
+           const num = parseFloat(clean);
+           return isNaN(num) ? null : num.toFixed(2);
+         };
 
-        const parseNumber = (val: any): string | null => {
-          if (val === undefined || val === null || val === "") return null;
-          const num = parseFloat(String(val).replace(",", "."));
-          return isNaN(num) ? null : num.toFixed(2);
-        };
+         // Row hash - using object values might vary order but usually consistent. 
+         // Better to hash specific key columns for stable deduplication
+         const rowHash = createRowHash(Object.values(row));
 
-        // Row hash oluştur
-        const rowHash = createRowHash(row);
+         // Tip Mapping
+         let tipRaw = row["TİP"] ? String(row["TİP"]).trim() : "Diğer";
+         let tip = "Diğer";
+         const tr = tipRaw.toUpperCase();
+         if (tr === "T" || tr === "İTHALAT") tip = "İthalat";
+         else if (tr === "H" || tr === "İHRACAT") tip = "İhracat";
+         else if (tr === "@" || tr === "TRANSİT") tip = "Transit";
+         else if (tr === "A") tip = "Serbest B. Giriş";
+         else if (tr === "B") tip = "Serbest B. Çıkış";
+         else tip = "Diğer";
 
-        // Tip Mapping
-        let tip = row[0] ? String(row[0]).trim() : "Diğer";
-        if (tip === "T" || tip === "t") tip = "İthalat";
-        else if (tip === "H") tip = "İhracat";
-        else if (tip === "@") tip = "Transit";
-        else if (tip === "A") tip = "Serbest B. Giriş";
-        else if (tip === "B") tip = "Serbest B. Çıkış";
-        else tip = "Diğer";
+         const g = (key: string) => row[key] ? String(row[key]).trim() : null;
 
-        veriler.push({
-          ay,
-          yil,
-          tip,
-          dosyaNo: row[1] ? String(row[1]).trim() : null,
-          firmaUnvan: row[2] ? String(row[2]).trim() : null,
-          rejim: row[3] ? String(row[3]).trim() : null,
-          faturaNo: row[4] ? String(row[4]).trim() : null,
-          faturaTarihi: row[5] ? String(row[5]).trim() : null,
-          gumruk: row[6] ? String(row[6]).trim() : null,
-          tescilTarihi: row[7] ? String(row[7]).trim() : null,
-          tescilNo: row[8] ? String(row[8]).trim() : null,
-          faturayiKesen: row[9] ? String(row[9]).trim() : null,
-          dovizKiymeti: row[10] ? String(row[10]).trim() : null,
-          doviz: row[11] ? String(row[11]).trim() : null,
-          girisElemani: row[12] ? String(row[12]).trim() : null,
-          malBedeli: parseNumber(row[13]),
-          topIskonto: parseNumber(row[14]),
-          topKdvTutar: parseNumber(row[15]),
-          topFaturaTutar: parseNumber(row[16]),
-          rowHash,
-        });
+         veriler.push({
+           ay,
+           yil,
+           rowHash,
+           tip,
+           dosyaNo: g("DOSYA NO"),
+           firmaUnvan: g("FİRMA ÜNVAN"),
+           rejim: g("REJİM"),
+           faturaNo: g("FATURA NO"),
+           faturaTarihi: g("FATURA TARİHİ"),
+           gumruk: g("GÜMRÜK"),
+           tescilTarihi: g("TESCİL TARİHİ"),
+           tescilNo: g("TESCİL NO"),
+           faturayiKesen: g("FATURAYI KESEN"),
+           dovizKiymeti: g("DOVİZ KIYMETİ"),
+           doviz: g("DOVİZ"),
+           girisElemani: g("GİRİŞ ELEMANI"),
+           
+           malBedeli: parseNumber(row["MAL BEDELİ"]),
+           topIskonto: parseNumber(row["TOP İSKONTO"]),
+           topKdvTutar: parseNumber(row["TOP KDV TUTAR"]),
+           topFaturaTutar: parseNumber(row["TOP FATURA TUTAR"]),
+
+           // New Fields
+           firmaNo: g("FİRMA NO"),
+           firmaOzellik: g("FİRMA ÖZELLİK"),
+           hesapNo: g("HesapNo"),
+           malinCinsi: g("MALIN CİNSİ"),
+           referansNo: g("REFERANS NO"),
+           houseNo: g("HOUSE NO"),
+           konteynerSayisi: g("KONTEYNER SAYISI"),
+           siraNo: g("SIRA NO"),
+           faturaKesimTarihi: g("FATURA KESİM TARİHİ"),
+           valorTarihi: g("VALÖR TARİHİ"),
+           mensei: g("MENŞEİ"),
+           cifKiymet: parseNumber(row["CIF KIYMET"]),
+           tasimaCinsi: g("TAŞIMA CİNSİ"),
+           kapAdedi: g("KAP ADEDİ"),
+           tasitCinsi: g("TAŞIT CİNSİ"),
+           kalemSayisi: g("KALEM SAY"),
+           mm: g("MM"),
+           ydFirma: g("YD FİRMA"),
+           istKiymet: parseNumber(row["İST KIYMET"]),
+           kullanici: g("KULLANICI"),
+           araKonsNo: g("ARA KONŞ NO"),
+           accountNo: g("ACCOUNT NO"),
+           vd: g("VD"),
+           vn: g("VN"),
+           fe: g("FE"),
+           sm: g("SM"),
+           odemeSekli: g("ÖDEME ŞEK."),
+           kur: parseNumber(row["KUR"]),
+           supalan: g("SUPALAN"),
+           musFatura: g("MÜŞ FATURA"),
+           komisyonHesap: g("KomisyonHesap"),
+           isTf: g("isTF"),
+           imalatci: g("Imalatci"),
+           tevkifatKod: g("TEVKİFAT KOD"),
+           poNo: g("Po No"),
+         });
       }
 
       if (veriler.length === 0) {
@@ -1453,6 +1861,38 @@ export async function registerRoutes(
     }
   });
   
+  // Raporlar ve Analizler endpoint'leri
+  app.get("/api/reports/branch-profitability", async (req, res) => {
+    try {
+      const yil = parseInt(req.query.yil as string) || new Date().getFullYear();
+      const ay = req.query.ay as string;
+      const data = await storage.getBranchProfitability(yil, ay);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Şube kârlılık raporu alınamadı" });
+    }
+  });
+
+  app.get("/api/reports/vehicle-expenses/:plaka", async (req, res) => {
+    try {
+      const { plaka } = req.params;
+      const data = await storage.getVehicleExpenses(plaka);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Araç masraf raporu alınamadı" });
+    }
+  });
+
+  app.get("/api/reports/reminders", async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 60; // 60 days default
+      const data = await storage.getUpcomingPolicies(days);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Hatırlatıcılar alınamadı" });
+    }
+  });
+
   // AI Chat Endpoint
   app.post("/api/chat", async (req, res) => {
     try {

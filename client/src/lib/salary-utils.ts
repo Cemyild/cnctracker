@@ -52,7 +52,7 @@ export const MIN_WAGE_EXEMPTIONS_2026 = [
 ];
 
 export interface CalculationParams {
-  employeeType: "normal" | "retired";
+  employeeType: "normal" | "retired" | "management";
   hasBes: boolean;
   disabilityDegree: 0 | 1 | 2 | 3;
   isTreasuryIncentiveApplied?: boolean; // 5510 %2 İndirimi
@@ -130,6 +130,9 @@ export function calculateNetFromGross(
     if (employeeType === "retired") {
         workerSgkRate = RETIRED_WORKER_SGK_RATE; // 7.5%
         workerUnempRate = RETIRED_WORKER_UNEMPLOYMENT_RATE; // 0%
+    } else if (employeeType === "management") {
+        workerSgkRate = 0;
+        workerUnempRate = 0;
     }
 
     const sgkWorker = sgkBase * workerSgkRate;
@@ -167,6 +170,9 @@ export function calculateNetFromGross(
     
     if (employeeType === "retired") {
         employerSgkRate = 0.2475; // SGDP İşveren Standart (24.75%)
+        employerUnempRate = 0;
+    } else if (employeeType === "management") {
+        employerSgkRate = 0;
         employerUnempRate = 0;
     } else {
         // Normal Çalışan

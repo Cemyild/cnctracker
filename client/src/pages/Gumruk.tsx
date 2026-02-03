@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { type Calisan, type Gider, type GumrukVerisi } from "@shared/schema";
+import { type Calisan, type Gider, type GumrukVerisi, subeler } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 import { 
   TrendingUp, 
   FileSpreadsheet, 
@@ -12,8 +13,15 @@ import {
   ArrowUpDown, 
   ArrowUp, 
   ArrowDown,
-  Bot
+  Bot,
+  AlertTriangle,
+  Lightbulb,
+  TrendingDown,
+  Pencil,
+  Target
 } from "lucide-react";
+import { GiderEditModal } from "@/components/GiderEditModal";
+import { Badge } from "@/components/ui/badge";
 import { 
   Select, 
   SelectContent, 
@@ -52,6 +60,7 @@ import { ExcelUploadModal } from "@/components/ExcelUploadModal";
 import { FinancialOverview } from "@/components/FinancialOverview";
 import { BackgroundPaths } from "@/components/BackgroundPaths";
 import { AdvancedChart } from "@/components/AdvancedChart";
+import { AnalysisTab } from "@/components/AnalysisTab";
 import { AIChat } from "@/components/AIChat";
 
         const aylar = [
@@ -130,6 +139,40 @@ import { AIChat } from "@/components/AIChat";
                 const [selectedGiderAy, setSelectedGiderAy] = useState<string>("");
                   const [selectedGiderYil, setSelectedGiderYil] = useState<string>(String(currentYear));
                     const [sortConfig, setSortConfig] = useState<{ key: keyof Gider | 'tryTutar' | null; direction: 'asc' | 'desc' }>({key: null, direction: 'asc' });
+                    const [editingGider, setEditingGider] = useState<Gider | null>(null);
+                    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+                    const { toast } = useToast();
+
+                    const { data: categories } = useQuery<{id: string, name: string}[]>({
+                        queryKey: ["/api/categories"],
+                    });
+
+                    const handleInlineUpdate = async (id: string, field: 'sube' | 'kategori', value: string) => {
+                        try {
+                            const response = await fetch(`/api/giderler/${id}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ [field]: value })
+                            });
+
+                            if (!response.ok) throw new Error("Update failed");
+
+                            toast({
+                                title: "Başarılı",
+                                description: "Kayıt güncellendi",
+                                duration: 2000,
+                            });
+                            
+                            refetchGiderler();
+                            refetchGiderStats();
+                        } catch (error) {
+                            toast({
+                                title: "Hata",
+                                description: "Güncelleme sırasında hata oluştu",
+                                variant: "destructive",
+                            });
+                        }
+                    };
 
                     // Yüklü ayları getir
                     const {data: yukluAylar, refetch: refetchAylar } = useQuery<
@@ -430,11 +473,29 @@ import { AIChat } from "@/components/AIChat";
                                 <Bot className="w-4 h-4" />
                                 AI Asistan
                             </TabsTrigger>
+                            <TabsTrigger value="analiz" className="gap-2">
+                                <TrendingUp className="w-4 h-4" />
+                                Trend Analizi
+                            </TabsTrigger>
+                            <TabsTrigger value="projeksiyon" className="gap-2">
+                                <Target className="w-4 h-4" />
+                                Analiz
+                            </TabsTrigger>
                           </TabsList>
 
                           <TabsContent value="ai-asistan" className="space-y-6">
                             <AIChat />
                           </TabsContent>
+
+                          <TabsContent value="analiz" className="space-y-6">
+                             <TrendAnalysis />
+                          </TabsContent>
+
+                          <TabsContent value="projeksiyon" className="space-y-6">
+                             <AnalysisTab />
+                          </TabsContent>
+
+
 
                           <TabsContent value="ozet" className="space-y-6">
                             {/* Filter Selectors */}
@@ -1239,6 +1300,13 @@ import { AIChat } from "@/components/AIChat";
                                         <TableHead className="cursor-pointer hover:bg-muted/50 text-right" onClick={() => handleSort('tryTutar')}>
                                           <div className="flex items-center justify-end">TRY Tutar <SortIcon column="tryTutar" /></div>
                                         </TableHead>
+                                        <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('sube')}>
+                                          <div className="flex items-center">Şube <SortIcon column="sube" /></div>
+                                        </TableHead>
+                                        <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('kategori')}>
+                                          <div className="flex items-center">Kategori <SortIcon column="kategori" /></div>
+                                        </TableHead>
+                                        <TableHead className="w-[50px]"></TableHead>
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -1266,6 +1334,41 @@ import { AIChat } from "@/components/AIChat";
                                             <TableCell>{gider.paraBirimi}</TableCell>
                                             <TableCell className="text-right">{Number(gider.kur).toFixed(4)}</TableCell>
                                             <TableCell className="text-right font-bold">{formatCurrency(gider.tryTutar)}</TableCell>
+                                            <TableCell className="p-2">
+                                              <Select 
+                                                defaultValue={gider.sube || ""} 
+                                                onValueChange={(val) => handleInlineUpdate(gider.id, 'sube', val)}
+                                              >
+                                                <SelectTrigger className="h-8 w-[130px]">
+                                                  <SelectValue placeholder="Seçiniz" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  {subeler.map((s) => (
+                                                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                            </TableCell>
+                                            <TableCell className="p-2">
+                                               <Select 
+                                                defaultValue={gider.kategori || ""} 
+                                                onValueChange={(val) => handleInlineUpdate(gider.id, 'kategori', val)}
+                                              >
+                                                <SelectTrigger className="h-8 w-[140px]">
+                                                  <SelectValue placeholder="Seçiniz" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  {categories?.map((c) => (
+                                                    <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                            </TableCell>
+                                            <TableCell>
+                                              <Button variant="ghost" size="icon" onClick={() => { setEditingGider(gider); setIsEditModalOpen(true); }}>
+                                                <Pencil className="w-4 h-4" />
+                                              </Button>
+                                            </TableCell>
                                           </TableRow>
                                         ))
                                       )}
@@ -1284,6 +1387,16 @@ import { AIChat } from "@/components/AIChat";
                               uploadUrl="/api/giderler/upload"
                               title="Gider Excel Yükle"
                               description="Muhasebe gider kayıtlarını içeren Excel dosyasını yükleyin."
+                            />
+
+                            <GiderEditModal
+                              open={isEditModalOpen}
+                              onOpenChange={setIsEditModalOpen}
+                              gider={editingGider}
+                              onSuccess={() => {
+                                refetchGiderler();
+                                refetchGiderStats();
+                              }}
                             />
                           </TabsContent>
 
@@ -1515,4 +1628,264 @@ import { AIChat } from "@/components/AIChat";
                           )}
                         </div>
                         );
+}
+
+function TrendAnalysis() {
+  const [churnMonths, setChurnMonths] = useState("2");
+  const { data, isLoading } = useQuery<{ risingTrends: any[], fallingTrends: any[], alerts: any[], currentPeriodLabel: string }>({ 
+    queryKey: [`/api/gumruk/analiz?churnMonths=${churnMonths}`] 
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!data?.risingTrends && !data?.fallingTrends && !data?.alerts) {
+    return (
+        <div className="flex flex-col items-center justify-center min-h-[400px] text-muted-foreground border-2 border-dashed rounded-lg">
+            <TrendingUp className="w-12 h-12 mb-4 opacity-50" />
+            <p>Analiz verisi bulunamadı.</p>
+        </div>
+    )
+  }
+
+  const { alerts, risingTrends, fallingTrends, currentPeriodLabel } = data;
+  
+  // Sort Churn Alerts: Longest inactive time first
+  const churnAlerts = alerts
+    .filter((a: any) => a.type === 'churn_risk')
+    .sort((a: any, b: any) => {
+        // Extract month count from message "Son işlem: X ay önce"
+        const getMonth = (msg: string) => {
+            const match = msg.match(/(\d+)/);
+            return match ? parseInt(match[0]) : 0;
+        };
+        return getMonth(b.message) - getMonth(a.message);
+    });
+
+  const newCustomerAlerts = alerts.filter((a: any) => a.type === 'new_customer');
+
+  // Trend Table Component
+  const TrendTable = ({ trends = [], isRising, defaultSortField = 'currentVol' }: { trends: any[], isRising: boolean, defaultSortField?: 'currentVol' | 'prevVol' }) => {
+    const [sortField, setSortField] = useState<'currentVol' | 'prevVol' | 'growth' | 'absGrowth'>(defaultSortField);
+    const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+    const sortedTrends = [...trends].sort((a, b) => {
+        const valA = a[sortField];
+        const valB = b[sortField];
+        return sortDirection === 'asc' ? valA - valB : valB - valA;
+    });
+
+    const handleSort = (field: 'currentVol' | 'prevVol' | 'growth' | 'absGrowth') => {
+        if (sortField === field) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortDirection('desc');
+        }
+    };
+    
+    return (
+    <Card>
+        <CardContent className="p-0">
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Firma</TableHead>
+                        <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('currentVol')}>
+                             <div className="flex items-center justify-end gap-1">
+                                Son Dönem Hacim ({currentPeriodLabel})
+                                {sortField === 'currentVol' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                             </div>
+                        </TableHead>
+                        <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('prevVol')}>
+                             <div className="flex items-center justify-end gap-1">
+                                Önceki Dönem
+                                {sortField === 'prevVol' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                             </div>
+                        </TableHead>
+                        <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('growth')}>
+                             <div className="flex items-center justify-end gap-1">
+                                Büyüme
+                                {sortField === 'growth' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                             </div>
+                        </TableHead>
+                        <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('absGrowth')}>
+                             <div className="flex items-center justify-end gap-1">
+                                Fark (TL)
+                                {sortField === 'absGrowth' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                             </div>
+                        </TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {!sortedTrends || sortedTrends.length === 0 ? (
+                        <TableRow><TableCell colSpan={5} className="text-center py-8">Veri yok</TableCell></TableRow>
+                    ) : sortedTrends.map((t: any, i: number) => (
+                        <TableRow key={i}>
+                            <TableCell className="font-medium">{t.company}</TableCell>
+                            <TableCell className="text-right font-bold">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(t.currentVol)}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(t.prevVol)}</TableCell>
+                            <TableCell className="text-right">
+                                <Badge variant={t.growth > 0 ? "secondary" : "destructive"} className={t.growth > 0 ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}>
+                                    {t.growth > 0 ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
+                                    %{t.growth.toFixed(1)}
+                                </Badge>
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${t.absGrowth > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {t.absGrowth > 0 ? '+' : ''}{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(t.absGrowth)}
+                            </TableCell>
+                        </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </CardContent>
+    </Card>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <Tabs defaultValue="risks" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="risks" className="gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                Riskli Şirketler ({churnAlerts.length})
+            </TabsTrigger>
+            <TabsTrigger value="new" className="gap-2">
+                <Lightbulb className="w-4 h-4 text-yellow-500" />
+                Yeni Şirketler ({newCustomerAlerts.length})
+            </TabsTrigger>
+            <TabsTrigger value="rising" className="gap-2">
+                <TrendingUp className="w-4 h-4 text-green-500" />
+                Yükselen Şirketler ve Trendler
+            </TabsTrigger>
+            <TabsTrigger value="falling" className="gap-2">
+                <TrendingDown className="w-4 h-4 text-red-500" />
+                Düşüşteki Şirketler ve Trendler
+            </TabsTrigger>
+        </TabsList>
+        
+        {/* RISKLI SIRKETLER */}
+        <TabsContent value="risks" className="space-y-4 mt-6">
+            <div className="flex items-center justify-between mb-4 bg-muted/30 p-4 rounded-lg border">
+                <div>
+                     <h3 className="text-lg font-semibold flex items-center gap-2">
+                        <AlertTriangle className="w-5 h-5 text-red-500" /> 
+                        Kaybetme Riski Olan Şirketler
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">Belirlenen süre boyunca işlem yapmayan eski müşteriler.</p>
+                </div>
+               
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium whitespace-nowrap">Risk Süresi (Ay):</span>
+                    <Select value={churnMonths} onValueChange={setChurnMonths}>
+                        <SelectTrigger className="w-[80px]">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="2">2</SelectItem>
+                            <SelectItem value="3">3</SelectItem>
+                            <SelectItem value="4">4</SelectItem>
+                            <SelectItem value="5">5</SelectItem>
+                            <SelectItem value="6">6</SelectItem>
+                            <SelectItem value="9">9</SelectItem>
+                            <SelectItem value="12">12</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {churnAlerts.length === 0 ? (
+                <div className="col-span-3 text-center py-10 text-muted-foreground border-2 border-dashed rounded-lg">
+                    <TrendingUp className="w-8 h-8 mb-2 mx-auto opacity-30" />
+                    Belirlenen kriterlere uyan riskli şirket bulunamadı.
+                </div>
+            ) : (
+                churnAlerts.map((alert: any, i: number) => (
+                <Card key={i} className="border-l-4 border-l-red-500">
+                    <CardHeader className="pb-2">
+                        <div className="flex justify-between items-start">
+                            <CardTitle className="text-base font-bold">{alert.company}</CardTitle>
+                            <Badge variant="destructive">Risk</Badge>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex items-center gap-2 text-sm text-red-600 font-medium">
+                            <AlertTriangle className="w-4 h-4" />
+                            <span>{alert.message}</span>
+                        </div>
+                    </CardContent>
+                </Card>
+                ))
+            )}
+            </div>
+        </TabsContent>
+
+        {/* YENI SIRKETLER */}
+        <TabsContent value="new" className="space-y-4 mt-6">
+             <div className="mb-4 bg-muted/30 p-4 rounded-lg border">
+                 <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <Lightbulb className="w-5 h-5 text-yellow-500" /> 
+                    Portföye Yeni Katılanlar (Son 3 Ay)
+                </h3>
+            </div>
+             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {newCustomerAlerts.length === 0 ? (
+                 <div className="col-span-3 text-center py-10 text-muted-foreground border-2 border-dashed rounded-lg">
+                    Yeni müşteri bulunamadı.
+                </div>
+            ) : (
+                newCustomerAlerts.map((alert: any, i: number) => (
+                <Card key={i} className="border-l-4 border-l-green-500">
+                    <CardHeader className="pb-2">
+                        <div className="flex justify-between items-start">
+                             <CardTitle className="text-base font-bold">{alert.company}</CardTitle>
+                             <Badge className="bg-green-500 hover:bg-green-600">Yeni</Badge>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex items-center gap-2 text-sm text-green-600 font-medium">
+                            <TrendingUp className="w-4 h-4" />
+                            <span>{alert.message}</span>
+                        </div>
+                    </CardContent>
+                </Card>
+                ))
+            )}
+            </div>
+        </TabsContent>
+
+        {/* YUKSELEN TRENDLER */}
+        <TabsContent value="rising" className="space-y-4 mt-6">
+            <div className="mb-4 bg-muted/30 p-4 rounded-lg border">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-green-500" /> 
+                    Yükselen Şirketler ve Trendler (Son 3 Ay)
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">İşlem hacmini en çok artıran şirketler.</p>
+            </div>
+            <TrendTable trends={risingTrends || []} isRising={true} defaultSortField="currentVol" />
+        </TabsContent>
+
+        {/* DUSUSTEKI TRENDLER */}
+        <TabsContent value="falling" className="space-y-4 mt-6">
+             <div className="mb-4 bg-muted/30 p-4 rounded-lg border">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <TrendingDown className="w-5 h-5 text-red-500" /> 
+                    Düşüşteki Şirketler ve Trendler (Son 3 Ay)
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">İşlem hacmi en çok azalan şirketler.</p>
+            </div>
+            <TrendTable trends={fallingTrends || []} isRising={false} defaultSortField="prevVol" />
+        </TabsContent>
+
+      </Tabs>
+    </div>
+  );
 }

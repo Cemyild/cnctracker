@@ -39,6 +39,44 @@ export const gumrukVerileri = pgTable("gumruk_verileri", {
   topIskonto: decimal("top_iskonto", { precision: 15, scale: 2 }),
   topKdvTutar: decimal("top_kdv_tutar", { precision: 15, scale: 2 }),
   topFaturaTutar: decimal("top_fatura_tutar", { precision: 15, scale: 2 }), // Mal Bedeli + KDV
+  
+  // New Columns from "Satışlar Excel Temp.xlsx"
+  firmaNo: text("firma_no"),
+  firmaOzellik: text("firma_ozellik"),
+  hesapNo: text("hesap_no"),
+  malinCinsi: text("malin_cinsi"),
+  referansNo: text("referans_no"),
+  houseNo: text("house_no"),
+  konteynerSayisi: text("konteyner_sayisi"),
+  siraNo: text("sira_no"),
+  faturaKesimTarihi: text("fatura_kesim_tarihi"),
+  valorTarihi: text("valor_tarihi"),
+  mensei: text("mensei"),
+  cifKiymet: decimal("cif_kiymet", { precision: 15, scale: 2 }),
+  tasimaCinsi: text("tasima_cinsi"),
+  kapAdedi: text("kap_adedi"),
+  tasitCinsi: text("tasit_cinsi"),
+  kalemSayisi: text("kalem_sayisi"),
+  mm: text("mm"),
+  ydFirma: text("yd_firma"),
+  istKiymet: decimal("ist_kiymet", { precision: 15, scale: 2 }),
+  kullanici: text("kullanici"),
+  araKonsNo: text("ara_kons_no"),
+  accountNo: text("account_no"),
+  vd: text("vd"),
+  vn: text("vn"),
+  fe: text("fe"),
+  sm: text("sm"),
+  odemeSekli: text("odeme_sekli"),
+  kur: decimal("kur", { precision: 10, scale: 4 }),
+  supalan: text("supalan"),
+  musFatura: text("mus_fatura"),
+  komisyonHesap: text("komisyon_hesap"),
+  isTf: text("is_tf"),
+  imalatci: text("imalatci"),
+  tevkifatKod: text("tevkifat_kod"),
+  poNo: text("po_no"),
+
   rowHash: text("row_hash").notNull(), // Satırı benzersiz tanımlayan hash
 }, (table) => [
   uniqueIndex("gumruk_verileri_ay_yil_hash_idx").on(table.ay, table.yil, table.rowHash),
@@ -72,6 +110,7 @@ export const subeler = [
   "Gemlik",
   "İstanbul - Erenköy",
   "İstanbul - İHL",
+  "Muratbey",
   "Yönetim"
 ];
 
@@ -169,6 +208,8 @@ export const giderler = pgTable("giderler", {
   paraBirimi: text("para_birimi").default("TRY"), // TRY, USD, EUR
   kur: decimal("kur", { precision: 10, scale: 4 }).default("1"), // Kullanılan kur
   tryTutar: decimal("try_tutar", { precision: 15, scale: 2 }), // TRY karşılığı (Toplam Tutar * Kur)
+  sube: text("sube"), // Şube
+  kategori: text("kategori"), // Kategori (Nakliye, Ardiye, vb.)
   ay: text("ay").notNull(),
   yil: integer("yil").notNull(),
   olusturmaTarihi: date("olusturma_tarihi").default(sql`CURRENT_DATE`),
@@ -240,3 +281,37 @@ export const insertSigortaMuhasebeSchema = createInsertSchema(sigortaMuhasebeKay
 export type InsertSigortaMuhasebe = z.infer<typeof insertSigortaMuhasebeSchema>;
 export type SigortaMuhasebe = typeof sigortaMuhasebeKayitlari.$inferSelect;
 
+
+// Maaş Planlama Tablosu (Yıllık bazda)
+export const salaryPlans = pgTable("salary_plans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tcNo: text("tc_no").notNull(),
+  year: integer("year").notNull(),
+  netSalary: decimal("net_salary", { precision: 15, scale: 2 }), // Kullanıcının girdiği hedef net
+  employeeType: text("employee_type").default("normal"), // normal, retired, management
+  branch: text("branch"), // Planlama anındaki şube bilgisi (snapshot)
+  updatedAt: date("updated_at").default(sql`CURRENT_DATE`),
+}, (table) => [
+  uniqueIndex("salary_plans_tc_year_idx").on(table.tcNo, table.year),
+]);
+
+export const insertSalaryPlanSchema = createInsertSchema(salaryPlans).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type InsertSalaryPlan = z.infer<typeof insertSalaryPlanSchema>;
+export type SalaryPlan = typeof salaryPlans.$inferSelect;
+
+// Expense Categories Table
+export const expenseCategories = pgTable("expense_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+});
+
+export const insertExpenseCategorySchema = createInsertSchema(expenseCategories).omit({
+  id: true,
+});
+
+export type InsertExpenseCategory = z.infer<typeof insertExpenseCategorySchema>;
+export type ExpenseCategory = typeof expenseCategories.$inferSelect;
