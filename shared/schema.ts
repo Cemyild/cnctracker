@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, decimal, date, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, decimal, date, integer, uniqueIndex, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -16,6 +16,25 @@ export const insertUserSchema = createInsertSchema(users).pick({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+// Gümrük Dosyaları tablosu (Yüklenen Excel'lerin takibi)
+export const gumrukDosyalar = pgTable("gumruk_dosyalar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  filename: text("filename").notNull(),
+  filepath: text("filepath").notNull(), // Sunucudaki fiziksel yol
+  uploadDate: timestamp("upload_date").defaultNow(),
+  sizeBytes: integer("size_bytes"),
+  recordCount: integer("record_count"), // Kaç satır import edildi
+  md5Hash: text("md5_hash"), // Dosya değişimi kontrolü için
+});
+
+export const insertGumrukDosyaSchema = createInsertSchema(gumrukDosyalar).omit({
+  id: true,
+  uploadDate: true,
+});
+
+export type InsertGumrukDosya = z.infer<typeof insertGumrukDosyaSchema>;
+export type GumrukDosya = typeof gumrukDosyalar.$inferSelect;
 
 // Gümrük verileri tablosu
 export const gumrukVerileri = pgTable("gumruk_verileri", {
@@ -77,6 +96,12 @@ export const gumrukVerileri = pgTable("gumruk_verileri", {
   tevkifatKod: text("tevkifat_kod"),
   poNo: text("po_no"),
 
+  // Link to Source File
+  dosyaId: varchar("dosya_id").references(() => gumrukDosyalar.id),
+  
+  // Archival Field
+  rawData: text("raw_data"), // Stores the full original row as JSON string
+
   rowHash: text("row_hash").notNull(), // Satırı benzersiz tanımlayan hash
 }, (table) => [
   uniqueIndex("gumruk_verileri_ay_yil_hash_idx").on(table.ay, table.yil, table.rowHash),
@@ -118,12 +143,21 @@ export const subeler = [
 export const araclar = pgTable("araclar", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   plaka: text("plaka").notNull().unique(),
+  marka: text("marka"),
+  model: text("model"),
+  sube: text("sube"), // Şube
   // Trafik Sigortası
+  trafikSigortaSirketi: text("trafik_sigorta_sirketi"),
   trafikPoliceNo: text("trafik_police_no"),
   trafikBitisTarihi: text("trafik_bitis_tarihi"),
+  trafikSigortaFiyat: decimal("trafik_sigorta_fiyat", { precision: 15, scale: 2 }),
   // Kasko
+  kaskoSigortaSirketi: text("kasko_sigorta_sirketi"),
   kaskoPoliceNo: text("kasko_police_no"),
   kaskoBitisTarihi: text("kasko_bitis_tarihi"),
+  kaskoSigortaFiyat: decimal("kasko_sigorta_fiyat", { precision: 15, scale: 2 }),
+  // Ruhsat
+  ruhsatDosyasi: text("ruhsat_dosyasi"),
 });
 
 export const insertAracSchema = createInsertSchema(araclar).omit({
@@ -132,6 +166,26 @@ export const insertAracSchema = createInsertSchema(araclar).omit({
 
 export type InsertArac = z.infer<typeof insertAracSchema>;
 export type Arac = typeof araclar.$inferSelect;
+
+// Araç Giderleri tablosu
+export const aracGiderler = pgTable("arac_giderler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  aracId: varchar("arac_id").references(() => araclar.id, { onDelete: 'cascade' }).notNull(),
+  tarih: text("tarih").notNull(), // YYYY-MM-DD
+  kategori: text("kategori").notNull(), // Yakıt, Bakım, Vergi, Diğer
+  aciklama: text("aciklama"),
+  tutar: decimal("tutar", { precision: 15, scale: 2 }).notNull(),
+  kilometre: integer("kilometre"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertAracGiderSchema = createInsertSchema(aracGiderler).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+
+export type InsertAracGider = z.infer<typeof insertAracGiderSchema>;
+export type AracGider = typeof aracGiderler.$inferSelect;
 
 // Nakliye verileri tablosu
 export const nakliyeVerileri = pgTable("nakliye_verileri", {
@@ -152,6 +206,16 @@ export const nakliyeVerileri = pgTable("nakliye_verileri", {
   musteri: text("musteri"), // Eşleştirilen/Düzeltilen Müşteri
   konteynerler: text("konteynerler"), // Eşleştirilen/Düzeltilen Konteynerler (Virgülle ayrılmış)
   rawJson: text("raw_json"), // Her ihtimale karşı tüm veriyi saklamak için
+  
+  // Gümrük Eşleşme Verileri
+  ilgiliDosyaNo: text("ilgili_dosya_no"),
+  gumrukFirmaUnvan: text("gumruk_firma_unvan"),
+  gumrukAdi: text("gumruk_adi"),
+  gumrukDovizKiymeti: text("gumruk_doviz_kiymeti"),
+  gumrukDovizCinsi: text("gumruk_doviz_cinsi"),
+  gumrukTescilNo: text("gumruk_tescil_no"),
+  gumrukTescilTarihi: text("gumruk_tescil_tarihi"),
+  eslesenHouseNo: text("eslesen_house_no"),
 });
 
 export const insertNakliyeVerisiSchema = createInsertSchema(nakliyeVerileri).omit({

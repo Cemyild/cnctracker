@@ -8,7 +8,8 @@ import { calculateYearlySalary, CalculationParams, SalaryResult, calculateNetFro
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Calculator } from "lucide-react";
+import { Calculator, Download } from "lucide-react";
+import * as XLSX from "xlsx";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Calisan, SalaryPlan } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
@@ -177,6 +178,135 @@ function SalaryPlanning2026() {
         }));
 
         saveMutation.mutate({ year: 2026, data });
+    };
+
+    // Excel Export
+    const handleExportExcel = () => {
+        // 1. Prepare Data
+        const rows = filteredEmployees.map(emp => {
+            const state = plannerState[emp.tcNo] || { netSalary: "", type: "normal" };
+            const net26 = parseFloat(state.netSalary);
+            const net25 = historical2025[emp.tcNo]?.decNet || 0;
+            const res = getResult(emp.tcNo);
+            const cost26 = res?.totalCost || 0;
+            const cost25 = historical2025[emp.tcNo]?.yearlyTotalCost || 0;
+            
+            // Calculate differences for raw data (formulas will be applied in Excel)
+            const netDiff = (net26 && net25) ? ((net26 / net25) - 1) : 0;
+            const costDiff = (cost26 && cost25) ? ((cost26 / cost25) - 1) : 0;
+
+            return {
+                "Ad Soyad": emp.adSoyad,
+                "Şube": emp.sube || "Merkez",
+                "Çalışan Tipi": state.type === "retired" ? "Emekli" : (state.type === "management" ? "Yönetim" : "Normal"),
+                "2025 Net Maaş": net25,
+                "2026 Net Maaş": net26 || 0,
+                // Formulas will be injected later, placeholders here
+                "Fark %": netDiff, 
+                "Yıllık Toplam Brüt": res?.totalGross || 0,
+                "Yıllık İşveren Payı": res?.totalEmployerShare || 0,
+                "2025 Yıllık Maliyet": cost25,
+                "2026 Yıllık Maliyet": cost26,
+                "Değişim %": costDiff
+            };
+        });
+
+        // Add Total Row Data
+        // Note: For Excel, we'll usually place totals at the bottom. 
+        // We will create the worksheet and then modify cells for formulas.
+
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+
+        // Adjust Column Widths
+        const wscols = [
+            { wch: 25 }, // Ad Soyad
+            { wch: 15 }, // Şube
+            { wch: 15 }, // Tipi
+            { wch: 15 }, // 2025 Net
+            { wch: 15 }, // 2026 Net
+            { wch: 10 }, // Fark %
+            { wch: 15 }, // Yıllık Brüt
+            { wch: 15 }, // Yıllık İşveren
+            { wch: 15 }, // 2025 Maliyet
+            { wch: 15 }, // 2026 Maliyet
+            { wch: 10 }  // Değişim %
+        ];
+        worksheet['!cols'] = wscols;
+
+        // Add Formulas
+        // Data starts at row 2 (row 1 is header)
+        // range is filteredEmployees.length
+        
+        const range = XLSX.utils.decode_range(worksheet['!ref']!);
+        
+        for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+            // Row number in Excel (1-indexed)
+            const rowNum = R + 1; 
+            
+            // F column (Fark %) = (E - D) / D  --> (2026 Net / 2025 Net) - 1
+            // D is col index 3, E is col index 4. F is index 5.
+            const cellRef2025Net = XLSX.utils.encode_cell({r: R, c: 3});
+            const cellRef2026Net = XLSX.utils.encode_cell({r: R, c: 4});
+            const cellRefFark = XLSX.utils.encode_cell({r: R, c: 5});
+
+            // Set formula for "Fark %"
+            // IF(D2>0, (E2/D2)-1, 0)
+            worksheet[cellRefFark] = { t: 'n', f: `IF(${cellRef2025Net}>0,(${cellRef2026Net}/${cellRef2025Net})-1,0)`, z: '0.0%' };
+
+            // K column (Değişim %) = (J - I) / I
+            // I is col index 8, J is col index 9. K is index 10.
+            const cellRef2025Cost = XLSX.utils.encode_cell({r: R, c: 8});
+            const cellRef2026Cost = XLSX.utils.encode_cell({r: R, c: 9});
+            const cellRefDegisim = XLSX.utils.encode_cell({r: R, c: 10});
+
+             worksheet[cellRefDegisim] = { t: 'n', f: `IF(${cellRef2025Cost}>0,(${cellRef2026Cost}/${cellRef2025Cost})-1,0)`, z: '0.0%' };
+             
+             // Format other numbers
+             // 2025 Net
+             worksheet[cellRef2025Net].z = '#,##0.00';
+             // 2026 Net
+             worksheet[cellRef2026Net].z = '#,##0.00';
+             // Yıllık Brüt, İşveren Payı, 2025 Cost, 2026 Cost
+             worksheet[XLSX.utils.encode_cell({r: R, c: 6})].z = '#,##0.00';
+             worksheet[XLSX.utils.encode_cell({r: R, c: 7})].z = '#,##0.00';
+             worksheet[cellRef2025Cost].z = '#,##0.00';
+             worksheet[cellRef2026Cost].z = '#,##0.00';
+        }
+
+        // Add Total Row at the bottom
+        const totalRowIdx = range.e.r + 1;
+        
+        // Label
+        worksheet[XLSX.utils.encode_cell({r: totalRowIdx, c: 0})] = { v: "TOPLAM", t: 's', s: { font: { bold: true } } };
+        
+        // Sum Formulas
+        const numericCols = [3, 4, 6, 7, 8, 9]; // indices of columns to sum
+        numericCols.forEach(c => {
+            const start = XLSX.utils.encode_cell({r: 1, c: c});
+            const end = XLSX.utils.encode_cell({r: totalRowIdx - 1, c: c});
+            const cell = XLSX.utils.encode_cell({r: totalRowIdx, c: c});
+            worksheet[cell] = { t: 'n', f: `SUM(${start}:${end})`, z: '#,##0.00' };
+        });
+
+        // Total Percentage Formulas
+        // Fark % for Totals
+        const total2025NetRef = XLSX.utils.encode_cell({r: totalRowIdx, c: 3});
+        const total2026NetRef = XLSX.utils.encode_cell({r: totalRowIdx, c: 4});
+        const totalFarkRef = XLSX.utils.encode_cell({r: totalRowIdx, c: 5});
+        worksheet[totalFarkRef] = { t: 'n', f: `IF(${total2025NetRef}>0,(${total2026NetRef}/${total2025NetRef})-1,0)`, z: '0.0%' };
+
+        // Değişim % for Totals
+        const total2025CostRef = XLSX.utils.encode_cell({r: totalRowIdx, c: 8});
+        const total2026CostRef = XLSX.utils.encode_cell({r: totalRowIdx, c: 9});
+        const totalDegisimRef = XLSX.utils.encode_cell({r: totalRowIdx, c: 10});
+        worksheet[totalDegisimRef] = { t: 'n', f: `IF(${total2025CostRef}>0,(${total2026CostRef}/${total2025CostRef})-1,0)`, z: '0.0%' };
+
+        // Update range
+        worksheet['!ref'] = XLSX.utils.encode_range({s: {c:0, r:0}, e: {c: 10, r: totalRowIdx}});
+
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "2026 Maaş Planı");
+        XLSX.writeFile(workbook, "2026-Maas-Planlamasi.xlsx");
     };
 
     // Varsayılanları Yükle
@@ -508,6 +638,10 @@ function SalaryPlanning2026() {
             </div>
             
             <div className="p-4 bg-slate-50 border-t flex justify-end">
+                <Button onClick={handleExportExcel} variant="outline" className="mr-2 border-green-600 text-green-700 hover:bg-green-50">
+                    <Download className="mr-2 h-4 w-4" />
+                    Excel İndir
+                </Button>
                 <Button onClick={handleSave} disabled={saveMutation.isPending} className="bg-green-600 hover:bg-green-700 text-white w-40">
                     {saveMutation.isPending ? "Kaydediliyor..." : "Kaydet"}
                 </Button>

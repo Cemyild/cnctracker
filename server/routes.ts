@@ -4,8 +4,26 @@ import { storage } from "./storage";
 import multer from "multer";
 import { type IStorage } from "./storage";
 import * as XLSX from "xlsx";
+import fs from "fs";
+import path from "path";
+import express from "express";
 
-import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, aylar } from "@shared/schema";
+const ruhsatStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = "uploads/ruhsat";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'ruhsat-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+const uploadRuhsat = multer({ storage: ruhsatStorage });
+
+import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar } from "@shared/schema";
 import { createHash } from "crypto";
 import { z } from "zod";
 import {
@@ -44,6 +62,26 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // Serve static files
+  app.use('/uploads', express.static('uploads'));
+
+  app.post("/api/araclar/:id/ruhsat", uploadRuhsat.single('ruhsat'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Dosya yüklenemedi." });
+      }
+      
+      const fileUrl = `/uploads/ruhsat/${req.file.filename}`;
+      
+      await storage.updateArac(req.params.id, { ruhsatDosyasi: fileUrl });
+      
+      res.json({ message: "Ruhsat yüklendi", url: fileUrl });
+    } catch (err) {
+      console.error("Ruhsat yükleme hatası:", err);
+      res.status(500).json({ error: "Ruhsat yüklenirken bir hata oluştu" });
+    }
+  });
 
   // Trend Analysis Endpoint
   app.get("/api/gumruk/analiz", async (req, res) => {
@@ -344,6 +382,8 @@ export async function registerRoutes(
     }
   });
 
+
+
   app.delete("/api/araclar/:id", async (req, res) => {
     try {
       await storage.deleteArac(req.params.id);
@@ -351,6 +391,42 @@ export async function registerRoutes(
     } catch (err) {
       console.error("Araç silinirken hata:", err);
       res.status(500).json({ error: "Araç silinirken bir hata oluştu" });
+    }
+  });
+
+  // Araç Giderleri Endpoints
+  app.get("/api/araclar/:id/giderler", async (req, res) => {
+    try {
+      const giderler = await storage.getAracGiderler(req.params.id);
+      res.json(giderler);
+    } catch (err) {
+      console.error("Araç giderleri listelenirken hata:", err);
+      res.status(500).json({ error: "Giderler listelenirken hata oluştu" });
+    }
+  });
+
+  app.post("/api/araclar/:id/giderler", async (req, res) => {
+    try {
+      const veriler = { ...req.body, aracId: req.params.id };
+      const parsed = insertAracGiderSchema.safeParse(veriler);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error });
+      }
+      const newGider = await storage.createAracGider(parsed.data);
+      res.status(201).json(newGider);
+    } catch (err) {
+      console.error("Araç gideri eklenirken hata:", err);
+      res.status(500).json({ error: "Gider eklenirken hata oluştu" });
+    }
+  });
+
+  app.delete("/api/araclar/giderler/:id", async (req, res) => {
+    try {
+      await storage.deleteAracGider(req.params.id);
+      res.sendStatus(204);
+    } catch (err) {
+      console.error("Araç gideri silinirken hata:", err);
+      res.status(500).json({ error: "Gider silinirken hata oluştu" });
     }
   });
 
@@ -1418,6 +1494,208 @@ export async function registerRoutes(
     }
   });
 
+  // Nakliye - Gümrük Eşleştirme (Konteyner Cross-Reference)
+  app.post("/api/nakliye/eslestir", async (req, res) => {
+    try {
+      console.log("Nakliye eşleştirme başlatılıyor...");
+      const nakliyeVerileri = await storage.getNakliyeVerileri();
+      let matchCount = 0;
+
+      // Tüm gümrük verilerini çek
+      const gumrukVerileri = await storage.getAllGumrukVerileri();
+      
+      // Hızlı arama için House No tabanlı Map (Multi-Value)
+      // Key: Normalized Container No -> Value: Array of Records
+      const gumrukMap = new Map<string, InsertGumrukVerisi[]>();
+
+      // Normalization Helper
+      const normalizeContainer = (val: string) => {
+          if (!val) return "";
+          return val.replace(/[^A-Z0-9]/g, '').toUpperCase();
+      };
+      
+      gumrukVerileri.forEach(g => {
+        if (g.houseNo) {
+           const cleanHouse = normalizeContainer(g.houseNo);
+           if (cleanHouse.length > 3) {
+              if (!gumrukMap.has(cleanHouse)) {
+                  gumrukMap.set(cleanHouse, []);
+              }
+              gumrukMap.get(cleanHouse)!.push(g);
+           }
+        }
+      });
+
+      console.log(`Gümrük Map Hazır: ${gumrukMap.size} unique konteyner.`);
+
+      for (const n of nakliyeVerileri) {
+        // ---------------------------------------------------------
+        // 1. DYNAMIC EXTRACTION & PERSISTENCE (User Request)
+        // ---------------------------------------------------------
+        let activeKonteynerler = n.konteynerler || "";
+        
+        // Regex exactly as used in Frontend (Nakliye.tsx) but relaxed for backend processing
+        // Removed leading \b to capture "TaşimaHMMU..." cases
+        const containerRegex = /([A-Z]{4})\s*(\d{6,7})\b/g;
+        const extracted = (n.malHizmet || "").match(containerRegex);
+        
+        if (extracted && extracted.length > 0) {
+             const uniqueExtracted = Array.from(new Set(extracted)).join(", ");
+             
+             // If DB is empty, or we found MORE/DIFFERENT data, update it.
+             // Simple check: if current is empty or doesn't include the new find
+             if (!activeKonteynerler || activeKonteynerler.length < uniqueExtracted.length) {
+                 try {
+                     console.log(`Fixing Container Data for Invoice ${n.faturaNo}: ${activeKonteynerler} -> ${uniqueExtracted}`);
+                     await storage.updateNakliyeVerisi(n.id, { konteynerler: uniqueExtracted });
+                     activeKonteynerler = uniqueExtracted; // Use new data for matching
+                 } catch (saveErr) {
+                     console.error(`Container save error ID ${n.id}:`, saveErr);
+                 }
+             }
+        }
+
+        if (!activeKonteynerler) continue;
+
+        // ---------------------------------------------------------
+        // 2. MATCHING LOGIC
+        // ---------------------------------------------------------
+
+        // Fatura Tarihi Parse (DD.MM.YYYY typically from Excel/PDF)
+        let invoiceDate: Date | null = null;
+        if (n.faturaTarihi) {
+            // Try DD.MM.YYYY
+            const parts = n.faturaTarihi.split('.');
+            if (parts.length === 3) {
+                invoiceDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+            } else {
+                // Try standard YYYY-MM-DD
+                const d = new Date(n.faturaTarihi);
+                if (!isNaN(d.getTime())) invoiceDate = d;
+            }
+        }
+
+        const konteynerList = activeKonteynerler.split(',').map(c => normalizeContainer(c.trim()));
+
+        for (const cont of konteynerList) {
+          if (cont.length < 3) continue;
+
+          // DEBUG for Target Container
+          const isTargetDebug = cont.includes("HMMU2071981");
+
+          // Eşleşme ara
+          const candidates = gumrukMap.get(cont);
+          
+          if (candidates && candidates.length > 0) {
+             
+             let bestMatch: InsertGumrukVerisi | null = null;
+             let minDayDiff = 9999;
+
+             if (isTargetDebug) {
+                 console.log(`DEBUG Check HMMU2071981: Found ${candidates.length} candidates.`);
+             }
+
+             // Find best match based on Date (within reasonable window, e.g. 45 days)
+             // Customs Declaration (Tescil) usually happens around the invoice date
+             for (const cand of candidates) {
+                 // Parse Tescil Tarihi
+                 let tescilDate: Date | null = null;
+                 if (cand.tescilTarihi) {
+                    const tParts = cand.tescilTarihi.split('.'); // Typically DD.MM.YYYY per previous lines
+                    if (tParts.length === 3) {
+                        tescilDate = new Date(parseInt(tParts[2]), parseInt(tParts[1]) - 1, parseInt(tParts[0]));
+                    } else if (cand.faturaTarihi) {
+                        // Fallback to Customs Invoice Date
+                        const fParts = cand.faturaTarihi.split('.');
+                        if (fParts.length === 3) {
+                            tescilDate = new Date(parseInt(fParts[2]), parseInt(fParts[1]) - 1, parseInt(fParts[0]));
+                        }
+                    }
+                 }
+
+                 if (!invoiceDate || !tescilDate) {
+                     // If no dates available, matching is risky but if it's the only one, take it.
+                     // Or prioritze the one closest to "now" if multiple? 
+                     // Let's just take the first if dates fail, but prioritize date match.
+                     if (!bestMatch) bestMatch = cand;
+                     continue;
+                 }
+
+                 // Log date comparison for debug
+                 const diffTime = Math.abs(tescilDate.getTime() - invoiceDate.getTime());
+                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+                 if (isTargetDebug) {
+                     console.log(`  Candidate: Tescil=${cand.tescilTarihi} vs Invoice=${n.faturaTarihi} -> Diff=${diffDays} days`);
+                 }
+
+                 // Allow match if within 45 days window
+                 if (diffDays <= 45) {
+                     if (diffDays < minDayDiff) {
+                         minDayDiff = diffDays;
+                         bestMatch = cand;
+                     }
+                 }
+             }
+
+             // Helper to convert Excel Serial Date (e.g., 46044) to DD.MM.YYYY
+             const formatExcelDate = (serial: string | number): string => {
+                 if (!serial) return "";
+                 const num = typeof serial === 'string' ? parseFloat(serial) : serial;
+                 if (isNaN(num)) return serial.toString();
+                 
+                 // Excel base date is Dec 30, 1899
+                 const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+                 const day = date.getDate().toString().padStart(2, '0');
+                 const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                 const year = date.getFullYear();
+                 return `${day}.${month}.${year}`;
+             };
+
+             if (bestMatch) {
+                if (isTargetDebug) {
+                     console.log(`  MATCH_FOUND for HMMU2071981! Unvan: ${bestMatch.firmaUnvan}`);
+                }
+                const match = bestMatch; // Alias for readability
+
+                // Format Tescil Tarihi if it looks like an Excel serial number (numeric)
+                let finalTescilTarihi = match.tescilTarihi;
+                if (match.tescilTarihi && /^\d+$/.test(match.tescilTarihi)) {
+                    finalTescilTarihi = formatExcelDate(match.tescilTarihi);
+                }
+
+                try {
+                  await storage.updateNakliyeVerisi(n.id, {
+                    ilgiliDosyaNo: match.dosyaNo,
+                    gumrukFirmaUnvan: match.firmaUnvan,
+                    gumrukAdi: match.gumruk,
+                    gumrukDovizKiymeti: match.dovizKiymeti,
+                    gumrukDovizCinsi: match.doviz,
+                    gumrukTescilNo: match.tescilNo,
+                    gumrukTescilTarihi: finalTescilTarihi,
+                    eslesenHouseNo: match.houseNo
+                  });
+                  matchCount++;
+                  break; // Found a match for this invoice
+                } catch (err) {
+                  console.error(`Nakliye güncelleme hatası ID: ${n.id}`, err);
+                }
+             } else {
+                 if (isTargetDebug) console.log("  No match found within 45 days window.");
+             }
+          }
+        }
+      }
+
+      console.log(`Eşleştirme Tamamlandı. Toplam Eşleşen Fatura: ${matchCount}`);
+      res.json({ success: true, matchCount, totalScanned: nakliyeVerileri.length });
+
+    } catch (error) {
+      console.error("Eşleştirme hatası:", error);
+      res.status(500).json({ error: "Eşleştirme işlemi sırasında hata oluştu" });
+    }
+  });
+
   // Gider Excel Yükle
   app.post("/api/giderler/upload", upload.single("excel"), async (req, res) => {
     try {
@@ -1545,7 +1823,7 @@ export async function registerRoutes(
   });
 
 
-  // Excel yükle (Eski Gumruk)
+  // Enhanced Excel Upload (Gümrük Sayfası İçin)
   app.post("/api/gumruk/yukle", upload.single("excel"), async (req, res) => {
     try {
       if (!req.file) {
@@ -1559,7 +1837,34 @@ export async function registerRoutes(
       }
       const { ay, yil } = parseResult.data;
 
-      // Excel dosyasını oku
+      // 1. FILE ARCHIVING
+      // Klasör yapısını oluştur: uploads/gumruk/YIL/AY/
+      const fs = await import("fs");
+      const path = await import("path");
+      
+      const uploadDir = path.join(process.cwd(), "uploads", "gumruk", String(yil), ay);
+      await fs.promises.mkdir(uploadDir, { recursive: true });
+
+      const timestamp = new Date().getTime();
+      const safeFilename = req.file.originalname.replace(/[^a-z0-9.]/gi, '_');
+      const filename = `${timestamp}_${safeFilename}`;
+      const filepath = path.join(uploadDir, filename);
+
+      // Dosyayı diske yaz
+      await fs.promises.writeFile(filepath, req.file.buffer);
+
+      // Dosyayı veritabanına kaydet
+      const md5Hash = createHash("md5").update(req.file.buffer).digest("hex");
+      
+      const dosyaKaydi = await storage.createGumrukDosya({
+        filename: req.file.originalname,
+        filepath: filepath,
+        sizeBytes: req.file.size,
+        recordCount: 0, // Güncellenecek
+        md5Hash: md5Hash
+      });
+
+      // 2. DATA PARSING
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
@@ -1580,14 +1885,8 @@ export async function registerRoutes(
            if (typeof val === 'number') return val.toFixed(2);
            const str = String(val).trim();
            if (!str) return null;
-           // Handle 1.234,56 (TR) vs 1234.56
-           // If dot and comma exist, assume dot=thousand, comma=decimal (TR) or vice versa? 
-           // Standard approach for this user's locale seems to be TR (comma decimal)
-           // If clean number in string, parseFloat works. 
-           // If "1.000,50" -> replace dots, replace comma with dot -> "1000.50"
            let clean = str;
            if (str.includes(",") && str.includes(".")) {
-              // Likely TR
               clean = str.replace(/\./g, "").replace(",", ".");
            } else if (str.includes(",")) {
               clean = str.replace(",", ".");
@@ -1596,9 +1895,9 @@ export async function registerRoutes(
            return isNaN(num) ? null : num.toFixed(2);
          };
 
-         // Row hash - using object values might vary order but usually consistent. 
-         // Better to hash specific key columns for stable deduplication
+         // Row hash - using object values
          const rowHash = createRowHash(Object.values(row));
+         
 
          // Tip Mapping
          let tipRaw = row["TİP"] ? String(row["TİP"]).trim() : "Diğer";
@@ -1613,15 +1912,23 @@ export async function registerRoutes(
 
          const g = (key: string) => row[key] ? String(row[key]).trim() : null;
 
-         veriler.push({
+         // Serialize FULL row data for archival
+         const rawData = JSON.stringify(row);
+
+         const veri: InsertGumrukVerisi = {
            ay,
            yil,
-           rowHash,
+           firmaUnvan: row["FİRMA ÜNVAN"],
+           faturaNo: row["FATURA NO"],
+           malBedeli: parseNumber(row["MAL BEDELİ"]),
+           topKdvTutar: parseNumber(row["TOP KDV TUTAR"]),
+           topFaturaTutar: parseNumber(row["TOP FATURA TUTAR"]),
+           topIskonto: parseNumber(row["TOP İSKONTO"]),
+           
+           // Mapped fields
            tip,
            dosyaNo: g("DOSYA NO"),
-           firmaUnvan: g("FİRMA ÜNVAN"),
            rejim: g("REJİM"),
-           faturaNo: g("FATURA NO"),
            faturaTarihi: g("FATURA TARİHİ"),
            gumruk: g("GÜMRÜK"),
            tescilTarihi: g("TESCİL TARİHİ"),
@@ -1631,12 +1938,7 @@ export async function registerRoutes(
            doviz: g("DOVİZ"),
            girisElemani: g("GİRİŞ ELEMANI"),
            
-           malBedeli: parseNumber(row["MAL BEDELİ"]),
-           topIskonto: parseNumber(row["TOP İSKONTO"]),
-           topKdvTutar: parseNumber(row["TOP KDV TUTAR"]),
-           topFaturaTutar: parseNumber(row["TOP FATURA TUTAR"]),
-
-           // New Fields
+           // New Enhanced Fields
            firmaNo: g("FİRMA NO"),
            firmaOzellik: g("FİRMA ÖZELLİK"),
            hesapNo: g("HesapNo"),
@@ -1648,31 +1950,40 @@ export async function registerRoutes(
            faturaKesimTarihi: g("FATURA KESİM TARİHİ"),
            valorTarihi: g("VALÖR TARİHİ"),
            mensei: g("MENŞEİ"),
-           cifKiymet: parseNumber(row["CIF KIYMET"]),
-           tasimaCinsi: g("TAŞIMA CİNSİ"),
-           kapAdedi: g("KAP ADEDİ"),
-           tasitCinsi: g("TAŞIT CİNSİ"),
-           kalemSayisi: g("KALEM SAY"),
-           mm: g("MM"),
-           ydFirma: g("YD FİRMA"),
-           istKiymet: parseNumber(row["İST KIYMET"]),
+           mm: g("M.M"), 
+           ydFirma: g("Y.D FİRMA"),
            kullanici: g("KULLANICI"),
-           araKonsNo: g("ARA KONŞ NO"),
+           araKonsNo: g("ARA KONS. NO"),
            accountNo: g("ACCOUNT NO"),
-           vd: g("VD"),
-           vn: g("VN"),
+           vd: g("V.D") || g("VERGİ DAİRESİ"),
+           vn: g("V.N") || g("VERGİ NO"),
+           odemeSekli: g("ÖDEME ŞEKLİ"),
+           musFatura: g("MÜŞ. FATURA"),
+           komisyonHesap: g("KOMİSYON HESAP"),
+           isTf: g("İS TF"),
+           imalatci: g("İMALATÇI"),
+           tevkifatKod: g("TEVKİFAT KOD"),
+           poNo: g("PO NO"),
+           supalan: g("SUPALAN"),
            fe: g("FE"),
            sm: g("SM"),
-           odemeSekli: g("ÖDEME ŞEK."),
+           kapAdedi: g("KAP ADEDİ"),
+           tasimaCinsi: g("TAŞIMA CİNSİ"),
+           tasitCinsi: g("TAŞIT CİNSİ"),
+           kalemSayisi: g("KALEM SAYISI"),
+
+           // Numeric Fields (Enhanced)
+           cifKiymet: parseNumber(row["CİF KIYMET"]),
+           istKiymet: parseNumber(row["İST. KIYMET"]),
            kur: parseNumber(row["KUR"]),
-           supalan: g("SUPALAN"),
-           musFatura: g("MÜŞ FATURA"),
-           komisyonHesap: g("KomisyonHesap"),
-           isTf: g("isTF"),
-           imalatci: g("Imalatci"),
-           tevkifatKod: g("TEVKİFAT KOD"),
-           poNo: g("Po No"),
-         });
+           
+           // Raw Data Vault
+           rawData: rawData,
+           dosyaId: dosyaKaydi.id, // Link to file
+           rowHash
+         };
+         
+         veriler.push(veri);
       }
 
       if (veriler.length === 0) {

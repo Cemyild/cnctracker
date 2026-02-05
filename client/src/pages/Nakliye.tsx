@@ -18,6 +18,7 @@ export default function Nakliye() {
     const [extractedData, setExtractedData] = useState<any[]>([]);
     const [savedInvoices, setSavedInvoices] = useState<any[]>([]);
     const [saving, setSaving] = useState(false);
+    const [matching, setMatching] = useState(false);
     const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
     const [customers, setCustomers] = useState<string[]>([]);
@@ -436,6 +437,40 @@ export default function Nakliye() {
         }
     };
 
+    const handleMatchWithGumruk = async () => {
+        if (savedInvoices.length === 0) {
+            toast({ variant: "destructive", title: "Hata", description: "Eşleştirilecek kayıt bulunamadı." });
+            return;
+        }
+
+        setMatching(true);
+        try {
+            const response = await fetch("/api/nakliye/eslestir", {
+                method: "POST",
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                toast({
+                    title: "Eşleştirme Tamamlandı",
+                    description: `${result.totalScanned} kayıttan ${result.matchCount} tanesi Gümrük verileriyle eşleşti.`,
+                });
+                fetchSavedInvoices(); // Refresh to see new data
+            } else {
+                throw new Error("Eşleştirme başarısız");
+            }
+        } catch (error) {
+            console.error("Matching error:", error);
+            toast({
+                variant: "destructive",
+                title: "Hata",
+                description: "Eşleştirme işlemi sırasında hata oluştu.",
+            });
+        } finally {
+            setMatching(false);
+        }
+    };
+
     const handleDeleteInvoice = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         if (!confirm("Bu faturayı silmek istediğinize emin misiniz?")) return;
@@ -528,6 +563,25 @@ export default function Nakliye() {
                         </div>
 
                         <div className="flex items-center gap-4 w-full md:w-auto">
+                            <Button
+                                variant="outline"
+                                className="h-12 px-6 rounded-xl font-bold hover:bg-primary/10 border-primary/20 text-primary"
+                                onClick={handleMatchWithGumruk}
+                                disabled={matching || uploading}
+                            >
+                                {matching ? (
+                                    <>
+                                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                                        <span>Eşleşiyor...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <RefreshCcw className="w-5 h-5 mr-2" />
+                                        <span>Gümrük ile Eşleştir</span>
+                                    </>
+                                )}
+                            </Button>
+
                             <input
                                 type="file"
                                 id="nakliye-upload-compact"
@@ -686,6 +740,7 @@ export default function Nakliye() {
                                         </TableHead>
                                         <TableHead className="font-bold py-4">Mal/Hizmet</TableHead>
                                         <TableHead className="font-bold py-4 text-blue-600">Konteyner/Referans</TableHead>
+                                        <TableHead className="font-bold py-4 text-purple-600">Dosya No</TableHead>
                                         <TableHead className="font-bold py-4 text-green-600">Müşteri</TableHead>
                                         <TableHead className="font-bold py-4 text-right">Miktar</TableHead>
                                         <TableHead className="font-bold py-4 text-right">Birim Fiyat</TableHead>
@@ -709,6 +764,7 @@ export default function Nakliye() {
                                                 <TableCell className="text-sm text-muted-foreground">{formatDate(inv.faturaTarihi)}</TableCell>
                                                 <TableCell className="font-medium max-w-[200px] truncate">{inv.malHizmet || "-"}</TableCell>
                                                 <TableCell className="font-mono text-blue-600 font-medium">{inv.konteynerler || extractContainerRef(inv.malHizmet)}</TableCell>
+                                                <TableCell className="font-bold text-purple-600">{inv.ilgiliDosyaNo || "-"}</TableCell>
                                                 <TableCell className="font-medium text-green-600 truncate max-w-[150px]">{inv.musteri || extractCustomer(inv.malHizmet)}</TableCell>
                                                 <TableCell className="text-right font-mono">{formatCurrency(inv.miktar)}</TableCell>
                                                 <TableCell className="text-right font-mono text-muted-foreground">{formatCurrency(inv.birimFiyat)}</TableCell>
@@ -769,6 +825,17 @@ export default function Nakliye() {
                                     <span className="text-xl font-bold font-mono tracking-tight">{formatDate(selectedInvoice.faturaTarihi)}</span>
                                 </div>
                             </div>
+
+                            {/* Matched Gumruk Info */}
+                            {selectedInvoice.ilgiliDosyaNo && (
+                                <div className="bg-purple-600/10 p-3 rounded-lg border border-purple-600/20 text-purple-800 dark:text-purple-300 text-sm font-medium flex items-center justify-center text-center">
+                                    <CheckCircle2 className="w-5 h-5 mr-2 text-purple-600" />
+                                    <span>
+                                        {/* Format: 1-DOSYA NO, 2-FİRMA ÜNVAN, 3-GÜMRÜK, 4-DOVİZ KIYMETİ, 5-DOVİZ, 6-TESCİL NO, 7-TESCİL TARİHİ, 8-HOUSE NO */}
+                                        {selectedInvoice.ilgiliDosyaNo} - {selectedInvoice.gumrukFirmaUnvan} - {selectedInvoice.gumrukAdi} - {selectedInvoice.gumrukDovizKiymeti} - {selectedInvoice.gumrukDovizCinsi} - {selectedInvoice.gumrukTescilNo} - {selectedInvoice.gumrukTescilTarihi} - {selectedInvoice.eslesenHouseNo}
+                                    </span>
+                                </div>
+                            )}
 
                             {/* Editable Fields */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/10 p-4 rounded-xl border border-border/50">

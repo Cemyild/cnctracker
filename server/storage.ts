@@ -1,4 +1,4 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull } from "drizzle-orm";
@@ -12,6 +12,7 @@ export interface IStorage {
   getGumrukVerileri(ay: string, yil: number): Promise<GumrukVerisi[]>
   getAllGumrukVerileri(): Promise<GumrukVerisi[]>;
   insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]>;
+  createGumrukDosya(dosya: InsertGumrukDosya): Promise<GumrukDosya>;
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
@@ -27,10 +28,15 @@ export interface IStorage {
   getAdvancedChartData(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
   getAdvancedChartTrend(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
   getTips(yil: number): Promise<string[]>;
-  getAraclar(): Promise<Arac[]>;
+  getAraclar(): Promise<(Arac & { toplamGider: number })[]>;
   createArac(arac: InsertArac): Promise<Arac>;
   updateArac(id: string, arac: Partial<InsertArac>): Promise<Arac>;
   deleteArac(id: string): Promise<void>;
+  
+  // Araç Giderleri
+  getAracGiderler(aracId: string): Promise<AracGider[]>;
+  createAracGider(gider: InsertAracGider): Promise<AracGider>;
+  deleteAracGider(id: string): Promise<void>;
 
   // Nakliye verileri
   getNakliyeVerileri(): Promise<NakliyeVerisi[]>;
@@ -127,6 +133,11 @@ export class DatabaseStorage implements IStorage {
 
   async getAllGumrukVerileri(): Promise<GumrukVerisi[]> {
     return await db.select().from(gumrukVerileri);
+  }
+
+  async createGumrukDosya(dosya: InsertGumrukDosya): Promise<GumrukDosya> {
+    const [result] = await db.insert(gumrukDosyalar).values(dosya).returning();
+    return result;
   }
 
   async insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]> {
@@ -483,8 +494,20 @@ export class DatabaseStorage implements IStorage {
       .sort();
   }
 
-  async getAraclar(): Promise<Arac[]> {
-    return await db.select().from(araclar);
+  async getAraclar(): Promise<(Arac & { toplamGider: number })[]> {
+    const result = await db
+      .select({
+        arac: araclar,
+        toplamGider: sql<string>`coalesce(sum(${aracGiderler.tutar}), 0)`,
+      })
+      .from(araclar)
+      .leftJoin(aracGiderler, eq(araclar.id, aracGiderler.aracId))
+      .groupBy(araclar.id);
+
+    return result.map(({ arac, toplamGider }) => ({
+      ...arac,
+      toplamGider: Number(toplamGider),
+    }));
   }
 
   async createArac(arac: InsertArac): Promise<Arac> {
@@ -504,6 +527,22 @@ export class DatabaseStorage implements IStorage {
 
   async deleteArac(id: string): Promise<void> {
     await db.delete(araclar).where(eq(araclar.id, id));
+  }
+
+  // ==========================================================
+  // ARAÇ GIDERLER IMPLEMENTATION
+  // ==========================================================
+  async getAracGiderler(aracId: string): Promise<AracGider[]> {
+    return await db.select().from(aracGiderler).where(eq(aracGiderler.aracId, aracId)).orderBy(desc(aracGiderler.tarih));
+  }
+
+  async createAracGider(gider: InsertAracGider): Promise<AracGider> {
+    const [newGider] = await db.insert(aracGiderler).values(gider).returning();
+    return newGider;
+  }
+
+  async deleteAracGider(id: string): Promise<void> {
+    await db.delete(aracGiderler).where(eq(aracGiderler.id, id));
   }
 
   async getNakliyeVerileri(): Promise<NakliyeVerisi[]> {
