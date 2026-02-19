@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Plus, Trash2, Car, Calendar, MoreVertical, Fuel, Wrench, FileText, AlertCircle, TrendingUp, DollarSign } from "lucide-react";
+import { Plus, Trash2, Car, Calendar, MoreVertical, Fuel, Wrench, FileText, AlertCircle, TrendingUp, DollarSign, Upload, Zap, Building2 } from "lucide-react";
 import { format, parseISO, isBefore, addDays } from "date-fns";
 import { tr } from "date-fns/locale";
+import * as XLSX from "xlsx";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,7 +33,8 @@ import {
     FormMessage,
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { type Arac, insertAracSchema, type AracGider, insertAracGiderSchema } from "@shared/schema";
+import { type Arac, insertAracSchema, type AracGider, insertAracGiderSchema, type Gider } from "@shared/schema";
+import { subYears, parse } from "date-fns";
 
 // --- HELPERS ---
 
@@ -426,18 +428,97 @@ function VehicleForm({
     );
 }
 
-function ExpensesTab({ aracId }: { aracId: string }) {
+// Birleşik gider tipi
+type UnifiedExpense = {
+    id: string;
+    tarih: string;
+    kategori: string;
+    aciklama: string;
+    tutar: number;
+    kaynak: 'Manuel' | 'Fatura' | 'Sigorta';
+    firma?: string; // Fatura giderleri için
+    canDelete: boolean;
+};
+
+function ExpensesTab({ arac }: { arac: Arac }) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
 
-    const { data: expenses, isLoading } = useQuery<AracGider[]>({
-        queryKey: [`/api/araclar/${aracId}/giderler`],
+    // Manuel giderler
+    const { data: manuelExpenses, isLoading: manuelLoading } = useQuery<AracGider[]>({
+        queryKey: [`/api/araclar/${arac.id}/giderler`],
     });
+
+    // Fatura giderleri (gümrük giderlerinden plakaya göre)
+    const { data: faturaExpenses, isLoading: faturaLoading } = useQuery<Gider[]>({
+        queryKey: [`/api/giderler/by-plaka/${arac.plaka}`],
+        enabled: !!arac.plaka,
+    });
+
+    // Sigorta giderlerini araç verisinden oluştur
+    const sigortaExpenses: UnifiedExpense[] = [];
+
+    if (arac.trafikSigortaFiyat && Number(arac.trafikSigortaFiyat) > 0 && arac.trafikBitisTarihi) {
+        const bitisTarihi = parse(arac.trafikBitisTarihi, "yyyy-MM-dd", new Date());
+        const baslangicTarihi = subYears(bitisTarihi, 1);
+        sigortaExpenses.push({
+            id: `sigorta-trafik-${arac.id}`,
+            tarih: format(baslangicTarihi, "yyyy-MM-dd"),
+            kategori: "Sigorta",
+            aciklama: `Trafik Sigortası - ${arac.trafikSigortaSirketi || ""}`,
+            tutar: Number(arac.trafikSigortaFiyat),
+            kaynak: 'Sigorta',
+            canDelete: false,
+        });
+    }
+
+    if (arac.kaskoSigortaFiyat && Number(arac.kaskoSigortaFiyat) > 0 && arac.kaskoBitisTarihi) {
+        const bitisTarihi = parse(arac.kaskoBitisTarihi, "yyyy-MM-dd", new Date());
+        const baslangicTarihi = subYears(bitisTarihi, 1);
+        sigortaExpenses.push({
+            id: `sigorta-kasko-${arac.id}`,
+            tarih: format(baslangicTarihi, "yyyy-MM-dd"),
+            kategori: "Sigorta",
+            aciklama: `Kasko - ${arac.kaskoSigortaSirketi || ""}`,
+            tutar: Number(arac.kaskoSigortaFiyat),
+            kaynak: 'Sigorta',
+            canDelete: false,
+        });
+    }
+
+    // Tüm giderleri birleştir
+    const allExpenses: UnifiedExpense[] = [
+        // Manuel giderler
+        ...(manuelExpenses?.map(g => ({
+            id: g.id,
+            tarih: g.tarih,
+            kategori: g.kategori,
+            aciklama: g.aciklama || "",
+            tutar: Number(g.tutar),
+            kaynak: 'Manuel' as const,
+            canDelete: true,
+        })) || []),
+        // Fatura giderleri
+        ...(faturaExpenses?.map(g => ({
+            id: g.id,
+            tarih: g.tarih ? parse(g.tarih, "dd.MM.yyyy", new Date()).toISOString().split('T')[0] : "",
+            kategori: g.kategori || "",
+            aciklama: g.firma || "",
+            tutar: Number(g.tryTutar || g.toplamTutar),
+            kaynak: 'Fatura' as const,
+            firma: g.firma || undefined,
+            canDelete: false,
+        })) || []),
+        // Sigorta giderleri
+        ...sigortaExpenses,
+    ].sort((a, b) => new Date(b.tarih).getTime() - new Date(a.tarih).getTime());
+
+    const isLoading = manuelLoading || faturaLoading;
 
     const form = useForm({
         resolver: zodResolver(insertAracGiderSchema),
         defaultValues: {
-            aracId,
+            aracId: arac.id,
             tarih: format(new Date(), "yyyy-MM-dd"),
             kategori: "Yakıt",
             aciklama: "",
@@ -450,10 +531,10 @@ function ExpensesTab({ aracId }: { aracId: string }) {
         mutationFn: async (values: any) => {
              const payload = {
                  ...values,
-                 aracId,
+                 aracId: arac.id,
                  kilometre: values.kilometre ? parseInt(values.kilometre) : null,
              };
-             const res = await fetch(`/api/araclar/${aracId}/giderler`, {
+             const res = await fetch(`/api/araclar/${arac.id}/giderler`, {
                  method: "POST",
                  headers: { "Content-Type": "application/json" },
                  body: JSON.stringify(payload),
@@ -462,10 +543,10 @@ function ExpensesTab({ aracId }: { aracId: string }) {
              return res.json();
         },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: [`/api/araclar/${aracId}/giderler`] });
+            queryClient.invalidateQueries({ queryKey: [`/api/araclar/${arac.id}/giderler`] });
             queryClient.invalidateQueries({ queryKey: ["/api/araclar"] }); // Update totals on main list
             form.reset({
-                aracId,
+                aracId: arac.id,
                 tarih: format(new Date(), "yyyy-MM-dd"),
                 kategori: "Yakıt",
                 aciklama: "",
@@ -485,7 +566,7 @@ function ExpensesTab({ aracId }: { aracId: string }) {
             if (!res.ok) throw new Error(await res.text());
         },
         onSuccess: () => {
-             queryClient.invalidateQueries({ queryKey: [`/api/araclar/${aracId}/giderler`] });
+             queryClient.invalidateQueries({ queryKey: [`/api/araclar/${arac.id}/giderler`] });
              queryClient.invalidateQueries({ queryKey: ["/api/araclar"] }); // Update totals
              toast({ title: "Gider Silindi" });
         }
@@ -576,27 +657,58 @@ function ExpensesTab({ aracId }: { aracId: string }) {
                             <TableHead>Kategori</TableHead>
                             <TableHead>Açıklama</TableHead>
                             <TableHead className="text-right">Tutar</TableHead>
+                            <TableHead>Kaynak</TableHead>
                             <TableHead className="w-[50px]"></TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {expenses?.map((gider) => (
-                            <TableRow key={gider.id}>
-                                <TableCell>{format(parseISO(gider.tarih), "d MMM yyyy", { locale: tr })}</TableCell>
-                                <TableCell>
-                                    <Badge variant="outline">{gider.kategori}</Badge>
-                                </TableCell>
-                                <TableCell className="text-muted-foreground">{gider.aciklama}</TableCell>
-                                <TableCell className="text-right font-medium">
-                                    {Number(gider.tutar).toLocaleString("tr-TR", { style: "currency", currency: "TRY" })}
-                                </TableCell>
-                                <TableCell>
-                                    <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(gider.id)}>
-                                        <Trash2 className="w-4 h-4 text-destructive" />
-                                    </Button>
+                        {isLoading ? (
+                            <TableRow>
+                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                                    Yükleniyor...
                                 </TableCell>
                             </TableRow>
-                        ))}
+                        ) : allExpenses.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                                    Henüz gider kaydı yok
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            allExpenses.map((gider) => (
+                                <TableRow key={gider.id}>
+                                    <TableCell>
+                                        {gider.tarih ? format(parseISO(gider.tarih), "d MMM yyyy", { locale: tr }) : "-"}
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge variant="outline">{gider.kategori}</Badge>
+                                    </TableCell>
+                                    <TableCell className="text-muted-foreground">{gider.aciklama}</TableCell>
+                                    <TableCell className="text-right font-medium">
+                                        {gider.tutar.toLocaleString("tr-TR", { style: "currency", currency: "TRY" })}
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge
+                                            variant={gider.kaynak === 'Manuel' ? 'secondary' : gider.kaynak === 'Fatura' ? 'default' : 'outline'}
+                                            className={
+                                                gider.kaynak === 'Manuel' ? 'bg-slate-100 text-slate-700' :
+                                                gider.kaynak === 'Fatura' ? 'bg-blue-100 text-blue-700' :
+                                                'bg-green-100 text-green-700'
+                                            }
+                                        >
+                                            {gider.kaynak}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                        {gider.canDelete && (
+                                            <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(gider.id)}>
+                                                <Trash2 className="w-4 h-4 text-destructive" />
+                                            </Button>
+                                        )}
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
                     </TableBody>
                 </Table>
             </div>
@@ -609,15 +721,74 @@ export default function Tools() {
     const [selectedArac, setSelectedArac] = useState<Arac | null>(null);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [isNewMode, setIsNewMode] = useState(false);
-    
+    const [selectedSube, setSelectedSube] = useState<string>("all");
+
     // Default to 'bilgiler'. If user clicks "Add Policy", we might change this.
     const [activeTab, setActiveTab] = useState("bilgiler");
 
     const { toast } = useToast();
     const queryClient = useQueryClient();
 
-    // Fetch vehicles with updated type (including totalGider)
-    const { data: araclar, isLoading } = useQuery<(Arac & { toplamGider: number })[]>({
+    const handleFuelExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const bstr = event.target?.result;
+                const workbook = XLSX.read(bstr, { type: "binary", cellDates: true });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+                // Expected format: Plaka, Tarih, Tutar, Açıklama, Kilometre
+                const validGiderler = jsonData.map(row => {
+                    const plaka = String(row.Plaka || row.plaka || "").trim().toUpperCase();
+                    const arac = araclar?.find(a => a.plaka.replace(/\s+/g, '').toUpperCase() === plaka.replace(/\s+/g, '').toUpperCase());
+                    
+                    if (!arac) return null;
+
+                    let rawTutar = row.Tutar || row.tutar || "0";
+                    if (typeof rawTutar === "string") {
+                        rawTutar = rawTutar.replace(/\./g, "").replace(",", ".");
+                    }
+
+                    return {
+                        aracId: arac.id,
+                        tarih: row.Tarih || row.tarih || format(new Date(), "yyyy-MM-dd"),
+                        kategori: "Yakıt",
+                        aciklama: row.Açıklama || row.aciklama || "Excel'den yüklendi",
+                        tutar: String(rawTutar),
+                        kilometre: row.Kilometre || row.kilometre || null
+                    };
+                }).filter(Boolean);
+
+                if (validGiderler.length === 0) {
+                    toast({ title: "Hata", description: "Geçerli plaka ile eşleşen kayıt bulunamadı.", variant: "destructive" });
+                    return;
+                }
+
+                const res = await fetch("/api/araclar/bulk-gider", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(validGiderler)
+                });
+
+                if (!res.ok) throw new Error(await res.text());
+
+                toast({ title: "Başarılı", description: `${validGiderler.length} yakıt gideri yüklendi.` });
+                queryClient.invalidateQueries({ queryKey: ["/api/araclar"] });
+            } catch (error) {
+                console.error("Excel upload error:", error);
+                toast({ title: "Hata", description: "Excel işlenirken hata oluştu.", variant: "destructive" });
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
+    // Fetch vehicles with updated type (including totalGider, ytd stuff)
+    const { data: araclar, isLoading } = useQuery<(Arac & { toplamGider: number; seneBasindanBeriGider: number; amortismanGiderYtd: number; toplamMaliyet: number })[]>({
         queryKey: ["/api/araclar"],
     });
 
@@ -684,11 +855,31 @@ export default function Tools() {
        const date = parseISO(dateStr);
        const today = new Date();
        const warningDate = addDays(today, 30);
-       
+
        if (isBefore(date, today)) return <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm animate-pulse" title="Süresi Dolmuş" />;
         // Only show red dot for critical issues to avoid clutter
        return null;
     }
+
+    // Benzersiz şubeleri al ve araç sayılarını hesapla
+    const subeler = useMemo(() => {
+        if (!araclar) return [];
+        const subeMap = new Map<string, number>();
+        araclar.forEach(a => {
+            const sube = a.sube || "Belirtilmemiş";
+            subeMap.set(sube, (subeMap.get(sube) || 0) + 1);
+        });
+        return Array.from(subeMap.entries())
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+    }, [araclar]);
+
+    // Filtrelenmiş araçlar
+    const filteredAraclar = useMemo(() => {
+        if (!araclar) return [];
+        if (selectedSube === "all") return araclar;
+        return araclar.filter(a => (a.sube || "Belirtilmemiş") === selectedSube);
+    }, [araclar, selectedSube]);
 
     return (
         <div className="p-6 bg-slate-50 min-h-screen">
@@ -700,16 +891,58 @@ export default function Tools() {
                      </h2>
                      <p className="text-muted-foreground">Şirket araçlarını yönetin ve giderleri izleyin.</p>
                 </div>
-                <Button onClick={() => openSheet(null, true)} size="lg" className="shadow-lg hover:shadow-xl transition-all">
-                    <Plus className="w-5 h-5 mr-2" /> Yeni Araç
+                <div className="flex items-center gap-2">
+                    <Input
+                        type="file"
+                        accept=".xlsx, .xls"
+                        id="fuel-excel-upload"
+                        className="hidden"
+                        onChange={handleFuelExcelUpload}
+                    />
+                    <Button variant="outline" size="lg" className="shadow-sm gap-2" asChild>
+                        <label htmlFor="fuel-excel-upload" className="cursor-pointer">
+                            <Upload className="w-5 h-5 text-emerald-600" />
+                            Yakıt Yükle
+                        </label>
+                    </Button>
+                    <Button onClick={() => openSheet(null, true)} size="lg" className="shadow-lg hover:shadow-xl transition-all">
+                        <Plus className="w-5 h-5 mr-2" /> Yeni Araç
+                    </Button>
+                </div>
+            </div>
+
+            {/* Şube Filtreleri */}
+            <div className="mb-6 flex flex-wrap gap-2">
+                <Button
+                    variant={selectedSube === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSelectedSube("all")}
+                    className="gap-2"
+                >
+                    <Car className="w-4 h-4" />
+                    Tümü
+                    <Badge variant="secondary" className="ml-1 h-5 px-1.5">{araclar?.length || 0}</Badge>
                 </Button>
+                {subeler.map((sube) => (
+                    <Button
+                        key={sube.name}
+                        variant={selectedSube === sube.name ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setSelectedSube(sube.name)}
+                        className="gap-2"
+                    >
+                        <Building2 className="w-4 h-4" />
+                        {sube.name}
+                        <Badge variant="secondary" className="ml-1 h-5 px-1.5">{sube.count}</Badge>
+                    </Button>
+                ))}
             </div>
 
             {isLoading ? (
                 <div className="flex justify-center p-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-                    {araclar?.map((arac) => {
+                    {filteredAraclar?.map((arac) => {
                          // Determine overall status color based on worst case (expired > warning > ok)
                          const tStatus = getStatusColor(arac.trafikBitisTarihi);
                          const kStatus = getStatusColor(arac.kaskoBitisTarihi);
@@ -808,21 +1041,32 @@ export default function Tools() {
                                         </div>
                                     </div>
 
-                                    {/* Footer / Stats */}
-                                    <div className="pt-2 border-t flex items-center justify-between text-xs">
-                                        <div className="flex items-center text-muted-foreground">
-                                            {arac.sube || "Şube Yok"}
+                                     {/* Detailed Stats Section */}
+                                    <div className="grid grid-cols-1 gap-1 pt-2 border-t mt-2">
+                                        <div className="flex justify-between items-center text-[11px]">
+                                            <span className="text-muted-foreground">Sene Başı Gider (YTD):</span>
+                                            <span className="font-semibold text-slate-700">
+                                                {(arac.seneBasindanBeriGider || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺
+                                            </span>
                                         </div>
-                                        <div 
-                                            className="flex items-center font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full"
-                                            title="Toplam Gider"
-                                        >
-                                            <TrendingUp className="w-3 h-3 mr-1" />
-                                            {arac.toplamGider > 0 
-                                                ? arac.toplamGider.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) + " ₺"
-                                                : "0 ₺"
-                                            }
+                                        <div className="flex justify-between items-center text-[11px]">
+                                            <span className="text-muted-foreground" title="Sigorta Amortismanı (Yıllık bedel / 12 * ay)">Poliçe Amortisman:</span>
+                                            <span className="font-semibold text-amber-600">
+                                                +{(arac.amortismanGiderYtd || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺
+                                            </span>
                                         </div>
+                                        <div className="flex justify-between items-center text-xs pt-1 mt-1 border-t border-dashed">
+                                            <span className="font-bold text-slate-900">Toplam Maliyet:</span>
+                                            <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                                {(arac.toplamMaliyet || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* Footer / Info */}
+                                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
+                                         <span>{arac.sube || "Merkez"}</span>
+                                         <Badge variant="outline" className="h-4 px-1 text-[9px] font-normal uppercase">{arac.marka || "Bilinmiyor"}</Badge>
                                     </div>
                                     
                                     {getStatusBadge(arac.trafikBitisTarihi)}
@@ -879,7 +1123,7 @@ export default function Tools() {
                                         />
                                     </TabsContent>
                                     <TabsContent value="giderler">
-                                        <ExpensesTab aracId={freshArac.id} />
+                                        <ExpensesTab arac={freshArac} />
                                     </TabsContent>
                                 </Tabs>
                              );

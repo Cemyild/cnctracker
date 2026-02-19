@@ -22,6 +22,7 @@ import {
   Wrench,
   Users,
   Calculator,
+  HandCoins,
 } from "lucide-react";
 
 const navItems = [
@@ -33,6 +34,7 @@ const navItems = [
   { title: "Araçlar", icon: Wrench, href: "/araclar" },
   { title: "Çalışanlar", icon: Users, href: "/calisanlar" },
   { title: "Hesaplamalar", icon: Calculator, href: "/hesaplamalar" },
+  { title: "Müşteri Tahsilat", icon: HandCoins, href: "/tahsilat" },
 ];
 
 export function AppSidebar() {

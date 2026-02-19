@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BackgroundPaths } from "@/components/BackgroundPaths";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
 import { Loader2, TrendingUp, TrendingDown, DollarSign, Calendar, Truck, Building2, AlertTriangle, Bell, Info } from "lucide-react";
@@ -56,6 +56,19 @@ export default function Raporlar() {
     });
 
     const formatCur = (val: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(val);
+
+    // Calculate totals for branch profitability
+    const branchTotals = useMemo(() => {
+        if (!branchData) return null;
+        return branchData.reduce((acc, row) => ({
+            gelir: acc.gelir + (row.gelir || 0),
+            giderPersonel: acc.giderPersonel + (row.giderPersonel || 0),
+            giderGumruk: acc.giderGumruk + (row.giderGumruk || 0),
+            giderArac: acc.giderArac + (row.giderArac || 0),
+            toplamGider: acc.toplamGider + (row.toplamGider || 0),
+            kar: acc.kar + (row.kar || 0),
+        }), { gelir: 0, giderPersonel: 0, giderGumruk: 0, giderArac: 0, toplamGider: 0, kar: 0 });
+    }, [branchData]);
 
     return (
         <div className="relative min-h-full pb-10">
@@ -130,13 +143,15 @@ export default function Raporlar() {
                                                 <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
                                                 <XAxis dataKey="sube" />
                                                 <YAxis />
-                                                <Tooltip 
+                                                <Tooltip
                                                     formatter={(value: any) => formatCur(value)}
                                                     contentStyle={{ backgroundColor: "hsl(var(--card))", borderRadius: "12px", border: "1px solid hsl(var(--border))" }}
                                                 />
                                                 <Legend />
-                                                <Bar dataKey="gelir" fill="#0088FE" name="Gelir" radius={[4, 4, 0, 0]} />
-                                                <Bar dataKey="gider" fill="#FF8042" name="Gider (Personel)" radius={[4, 4, 0, 0]} />
+                                                <Bar dataKey="gelir" fill="#0088FE" name="Gelir (M.B.)" radius={[4, 4, 0, 0]} />
+                                                <Bar dataKey="giderPersonel" fill="#FF8042" name="Personel" radius={[4, 4, 0, 0]} />
+                                                <Bar dataKey="giderGumruk" fill="#8884d8" name="Gümrük Giderleri" radius={[4, 4, 0, 0]} />
+                                                <Bar dataKey="giderArac" fill="#82ca9d" name="Araç Giderleri" radius={[4, 4, 0, 0]} />
                                             </BarChart>
                                         </ResponsiveContainer>
                                     </CardContent>
@@ -183,9 +198,12 @@ export default function Raporlar() {
                                             <TableHeader>
                                                 <TableRow>
                                                     <TableHead>Şube</TableHead>
-                                                    <TableHead className="text-right">Toplam Gelir (M.B.)</TableHead>
-                                                    <TableHead className="text-right">Personel Maliyeti</TableHead>
-                                                    <TableHead className="text-right">Brüt Kâr/Zarar</TableHead>
+                                                    <TableHead className="text-right">Gelir (M.B.)</TableHead>
+                                                    <TableHead className="text-right">Personel</TableHead>
+                                                    <TableHead className="text-right">Gümrük Gid.</TableHead>
+                                                    <TableHead className="text-right">Araç Gid.</TableHead>
+                                                    <TableHead className="text-right">Toplam Gider</TableHead>
+                                                    <TableHead className="text-right">Kâr/Zarar</TableHead>
                                                     <TableHead className="text-right">Durum</TableHead>
                                                 </TableRow>
                                             </TableHeader>
@@ -193,8 +211,11 @@ export default function Raporlar() {
                                                 {branchData?.map((row, idx) => (
                                                     <TableRow key={idx}>
                                                         <TableCell className="font-bold">{row.sube}</TableCell>
-                                                        <TableCell className="text-right font-mono">{formatCur(row.gelir)}</TableCell>
-                                                        <TableCell className="text-right font-mono text-muted-foreground">{formatCur(row.gider)}</TableCell>
+                                                        <TableCell className="text-right font-mono text-blue-600">{formatCur(row.gelir)}</TableCell>
+                                                        <TableCell className="text-right font-mono text-orange-500">{formatCur(row.giderPersonel)}</TableCell>
+                                                        <TableCell className="text-right font-mono text-purple-500">{formatCur(row.giderGumruk)}</TableCell>
+                                                        <TableCell className="text-right font-mono text-emerald-500">{formatCur(row.giderArac)}</TableCell>
+                                                        <TableCell className="text-right font-mono text-muted-foreground">{formatCur(row.toplamGider)}</TableCell>
                                                         <TableCell className={cn("text-right font-black font-mono", row.kar >= 0 ? "text-green-600" : "text-red-500")}>
                                                             {formatCur(row.kar)}
                                                         </TableCell>
@@ -204,6 +225,24 @@ export default function Raporlar() {
                                                     </TableRow>
                                                 ))}
                                             </TableBody>
+                                            {branchTotals && (
+                                                <TableFooter>
+                                                    <TableRow className="bg-muted/50">
+                                                        <TableCell className="font-black">TOPLAM</TableCell>
+                                                        <TableCell className="text-right font-mono font-bold text-blue-600">{formatCur(branchTotals.gelir)}</TableCell>
+                                                        <TableCell className="text-right font-mono font-bold text-orange-500">{formatCur(branchTotals.giderPersonel)}</TableCell>
+                                                        <TableCell className="text-right font-mono font-bold text-purple-500">{formatCur(branchTotals.giderGumruk)}</TableCell>
+                                                        <TableCell className="text-right font-mono font-bold text-emerald-500">{formatCur(branchTotals.giderArac)}</TableCell>
+                                                        <TableCell className="text-right font-mono font-bold text-muted-foreground">{formatCur(branchTotals.toplamGider)}</TableCell>
+                                                        <TableCell className={cn("text-right font-black font-mono", branchTotals.kar >= 0 ? "text-green-600" : "text-red-500")}>
+                                                            {formatCur(branchTotals.kar)}
+                                                        </TableCell>
+                                                        <TableCell className="text-right">
+                                                            {branchTotals.kar >= 0 ? <TrendingUp className="inline text-green-600 w-5 h-5" /> : <TrendingDown className="inline text-red-500 w-5 h-5" />}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                </TableFooter>
+                                            )}
                                         </Table>
                                     </CardContent>
                                 </Card>

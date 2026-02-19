@@ -16,12 +16,22 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Car } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Gider, subeler } from "@shared/schema";
 import { CategoryManager } from "./CategoryManager";
 import { useQuery } from "@tanstack/react-query";
 import { Settings } from "lucide-react";
+
+// Araç kategorileri - bu kategoriler seçildiğinde plaka sorulacak
+const ARAC_KATEGORILERI = ["ARAÇ BAKIM", "ARAÇ MUAYENE", "ARAÇ ŞARJ", "ARAÇ KİRA", "ARAÇ ALIM"];
+
+type Arac = {
+  id: string;
+  plaka: string;
+  marka: string | null;
+  model: string | null;
+};
 
 interface GiderEditModalProps {
   open: boolean;
@@ -38,16 +48,22 @@ export function GiderEditModal({
 }: GiderEditModalProps) {
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
-  
+
   const [formData, setFormData] = useState({
     sube: "",
     kategori: "",
+    plaka: "",
   });
 
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
 
   const { data: categories, refetch: refetchCategories } = useQuery<{id: string, name: string}[]>({
     queryKey: ["/api/categories"],
+  });
+
+  // Araçlar listesi (plaka dropdown için)
+  const { data: araclar } = useQuery<Arac[]>({
+    queryKey: ["/api/araclar"],
   });
 
   // Re-fetch categories when manager closes
@@ -62,6 +78,7 @@ export function GiderEditModal({
       setFormData({
         sube: gider.sube || "",
         kategori: gider.kategori || "",
+        plaka: gider.plaka || "",
       });
     }
   }, [gider]);
@@ -128,9 +145,9 @@ export function GiderEditModal({
           <div className="grid gap-2">
             <div className="flex items-center justify-between">
                 <Label>Kategori</Label>
-                <Button 
-                    variant="ghost" 
-                    size="sm" 
+                <Button
+                    variant="ghost"
+                    size="sm"
                     className="h-auto p-0 text-xs"
                     onClick={() => setIsCategoryManagerOpen(true)}
                 >
@@ -138,10 +155,14 @@ export function GiderEditModal({
                     Kategorileri Düzenle
                 </Button>
             </div>
-            
+
             <Select
               value={formData.kategori}
-              onValueChange={(val) => setFormData({ ...formData, kategori: val })}
+              onValueChange={(val) => {
+                // Araç kategorisi değilse plakayı temizle
+                const newPlaka = ARAC_KATEGORILERI.includes(val) ? formData.plaka : "";
+                setFormData({ ...formData, kategori: val, plaka: newPlaka });
+              }}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Kategori Seçin" />
@@ -155,6 +176,31 @@ export function GiderEditModal({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Plaka dropdown - sadece araç kategorisi seçiliyse göster */}
+          {ARAC_KATEGORILERI.includes(formData.kategori) && (
+            <div className="grid gap-2">
+              <Label className="flex items-center gap-2">
+                <Car className="w-4 h-4" />
+                Araç Plakası
+              </Label>
+              <Select
+                value={formData.plaka}
+                onValueChange={(val) => setFormData({ ...formData, plaka: val })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Plaka Seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {araclar?.map((a) => (
+                    <SelectItem key={a.id} value={a.plaka}>
+                      {a.plaka} {a.marka && a.model ? `(${a.marka} ${a.model})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

@@ -28,7 +28,7 @@ export interface IStorage {
   getAdvancedChartData(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
   getAdvancedChartTrend(yil: number, groupBy: string, names?: string[]): Promise<any[]>;
   getTips(yil: number): Promise<string[]>;
-  getAraclar(): Promise<(Arac & { toplamGider: number })[]>;
+  getAraclar(): Promise<(Arac & { toplamGider: number; seneBasindanBeriGider: number; amortismanGiderYtd: number; toplamMaliyet: number })[]>;
   createArac(arac: InsertArac): Promise<Arac>;
   updateArac(id: string, arac: Partial<InsertArac>): Promise<Arac>;
   deleteArac(id: string): Promise<void>;
@@ -36,6 +36,7 @@ export interface IStorage {
   // Araç Giderleri
   getAracGiderler(aracId: string): Promise<AracGider[]>;
   createAracGider(gider: InsertAracGider): Promise<AracGider>;
+  insertAracGiderler(giderler: InsertAracGider[]): Promise<AracGider[]>;
   deleteAracGider(id: string): Promise<void>;
 
   // Nakliye verileri
@@ -54,6 +55,7 @@ export interface IStorage {
 
   // Giderler
   getGiderler(ay?: string, yil?: number): Promise<Gider[]>;
+  getGiderlerByPlaka(plaka: string): Promise<Gider[]>;
   insertGiderler(veriler: InsertGiderler[]): Promise<Gider[]>;
   deleteGiderler(ay: string, yil: number): Promise<void>;
   updateGider(id: string, veri: Partial<InsertGiderler>): Promise<Gider>;
@@ -168,6 +170,15 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(gumrukVerileri.ay, ay), eq(gumrukVerileri.yil, yil)));
 
     return new Set(result.map(r => r.rowHash).filter((h): h is string => h !== null));
+  }
+
+  async getExistingFaturas(ay: string, yil: number): Promise<Set<string>> {
+    const result = await db.select({ faturaNo: gumrukVerileri.faturaNo })
+      .from(gumrukVerileri)
+      .where(and(eq(gumrukVerileri.ay, ay), eq(gumrukVerileri.yil, yil)));
+      
+    // Return distinct FaturaNos
+    return new Set(result.map(r => r.faturaNo).filter((f): f is string => f !== null));
   }
 
   async getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]> {
@@ -494,20 +505,36 @@ export class DatabaseStorage implements IStorage {
       .sort();
   }
 
-  async getAraclar(): Promise<(Arac & { toplamGider: number })[]> {
+  async getAraclar(): Promise<(Arac & { toplamGider: number; seneBasindanBeriGider: number; amortismanGiderYtd: number; toplamMaliyet: number })[]> {
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+    const startOfYear = `${currentYear}-01-01`;
+
     const result = await db
       .select({
         arac: araclar,
         toplamGider: sql<string>`coalesce(sum(${aracGiderler.tutar}), 0)`,
+        ytdGider: sql<string>`coalesce(sum(CASE WHEN ${aracGiderler.tarih} >= ${startOfYear} THEN ${aracGiderler.tutar} ELSE 0 END), 0)`,
       })
       .from(araclar)
       .leftJoin(aracGiderler, eq(araclar.id, aracGiderler.aracId))
       .groupBy(araclar.id);
 
-    return result.map(({ arac, toplamGider }) => ({
-      ...arac,
-      toplamGider: Number(toplamGider),
-    }));
+    return result.map(({ arac, toplamGider, ytdGider }) => {
+      const trafikFiyat = Number(arac.trafikSigortaFiyat || 0);
+      const kaskoFiyat = Number(arac.kaskoSigortaFiyat || 0);
+      const amortismanAylik = (trafikFiyat + kaskoFiyat) / 12;
+      const amortismanGiderYtd = amortismanAylik * currentMonth;
+      const seneBasindanBeriGider = Number(ytdGider);
+
+      return {
+        ...arac,
+        toplamGider: Number(toplamGider),
+        seneBasindanBeriGider: seneBasindanBeriGider,
+        amortismanGiderYtd: amortismanGiderYtd,
+        toplamMaliyet: seneBasindanBeriGider + amortismanGiderYtd,
+      };
+    });
   }
 
   async createArac(arac: InsertArac): Promise<Arac> {
@@ -539,6 +566,22 @@ export class DatabaseStorage implements IStorage {
   async createAracGider(gider: InsertAracGider): Promise<AracGider> {
     const [newGider] = await db.insert(aracGiderler).values(gider).returning();
     return newGider;
+  }
+
+  async insertAracGiderler(giderler: InsertAracGider[]): Promise<AracGider[]> {
+    if (giderler.length === 0) return [];
+    
+    // Batch inserts for large datasets
+    const BATCH_SIZE = 100;
+    const results: AracGider[] = [];
+    
+    for (let i = 0; i < giderler.length; i += BATCH_SIZE) {
+      const batch = giderler.slice(i, i + BATCH_SIZE);
+      const inserted = await db.insert(aracGiderler).values(batch).returning();
+      results.push(...inserted);
+    }
+    
+    return results;
   }
 
   async deleteAracGider(id: string): Promise<void> {
@@ -662,6 +705,14 @@ export class DatabaseStorage implements IStorage {
       return await db.select().from(giderler).where(and(...filters)).orderBy(giderler.tarih);
     }
     return await db.select().from(giderler).orderBy(giderler.tarih);
+  }
+
+  async getGiderlerByPlaka(plaka: string): Promise<Gider[]> {
+    return await db
+      .select()
+      .from(giderler)
+      .where(eq(giderler.plaka, plaka))
+      .orderBy(desc(giderler.tarih));
   }
 
   async insertGiderler(veriler: InsertGiderler[]): Promise<Gider[]> {
@@ -1004,8 +1055,6 @@ export class DatabaseStorage implements IStorage {
 
   async getBranchProfitability(yil: number, ay?: string): Promise<any[]> {
     // 1. Get Income by Branch (Gümrük verileri)
-    // Join with calisanlar to get branch
-    // Note: This matches girisElemani with calisanlar.adSoyad
     const filters = [eq(gumrukVerileri.yil, yil)];
     if (ay && ay !== "ALL") filters.push(eq(gumrukVerileri.ay, ay));
 
@@ -1023,12 +1072,102 @@ export class DatabaseStorage implements IStorage {
     }).from(calisanlar).where(and(eq(calisanlar.yil, yil), ay && ay !== "ALL" ? eq(calisanlar.ay, ay) : undefined));
 
     const employeeMap = new Map();
-    const branchCosts = new Map();
+    const branchPersonelCosts = new Map<string, number>();
 
     employees.forEach(e => {
         employeeMap.set(e.adSoyad, e.sube || "Belirsiz");
         const maliyet = parseFloat(e.maliyet || "0");
-        branchCosts.set(e.sube || "Belirsiz", (branchCosts.get(e.sube || "Belirsiz") || 0) + maliyet);
+        branchPersonelCosts.set(e.sube || "Belirsiz", (branchPersonelCosts.get(e.sube || "Belirsiz") || 0) + maliyet);
+    });
+
+    // 2. Get Gümrük Giderleri by Branch (from giderler table)
+    // Exclude ARAÇ YAKIT category (will be handled separately from Araçlar page)
+    const giderFilters = [eq(giderler.yil, yil)];
+    if (ay && ay !== "ALL") giderFilters.push(eq(giderler.ay, ay));
+
+    const giderlerResult = await db.select({
+        sube: giderler.sube,
+        kategori: giderler.kategori,
+        malBedeli: giderler.malBedeli,
+    }).from(giderler).where(and(...giderFilters));
+
+    const branchGumrukCosts = new Map<string, number>();
+    giderlerResult.forEach(g => {
+        // ARAÇ YAKIT kategorisini hariç tut
+        if (g.kategori?.toUpperCase() === "ARAÇ YAKIT") return;
+
+        const branch = g.sube || "Belirsiz";
+        const tutar = parseFloat(g.malBedeli || "0");
+        branchGumrukCosts.set(branch, (branchGumrukCosts.get(branch) || 0) + tutar);
+    });
+
+    // 3. Get Araç Giderleri by Branch (Yakıt, Kasko, Trafik)
+    const araclarList = await db.select().from(araclar);
+    const aracGiderlerResult = await db.select().from(aracGiderler);
+
+    const aracSubeMap = new Map<string, string>();
+    araclarList.forEach(a => {
+        aracSubeMap.set(a.id, a.sube || "Belirsiz");
+    });
+
+    const branchAracCosts = new Map<string, number>();
+
+    // a) Manual vehicle expenses (filter by year)
+    const yilStr = yil.toString();
+    aracGiderlerResult.forEach(g => {
+        if (!g.tarih.startsWith(yilStr)) return;
+
+        if (ay && ay !== "ALL") {
+            const ayIndex = ["ocak", "subat", "mart", "nisan", "mayis", "haziran",
+                           "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"].indexOf(ay.toLowerCase());
+            if (ayIndex !== -1) {
+                const monthStr = String(ayIndex + 1).padStart(2, '0');
+                if (!g.tarih.startsWith(`${yilStr}-${monthStr}`)) return;
+            }
+        }
+
+        const branch = aracSubeMap.get(g.aracId) || "Belirsiz";
+        const tutar = parseFloat(g.tutar || "0");
+        branchAracCosts.set(branch, (branchAracCosts.get(branch) || 0) + tutar);
+    });
+
+    // b) Kasko and Trafik insurance from araçlar
+    araclarList.forEach(a => {
+        const branch = a.sube || "Belirsiz";
+
+        // Trafik Sigortası
+        if (a.trafikBitisTarihi && a.trafikSigortaFiyat) {
+            const bitisTarihi = new Date(a.trafikBitisTarihi);
+            const baslangicTarihi = new Date(bitisTarihi);
+            baslangicTarihi.setFullYear(baslangicTarihi.getFullYear() - 1);
+
+            if (baslangicTarihi.getFullYear() === yil) {
+                if (ay && ay !== "ALL") {
+                    const ayIndex = ["ocak", "subat", "mart", "nisan", "mayis", "haziran",
+                                   "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"].indexOf(ay.toLowerCase());
+                    if (ayIndex !== -1 && baslangicTarihi.getMonth() !== ayIndex) return;
+                }
+                const tutar = parseFloat(a.trafikSigortaFiyat || "0");
+                branchAracCosts.set(branch, (branchAracCosts.get(branch) || 0) + tutar);
+            }
+        }
+
+        // Kasko
+        if (a.kaskoBitisTarihi && a.kaskoSigortaFiyat) {
+            const bitisTarihi = new Date(a.kaskoBitisTarihi);
+            const baslangicTarihi = new Date(bitisTarihi);
+            baslangicTarihi.setFullYear(baslangicTarihi.getFullYear() - 1);
+
+            if (baslangicTarihi.getFullYear() === yil) {
+                if (ay && ay !== "ALL") {
+                    const ayIndex = ["ocak", "subat", "mart", "nisan", "mayis", "haziran",
+                                   "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"].indexOf(ay.toLowerCase());
+                    if (ayIndex !== -1 && baslangicTarihi.getMonth() !== ayIndex) return;
+                }
+                const tutar = parseFloat(a.kaskoSigortaFiyat || "0");
+                branchAracCosts.set(branch, (branchAracCosts.get(branch) || 0) + tutar);
+            }
+        }
     });
 
     // Customs mapping for Bursa
@@ -1095,11 +1234,11 @@ export class DatabaseStorage implements IStorage {
         "PENDİK GÜMRÜK MÜDÜRLÜĞÜ"
     ];
 
-    const branchIncome = new Map();
+    const branchIncome = new Map<string, number>();
     gumrukResult.forEach(g => {
         let branch = "Belirsiz";
         const gumrukUpper = (g.gumruk || "").toUpperCase();
-        
+
         if (bursaGumrukleri.some(bg => gumrukUpper.includes(bg))) {
             branch = "Bursa";
         } else if (gumrukUpper.includes("GEMLİK")) {
@@ -1116,18 +1255,39 @@ export class DatabaseStorage implements IStorage {
         branchIncome.set(branch, (branchIncome.get(branch) || 0) + gelir);
     });
 
-    // Combine
-    const finalResult: { sube: string; gelir: number; gider: number; kar: number }[] = [];
-    const allBranches = new Set<string>([...Array.from(branchIncome.keys()), ...Array.from(branchCosts.keys())]);
+    // Combine all branches
+    const finalResult: {
+        sube: string;
+        gelir: number;
+        giderPersonel: number;
+        giderGumruk: number;
+        giderArac: number;
+        toplamGider: number;
+        kar: number
+    }[] = [];
+
+    const allBranches = new Set<string>([
+        ...Array.from(branchIncome.keys()),
+        ...Array.from(branchPersonelCosts.keys()),
+        ...Array.from(branchGumrukCosts.keys()),
+        ...Array.from(branchAracCosts.keys())
+    ]);
 
     allBranches.forEach(branch => {
         const gelir = branchIncome.get(branch) || 0;
-        const gider = branchCosts.get(branch) || 0;
+        const giderPersonel = branchPersonelCosts.get(branch) || 0;
+        const giderGumruk = branchGumrukCosts.get(branch) || 0;
+        const giderArac = branchAracCosts.get(branch) || 0;
+        const toplamGider = giderPersonel + giderGumruk + giderArac;
+
         finalResult.push({
             sube: branch,
             gelir,
-            gider,
-            kar: gelir - gider
+            giderPersonel,
+            giderGumruk,
+            giderArac,
+            toplamGider,
+            kar: gelir - toplamGider
         });
     });
 

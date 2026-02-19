@@ -420,6 +420,32 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/araclar/bulk-gider", async (req, res) => {
+    try {
+      const veriler = Array.isArray(req.body) ? req.body : [req.body];
+      
+      const validVeriler = [];
+      for (const item of veriler) {
+        const parsed = insertAracGiderSchema.safeParse(item);
+        if (parsed.success) {
+          validVeriler.push(parsed.data);
+        } else {
+          console.warn("Invalid vehicle expense item:", item, parsed.error);
+        }
+      }
+
+      if (validVeriler.length === 0 && veriler.length > 0) {
+        return res.status(400).json({ error: "Hiçbir gider kaydı geçerli formatta değil." });
+      }
+
+      const inserted = await storage.insertAracGiderler(validVeriler);
+      res.json({ success: true, count: inserted.length });
+    } catch (err) {
+      console.error("Toplu araç gideri eklenirken hata:", err);
+      res.status(500).json({ error: "Giderler eklenirken hata oluştu" });
+    }
+  });
+
   app.delete("/api/araclar/giderler/:id", async (req, res) => {
     try {
       await storage.deleteAracGider(req.params.id);
@@ -1494,6 +1520,18 @@ export async function registerRoutes(
     }
   });
 
+  // Plakaya göre giderleri getir (Araçlar sayfası için)
+  app.get("/api/giderler/by-plaka/:plaka", async (req, res) => {
+    try {
+      const { plaka } = req.params;
+      const giderler = await storage.getGiderlerByPlaka(plaka);
+      res.json(giderler);
+    } catch (error) {
+      console.error("Plakaya göre giderler alınırken hata:", error);
+      res.status(500).json({ error: "Giderler alınamadı" });
+    }
+  });
+
   // Nakliye - Gümrük Eşleştirme (Konteyner Cross-Reference)
   app.post("/api/nakliye/eslestir", async (req, res) => {
     try {
@@ -1990,11 +2028,14 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Geçerli veri bulunamadı" });
       }
 
-      // Mevcut row hash'leri al
-      const existingHashes = await storage.getExistingRowHashes(ay, yil);
+      // Mevcut Fatura Numaralarını al (Daha güvenilir duplicate kontrolü için)
+      const existingFaturas = await storage.getExistingFaturas(ay, yil);
 
-      // Sadece yeni satırları filtrele
-      const yeniVeriler = veriler.filter(v => !existingHashes.has(v.rowHash));
+      // Sadece yeni satırları filtrele (Fatura numarası eşleşmeyenleri al)
+      const yeniVeriler = veriler.filter(v => {
+        if (!v.faturaNo) return true; // Fatura numarası yoksa ekle (güvenli taraf)
+        return !existingFaturas.has(v.faturaNo);
+      });
 
       if (yeniVeriler.length === 0) {
         return res.json({

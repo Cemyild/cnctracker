@@ -216,8 +216,9 @@ export default function Calisanlar() {
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
     const { toast } = useToast();
 
-    // Ana sayfa ay seçimi (1-12 veya "toplam" için 0)
+    // Ana sayfa ay ve yıl seçimi
     const [selectedAy, setSelectedAy] = useState<string>("1");
+    const [selectedYil, setSelectedYil] = useState<number>(2026);
     const [hazineTesvikiVar, setHazineTesvikiVar] = useState(true);
 
 
@@ -239,9 +240,9 @@ export default function Calisanlar() {
 
             let url = "/api/calisanlar";
             if (selectedAy !== "toplam") {
-                url += `?ay=${selectedAy}&yil=2025`; // Yıl şimdilik sabit 2025
+                url += `?ay=${selectedAy}&yil=${selectedYil}`;
             } else {
-                url += `?ay=toplam&yil=2025`;
+                url += `?ay=toplam&yil=${selectedYil}`;
             }
 
             const response = await fetch(url || "/api/calisanlar");
@@ -259,7 +260,7 @@ export default function Calisanlar() {
 
     useEffect(() => {
         fetchCalisanlar();
-    }, [selectedAy]); // Ay değişince tekrar çek
+    }, [selectedAy, selectedYil]); // Ay veya yıl değişince tekrar çek
 
     const formatCurrency = (val: number | string | null | undefined) => {
         if (val === null || val === undefined) return "-";
@@ -381,7 +382,7 @@ export default function Calisanlar() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     ay: selectedAy === "toplam" ? "1" : selectedAy,
-                    yil: 2025,
+                    yil: selectedYil,
                     data: previewData
                 })
             });
@@ -575,16 +576,29 @@ export default function Calisanlar() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-4 bg-background/30 backdrop-blur-xl p-2 rounded-2xl border border-white/10 shadow-2xl">
+                        {/* Yıl Seçici */}
+                        <Select value={String(selectedYil)} onValueChange={(val) => setSelectedYil(parseInt(val))}>
+                            <SelectTrigger className="w-[100px] border-none bg-white/5">
+                                <SelectValue placeholder="Yıl" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="2024">2024</SelectItem>
+                                <SelectItem value="2025">2025</SelectItem>
+                                <SelectItem value="2026">2026</SelectItem>
+                                <SelectItem value="2027">2027</SelectItem>
+                            </SelectContent>
+                        </Select>
+
                         {/* Ay Seçici */}
                         <Select value={selectedAy} onValueChange={setSelectedAy}>
-                            <SelectTrigger className="w-[160px] border-none bg-white/5">
+                            <SelectTrigger className="w-[140px] border-none bg-white/5">
                                 <Calendar className="w-4 h-4 mr-2" />
                                 <SelectValue placeholder="Dönem Seç" />
                             </SelectTrigger>
                             <SelectContent>
                                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(ay => (
                                     <SelectItem key={ay} value={String(ay)}>
-                                        {ayNumarasiToAd(ay)} 2025
+                                        {ayNumarasiToAd(ay)}
                                     </SelectItem>
                                 ))}
                                 <SelectItem value="toplam" className="font-bold border-t mt-1 pt-2">
@@ -654,7 +668,7 @@ export default function Calisanlar() {
                 <div className="text-center">
                     <Badge className="text-lg px-4 py-2 bg-primary/10 text-primary border-primary/20">
                         <Calendar className="w-5 h-5 mr-2" />
-                        {selectedAy === "toplam" ? "2025 Yıllık Toplam" : `${ayNumarasiToAd(parseInt(selectedAy))} 2025`}
+                        {selectedAy === "toplam" ? `${selectedYil} Yıllık Toplam` : `${ayNumarasiToAd(parseInt(selectedAy))} ${selectedYil}`}
                     </Badge>
                 </div>
 
@@ -781,7 +795,7 @@ export default function Calisanlar() {
                                         <div className="p-4 bg-blue-500/5 rounded-xl border border-blue-500/10">
                                             <h4 className="text-xs font-bold uppercase text-blue-600 mb-3 flex items-center gap-2">
                                                 <Calculator className="w-4 h-4" />
-                                                Maaş Bilgileri - {ayNumarasiToAd(parseInt(selectedPerson.ay || selectedAy))} 2025
+                                                Maaş Bilgileri - {ayNumarasiToAd(parseInt(selectedPerson.ay || selectedAy))} {selectedYil}
                                             </h4>
                                             <div className="grid grid-cols-2 gap-2 text-sm">
                                                 <div className="flex justify-between">
@@ -868,7 +882,7 @@ export default function Calisanlar() {
             <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
                 <DialogContent className="sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>Bordro Yükle - {ayNumarasiToAd(parseInt(selectedAy))} 2025</DialogTitle>
+                        <DialogTitle>Bordro Yükle - {ayNumarasiToAd(parseInt(selectedAy))} {selectedYil}</DialogTitle></invoke>
                     </DialogHeader>
 
                     <div className="space-y-6 py-4">

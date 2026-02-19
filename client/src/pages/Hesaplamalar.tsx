@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { calculateYearlySalary, CalculationParams, SalaryResult, calculateNetFromGross, findGrossFromNet } from "@/lib/salary-utils";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Calculator, Download } from "lucide-react";
@@ -28,9 +28,9 @@ export default function Hesaplamalar() {
                 <TabsList>
                         <TabsTrigger value="maas">Maaş Hesaplama (Tekil)</TabsTrigger>
                         <TabsTrigger value="2026-plan">2026 Planlama (Toplu)</TabsTrigger>
+                        <TabsTrigger value="2026-monthly">2026 Aylık</TabsTrigger>
                         <TabsTrigger value="yemek">Yemek Kartı</TabsTrigger>
                     <TabsTrigger value="tarife">Tarife</TabsTrigger>
-                    <TabsTrigger value="2026-plan">2026 Hesaplama</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="maas">
@@ -39,6 +39,10 @@ export default function Hesaplamalar() {
 
                 <TabsContent value="2026-plan">
                     <SalaryPlanning2026 />
+                </TabsContent>
+
+                <TabsContent value="2026-monthly">
+                    <SalaryMonthly2026 />
                 </TabsContent>
 
                 <TabsContent value="yemek">
@@ -920,5 +924,142 @@ function SalaryCalculator() {
                 </Card>
             </div>
         </div>
+    );
+}
+
+// --- 2026 AYLIK TOPLAM MALİYET MODÜLÜ ---
+function SalaryMonthly2026() {
+    const { data: employees, isLoading: loadingEmployees } = useQuery<Calisan[]>({
+        queryKey: ["/api/calisanlar"],
+        queryFn: async () => {
+            const response = await fetch("/api/calisanlar");
+            if (!response.ok) throw new Error("Network response was not ok");
+            return response.json();
+        },
+    });
+
+    const { data: existingPlans, isLoading: loadingPlans } = useQuery<SalaryPlan[]>({
+        queryKey: ["/api/salary-plans/2026"],
+        queryFn: async () => {
+             const res = await fetch("/api/salary-plans/2026");
+             if (!res.ok) return [];
+             return res.json();
+        }
+    });
+
+    const [selectedBranch, setSelectedBranch] = React.useState<string>("all");
+
+    const uniqueEmployees = React.useMemo(() => {
+        if (!employees) return [];
+        const map = new Map<string, Calisan>();
+        employees.forEach(emp => {
+            map.set(emp.tcNo, emp);
+        });
+        return Array.from(map.values());
+    }, [employees]);
+
+    const monthlyAggregation = React.useMemo(() => {
+        const totals = Array(12).fill(null).map((_, i) => ({
+            month: i,
+            totalNet: 0,
+            totalGross: 0,
+            totalEmployerShare: 0,
+            totalCost: 0
+        }));
+
+        if (!existingPlans || existingPlans.length === 0) return totals;
+
+        existingPlans.forEach(plan => {
+            const emp = uniqueEmployees.find(e => e.tcNo === plan.tcNo);
+            if (!emp) return;
+            if (selectedBranch !== "all" && emp.sube !== selectedBranch) return;
+
+            const netInput = Number(plan.netSalary);
+            if (isNaN(netInput) || netInput <= 0) return;
+
+            const params: CalculationParams = {
+                employeeType: (plan.employeeType as any) || "normal",
+                hasBes: false,
+                disabilityDegree: 0,
+                isTreasuryIncentiveApplied: true
+            };
+
+            const yearlyResult = calculateYearlySalary(Array(12).fill(netInput), params);
+            
+            yearlyResult.forEach((res, monthIdx) => {
+                totals[monthIdx].totalNet += res.net;
+                totals[monthIdx].totalGross += res.gross;
+                totals[monthIdx].totalEmployerShare += (res.employerCost - res.gross);
+                totals[monthIdx].totalCost += res.employerCost;
+            });
+        });
+
+        return totals;
+    }, [existingPlans, uniqueEmployees, selectedBranch]);
+
+    const monthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+
+    if (loadingEmployees || loadingPlans) return <div className="p-8 text-center text-muted-foreground italic">Yükleniyor...</div>;
+
+    return (
+        <Card className="border-t-4 border-t-indigo-600 shadow-lg">
+            <CardHeader className="bg-slate-50/50 border-b">
+                <div className="flex justify-between items-center">
+                    <div>
+                        <CardTitle className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                            2026 Aylık Toplam Maliyet Planı
+                        </CardTitle>
+                        <CardDescription>Planlanan maaşlara göre her ay için işveren maliyet kırılımı</CardDescription>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs font-semibold text-slate-500 uppercase">Şube Filtresi</Label>
+                        <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+                            <SelectTrigger className="w-[200px] h-9">
+                                <SelectValue placeholder="Tüm Şubeler" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tüm Şubeler</SelectItem>
+                                {Array.from(new Set(uniqueEmployees.map(e => e.sube))).filter(Boolean).map(sube => (
+                                    <SelectItem key={sube!} value={sube!}>{sube}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent className="p-0">
+                <Table>
+                    <TableHeader className="bg-slate-100">
+                        <TableRow>
+                            <TableHead className="w-[150px]">Ay</TableHead>
+                            <TableHead className="text-right">Tpl. Net Maaş</TableHead>
+                            <TableHead className="text-right">Tpl. Brüt Maaş</TableHead>
+                            <TableHead className="text-right">Tpl. SGK/İşsizlik (İşveren)</TableHead>
+                            <TableHead className="text-right font-bold text-indigo-700">Toplam İşveren Maliyeti</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {monthlyAggregation.map((row) => (
+                            <TableRow key={row.month} className={row.month % 2 === 0 ? "bg-white" : "bg-slate-50/30"}>
+                                <TableCell className="font-medium">{monthNames[row.month]}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(row.totalNet)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(row.totalGross)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(row.totalEmployerShare)}</TableCell>
+                                <TableCell className="text-right font-bold text-indigo-700">{formatCurrency(row.totalCost)}</TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                    <TableFooter className="bg-slate-100 font-bold">
+                        <TableRow>
+                            <TableCell>YILLIK TOPLAM</TableCell>
+                            <TableCell className="text-right">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalNet, 0))}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalGross, 0))}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalEmployerShare, 0))}</TableCell>
+                            <TableCell className="text-right text-lg text-indigo-900">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalCost, 0))}</TableCell>
+                        </TableRow>
+                    </TableFooter>
+                </Table>
+            </CardContent>
+        </Card>
     );
 }

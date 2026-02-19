@@ -16,10 +16,10 @@ import {
   TableRow,
   TableFooter,
 } from "@/components/ui/table";
-import { Loader2, TrendingUp, Calculator, Lock, Unlock, ArrowRight, PieChart as PieIcon } from "lucide-react";
-import { aylar } from "@shared/schema";
+import { Loader2, TrendingUp, Calculator, Lock, Unlock, ArrowRight, PieChart as PieIcon, ClipboardList } from "lucide-react";
+import { aylar, type Calisan, type SalaryPlan } from "@shared/schema";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
-
+import { calculateYearlySalary, type CalculationParams } from "@/lib/salary-utils";
 import { Checkbox } from "@/components/ui/checkbox";
 
 // Type definitions matching the API response
@@ -59,8 +59,8 @@ export function AnalysisTab() {
   // Salary Mode: 'smart' = Auto-calculate based on inflation, 'manual' = User inputs
   const [salaryMode, setSalaryMode] = useState<'smart' | 'manual'>('smart');
   const [excludeManagement, setExcludeManagement] = useState(false);
-  
-  // Manual Salaries Store: { 'ocak': 50000, 'subat': 55000 ... }
+  const [useSalaryPlan, setUseSalaryPlan] = useState(false); // New state for using 2026 Salary Plan
+
   // Manual Salaries Store: { 'ocak': 50000, 'subat': 55000 ... }
   const [manualSalaries, setManualSalaries] = useState<Record<string, number>>({});
 
@@ -74,6 +74,21 @@ export function AnalysisTab() {
 
   const { data: targetData, isLoading: targetLoading } = useQuery<OzetSummaryItem[]>({
     queryKey: ["/api/gumruk/ozet-summary", String(targetYear)],
+  });
+
+  // Fetch 2026 Salary Plans
+  const { data: salaryPlans } = useQuery<SalaryPlan[]>({
+    queryKey: ["/api/salary-plans/2026"],
+    queryFn: async () => {
+      const res = await fetch("/api/salary-plans/2026");
+      if (!res.ok) return [];
+      return res.json();
+    }
+  });
+
+  // Fetch all employees to match plans
+  const { data: employees } = useQuery<Calisan[]>({
+     queryKey: ["/api/calisanlar"],
   });
 
   // --- Effects ---
@@ -94,6 +109,42 @@ export function AnalysisTab() {
   }, [baseData, targetData]);
 
   // --- Logic ---
+  // 1. Aggregate Planned Costs from 2026 Salary Plan
+  const plannedMonthlyCosts = useMemo(() => {
+    const totals = Array(12).fill(0);
+    if (!salaryPlans || !employees || employees.length === 0) return totals;
+
+    // Get unique employees
+    const empMap = new Map<string, Calisan>();
+    employees.forEach(emp => empMap.set(emp.tcNo, emp));
+
+    salaryPlans.forEach(plan => {
+      const emp = empMap.get(plan.tcNo);
+      if (!emp) return;
+
+      const netInput = Number(plan.netSalary);
+      if (isNaN(netInput) || netInput <= 0) return;
+
+      const params: CalculationParams = {
+        employeeType: (plan.employeeType as any) || "normal",
+        hasBes: false,
+        disabilityDegree: 0,
+        isTreasuryIncentiveApplied: true
+      };
+
+      const yearlyResult = calculateYearlySalary(Array(12).fill(netInput), params);
+      yearlyResult.forEach((res, idx) => {
+        // If excluding management, skip if management
+        if (excludeManagement && (plan.employeeType === 'management' || emp.statu === 'YÖNETİM' || emp.statu === 'YÖNETİCİ')) {
+          return;
+        }
+        totals[idx] += res.employerCost;
+      });
+    });
+
+    return totals;
+  }, [salaryPlans, employees, excludeManagement]);
+
   const projectionData = useMemo(() => {
     if (!baseData) return [];
 
@@ -115,28 +166,26 @@ export function AnalysisTab() {
       if (hasActualData) {
         // Use ACTUAL data if available
         projectedSales = actualTargetData.satisToplam;
-        projectedExpense = actualTargetData.giderToplam;
+        projectedExpense = actualTargetData.giderKdvHaric; // KDV hariç gider kullan
         
         // For salary, allow override even if data exists? 
         // Usually actuals are final. But let's assume if it came from DB, it's real.
         // However, user said "2026 Jan salaries not uploaded yet". 
         // So we might need to check if salary is 0.
         if (actualTargetData.calisanMaliyet > 0) {
-             projectedSalary = actualTargetData.calisanMaliyet;
+              projectedSalary = actualTargetData.calisanMaliyet;
         } else {
-             // Fallback to projection if DB has 0
-             if (salaryMode === 'manual') {
-                 projectedSalary = manualSalaries[ayKey] || 0;
-             } else {
-                 // Smart Mode: Dec 2025 * Inflation? Or Base Month * Inflation?
-                 // Usually salaries are flat or step-increased. 
-                 // Let's use Base Month * Inflation for simplicity of "Year over Year" 
-                 // OR better: use last known salary (Dec 2025) * Inflation.
-                 // Let's stick to Base Month * Inflation for matching seasonality/staffing count?
-                 // No, salary is usually fixed.
-                 // Let's use: Base Month Cost * Inflation.
-                 projectedSalary = (baseMonthData?.calisanMaliyet || 0) * inflationRate;
-             }
+              // Fallback to projection if DB has 0
+              if (useSalaryPlan) {
+                  // Use Plan from database
+                  // Find index of ayKey in aylar array
+                  const ayIndex = aylar.findIndex(a => a.value === ayKey);
+                  projectedSalary = plannedMonthlyCosts[ayIndex] || 0;
+              } else if (salaryMode === 'manual') {
+                  projectedSalary = manualSalaries[ayKey] || 0;
+              } else {
+                  projectedSalary = (baseMonthData?.calisanMaliyet || 0) * inflationRate;
+              }
         }
 
       } else {
@@ -146,10 +195,13 @@ export function AnalysisTab() {
         // Let's calculate parts:
         
         projectedSales = (baseMonthData?.satisToplam || 0) * salesGrowthRate;
-        projectedExpense = (baseMonthData?.giderToplam || 0) * expenseGrowthRate;
+        projectedExpense = (baseMonthData?.giderKdvHaric || 0) * expenseGrowthRate; // KDV hariç gider kullan
 
         // Salary Projection
-         if (salaryMode === 'manual') {
+         if (useSalaryPlan) {
+             const ayIndex = aylar.findIndex(a => a.value === ayKey);
+             projectedSalary = plannedMonthlyCosts[ayIndex] || 0;
+         } else if (salaryMode === 'manual') {
              projectedSalary = manualSalaries[ayKey] || 0;
          } else {
              // Base cost adjusted for exclusion if needed
@@ -172,7 +224,13 @@ export function AnalysisTab() {
            }
       } else {
           // Projection
-          if (salaryMode === 'manual') {
+          if (useSalaryPlan) {
+              // Estimate Net from Cost for Plan Mode
+              const baseNet = baseMonthData?.calisanNet || 0;
+              const baseCost = baseMonthData?.calisanMaliyet || 0;
+              const ratio = baseCost > 0 ? baseNet / baseCost : 0.65;
+              projectedSalaryNet = projectedSalary * ratio;
+          } else if (salaryMode === 'manual') {
               // In manual mode, we don't know the precise Net/Gross ratio. 
               // We'll estimate based on Base Year ratio for that month.
               const baseNet = baseMonthData?.calisanNet || 0;
@@ -198,30 +256,44 @@ export function AnalysisTab() {
            projectedSalary -= (actualTargetData.yonetimNetUcret || 0);
       }
       
-      const profit = projectedSales - projectedExpense - projectedSalary;
-      
       // Breakdown for Columns
       // Base Split
       const baseSalesNet = baseMonthData?.satisKdvHaric || 0;
       const baseSalesVAT = baseMonthData?.satisKdv || 0;
+      const baseExpenseNet = baseMonthData?.giderKdvHaric || 0;
+      const baseExpenseVAT = baseMonthData?.giderKdv || 0;
 
       // Projected Split
       // We need to derive Net/VAT from Projected Total Sales.
       // We assume the VAT ratio remains same as Base Year for that month.
       let projectedSalesNet = 0;
       let projectedSalesVAT = 0;
+      let projectedExpenseNet = 0;
+      let projectedExpenseVAT = 0;
       
       if (hasActualData && actualTargetData) {
           projectedSalesNet = actualTargetData.satisKdvHaric;
           projectedSalesVAT = actualTargetData.satisKdv;
+          projectedExpenseNet = actualTargetData.giderKdvHaric;
+          projectedExpenseVAT = actualTargetData.giderKdv;
       } else {
           // Calculate using base ratio
           const baseTotal = baseSalesNet + baseSalesVAT;
           const vatRatio = baseTotal > 0 ? baseSalesVAT / baseTotal : 0.20; // Default to 20% if no base data
-          
+
           projectedSalesVAT = projectedSales * vatRatio;
           projectedSalesNet = projectedSales - projectedSalesVAT;
+
+          // projectedExpense zaten KDV hariç olarak hesaplandı
+          projectedExpenseNet = projectedExpense;
+          // KDV'yi ayrıca hesapla (gösterim için)
+          const baseExpTotal = baseExpenseNet + baseExpenseVAT;
+          const expVatRatio = baseExpTotal > 0 ? baseExpenseVAT / baseExpenseNet : 0.20;
+          projectedExpenseVAT = projectedExpense * expVatRatio;
       }
+
+      // NEW FORMULA: Net Sales - Net Expense - Personnel
+      const profit = projectedSalesNet - projectedExpenseNet - projectedSalary;
 
       return {
         ...ayItem,
@@ -229,18 +301,22 @@ export function AnalysisTab() {
         baseSalesTotal: baseMonthData?.satisToplam || 0,
         baseSalesNet,
         baseSalesVAT,
+        baseExpenseNet,
+        baseExpenseVAT,
         
         projectedSalesTotal: projectedSales,
         projectedSalesNet,
         projectedSalesVAT,
 
         projectedExpense,
+        projectedExpenseNet,
+        projectedExpenseVAT,
         projectedSalary,
         projectedSalaryNet,
         profit
       };
     });
-  }, [baseData, targetData, salesGrowthRate, expenseGrowthRate, inflationRate, salaryMode, manualSalaries, excludeManagement]);
+  }, [baseData, targetData, salaryPlans, employees, plannedMonthlyCosts, salesGrowthRate, expenseGrowthRate, inflationRate, salaryMode, manualSalaries, excludeManagement, useSalaryPlan]);
 
   // Helper to update manual salary
   const handleManualSalaryChange = (ay: string, val: string) => {
@@ -253,8 +329,9 @@ export function AnalysisTab() {
 
   if (baseLoading) return <div className="flex h-48 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
 
-  const totalProjectedProfit = projectionData.reduce((acc, curr) => acc + curr.profit, 0);
-  const totalProjectedSales = projectionData.reduce((acc, curr) => acc + curr.projectedSalesTotal, 0);
+  const totalProjectedProfit = projectionData.reduce((acc: number, curr: any) => acc + curr.profit, 0);
+  const totalProjectedSales = projectionData.reduce((acc: number, curr: any) => acc + curr.projectedSalesTotal, 0);
+  const totalProjectedSalesNet = projectionData.reduce((acc: number, curr: any) => acc + curr.projectedSalesNet, 0);
 
   return (
     <div className="space-y-6">
@@ -299,8 +376,8 @@ export function AnalysisTab() {
             <p className="text-xs text-muted-foreground text-right">%{(expenseGrowthRate * 100 - 100).toFixed(0)} Artış</p>
           </div>
 
-          {/* Salary Inflation Slider (Only for Smart Mode) */}
-          <div className={salaryMode === 'manual' ? 'opacity-50 pointer-events-none space-y-3' : 'space-y-3'}>
+          {/* Salary Inflation Slider (Only for Smart Mode and no Salary Plan) */}
+          <div className={(salaryMode === 'manual' || useSalaryPlan) ? 'opacity-50 pointer-events-none space-y-3' : 'space-y-3'}>
              <div className="flex justify-between">
               <Label>Maaş Zam Oranı (Enflasyon)</Label>
               <Badge variant="secondary">x{inflationRate.toFixed(2)}</Badge>
@@ -310,24 +387,58 @@ export function AnalysisTab() {
               value={[inflationRate]} 
               onValueChange={(v) => setInflationRate(v[0])} 
             />
-             <p className="text-xs text-muted-foreground text-right">%{(inflationRate * 100 - 100).toFixed(0)} Zam</p>
+             <p className="text-xs text-muted-foreground text-right">
+                 {useSalaryPlan ? "Planlama Modunda Pasif" : `%${(inflationRate * 100 - 100).toFixed(0)} Zam`}
+             </p>
           </div>
 
           {/* Mode Toggle */}
           <div className="flex flex-col justify-center space-y-3 p-4 bg-background rounded-lg border">
-            <Label className="mb-1">Maaş Planlama Yöntemi</Label>
+            <Label className="mb-1">Projeksiyon Yöntemi</Label>
             <div className="flex items-center gap-2">
-                <span className={`text-sm ${salaryMode === 'smart' ? 'font-bold' : 'text-muted-foreground'}`}>Akıllı</span>
+                <span className={`text-sm ${salaryMode === 'smart' && !useSalaryPlan ? 'font-bold' : 'text-muted-foreground'}`}>Akıllı</span>
                 <Switch 
-                    checked={salaryMode === 'manual'}
-                    onCheckedChange={(c) => setSalaryMode(c ? 'manual' : 'smart')}
+                    checked={salaryMode === 'manual' || useSalaryPlan}
+                    onCheckedChange={(c) => {
+                        if (!c) {
+                            setSalaryMode('smart');
+                            setUseSalaryPlan(false);
+                        } else {
+                            setSalaryMode('manual');
+                        }
+                    }}
                 />
-                <span className={`text-sm ${salaryMode === 'manual' ? 'font-bold' : 'text-muted-foreground'}`}>Manuel Giriş</span>
+                <span className={`text-sm ${salaryMode === 'manual' || useSalaryPlan ? 'font-bold' : 'text-muted-foreground'}`}>Manuel/Plan</span>
             </div>
              <p className="text-[10px] text-muted-foreground">
-                {salaryMode === 'smart' 
-                    ? "2025 Maaşları x Zam Oranı" 
-                    : "Her ay için el ile giriş"}
+                {useSalaryPlan ? "2026 Maaş Planı Aktif" : (salaryMode === 'smart' ? "2025 Maaşları x Zam Oranı" : "El ile giriş")}
+            </p>
+          </div>
+
+          {/* Salary Plan Toggle */}
+          <div className="flex flex-col justify-center space-y-3 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
+            <Label className="mb-1 text-indigo-700 font-bold flex items-center gap-1">
+                <ClipboardList className="w-3 h-3" />
+                2026 Maaş Planı
+            </Label>
+             <div className="flex items-center space-x-2">
+                <Switch 
+                    id="useSalaryPlan" 
+                    checked={useSalaryPlan}
+                    onCheckedChange={(checked) => {
+                        setUseSalaryPlan(checked);
+                        if (checked) setSalaryMode('manual'); // Plan is effectively a 'defined' mode
+                    }}
+                />
+                <Label 
+                    htmlFor="useSalaryPlan" 
+                    className="text-xs font-semibold leading-none cursor-pointer text-indigo-900"
+                >
+                    Planlanan Verileri Kullan
+                </Label>
+            </div>
+            <p className="text-[10px] text-indigo-600">
+                Hesaplamalar sayfasındaki 2026 verilerini çeker.
             </p>
           </div>
 
@@ -357,14 +468,16 @@ export function AnalysisTab() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
               <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">Hedef Yıllık Satış</p>
-                  <p className="text-xl font-bold text-blue-600">{formatCurrency(totalProjectedSales)}</p>
+                  <p className="text-xs text-muted-foreground">Hedef Yıllık Satış (Net)</p>
+                  <p className="text-xl font-bold text-blue-600">{formatCurrency(totalProjectedSalesNet)}</p>
+                  <p className="text-[10px] text-muted-foreground">KDV Dahil: {formatCurrency(totalProjectedSales)}</p>
               </CardContent>
           </Card>
           <Card>
               <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">Hedef Yıllık Kar</p>
+                  <p className="text-xs text-muted-foreground">Hedef Yıllık Kar (Net)</p>
                   <p className="text-xl font-bold text-green-600">{formatCurrency(totalProjectedProfit)}</p>
+                  <p className="text-[10px] text-muted-foreground">Margin: %{totalProjectedSalesNet > 0 ? ((totalProjectedProfit / totalProjectedSalesNet) * 100).toFixed(1) : 0}</p>
               </CardContent>
           </Card>
       </div>
@@ -382,22 +495,22 @@ export function AnalysisTab() {
                   </CardTitle>
               </CardHeader>
               <CardContent>
-                  <div className="h-[300px]">
+                  <div className="h-[300px] relative">
                       <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                               <Pie
                                 data={[
                                     { name: "Net Kar", value: Math.max(0, totalProjectedProfit), color: "#10b981" },
-                                    { name: "Personel (İşveren Mal.)", value: projectionData.reduce((a,c) => a+c.projectedSalary, 0), color: "#f97316" },
-                                    { name: "Diğer Giderler", value: projectionData.reduce((a,c) => a+c.projectedExpense, 0), color: "#ef4444" },
+                                    { name: "Personel (İşveren Mal.)", value: projectionData.reduce((a: number,c: any) => a+c.projectedSalary, 0), color: "#f97316" },
+                                    { name: "Giderler (KDV Hariç)", value: projectionData.reduce((a: number,c: any) => a+c.projectedExpenseNet, 0), color: "#ef4444" },
                                 ]}
                                 cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5}
                                 dataKey="value"
                               >
                                   {[
                                     { name: "Net Kar", value: Math.max(0, totalProjectedProfit), color: "#10b981" },
-                                    { name: "Personel (İşveren Mal.)", value: projectionData.reduce((a,c) => a+c.projectedSalary, 0), color: "#f97316" },
-                                    { name: "Diğer Giderler", value: projectionData.reduce((a,c) => a+c.projectedExpense, 0), color: "#ef4444" },
+                                    { name: "Personel (İşveren Mal.)", value: projectionData.reduce((a: number,c: any) => a+c.projectedSalary, 0), color: "#f97316" },
+                                    { name: "Giderler (KDV Hariç)", value: projectionData.reduce((a: number,c: any) => a+c.projectedExpenseNet, 0), color: "#ef4444" },
                                   ].map((entry, index) => (
                                       <Cell key={`cell-${index}`} fill={entry.color} />
                                   ))}
@@ -407,10 +520,10 @@ export function AnalysisTab() {
                           </PieChart>
                       </ResponsiveContainer>
                       {/* Center Label */}
-                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-full text-center pointer-events-none mt-6 ml-6 lg:mt-6 lg:ml-0">
+                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none -mt-4">
                           <div className="text-xs text-muted-foreground">Kar Marjı</div>
                           <div className={`text-xl font-bold ${totalProjectedProfit > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                              %{totalProjectedSales > 0 ? ((totalProjectedProfit / totalProjectedSales) * 100).toFixed(1) : 0}
+                              %{totalProjectedSalesNet > 0 ? ((totalProjectedProfit / totalProjectedSalesNet) * 100).toFixed(1) : 0}
                           </div>
                       </div>
                   </div>
@@ -440,26 +553,26 @@ export function AnalysisTab() {
                   </div>
               </CardHeader>
               <CardContent>
-                   <div className="h-[300px]">
+                   <div className="h-[300px] relative">
                       <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                               <Pie
                                 data={[
-                                    { 
-                                        name: personnelChartMetric === 'net' ? "Personel (Net)" : "Personel (Maliyet)", 
-                                        value: personnelChartMetric === 'net' 
-                                            ? projectionData.reduce((a,c) => a+c.projectedSalaryNet, 0)
-                                            : projectionData.reduce((a,c) => a+c.projectedSalary, 0), 
-                                        color: "#f97316" 
+                                    {
+                                        name: personnelChartMetric === 'net' ? "Personel (Net)" : "Personel (Maliyet)",
+                                        value: personnelChartMetric === 'net'
+                                            ? projectionData.reduce((a: number,c: any) => a+c.projectedSalaryNet, 0)
+                                            : projectionData.reduce((a: number,c: any) => a+c.projectedSalary, 0),
+                                        color: "#f97316"
                                     },
-                                    { 
-                                        name: "Ciro (Kalan)", 
-                                        value: Math.max(0, totalProjectedSales - (
-                                            personnelChartMetric === 'net' 
-                                            ? projectionData.reduce((a,c) => a+c.projectedSalaryNet, 0)
-                                            : projectionData.reduce((a,c) => a+c.projectedSalary, 0)
-                                        )), 
-                                        color: "#e2e8f0" 
+                                    {
+                                        name: "Ciro (Kalan)",
+                                        value: Math.max(0, totalProjectedSalesNet - (
+                                            personnelChartMetric === 'net'
+                                            ? projectionData.reduce((a: number,c: any) => a+c.projectedSalaryNet, 0)
+                                            : projectionData.reduce((a: number,c: any) => a+c.projectedSalary, 0)
+                                        )),
+                                        color: "#e2e8f0"
                                     },
                                 ]}
                                 cx="50%" cy="50%" innerRadius={60} outerRadius={80} startAngle={180} endAngle={0}
@@ -473,14 +586,14 @@ export function AnalysisTab() {
                           </PieChart>
                       </ResponsiveContainer>
                        {/* Center Label for Gauge Effect */}
-                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-[100%] text-center pointer-events-none mt-8 lg:mt-8">
+                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none -mt-6">
                           <div className="text-xs text-muted-foreground">Cirodaki Payı</div>
                           <div className="text-xl font-bold text-orange-600">
-                              %{totalProjectedSales > 0 ? ((
-                                  (personnelChartMetric === 'net' 
-                                      ? projectionData.reduce((a,c) => a+c.projectedSalaryNet, 0)
-                                      : projectionData.reduce((a,c) => a+c.projectedSalary, 0))
-                                  / totalProjectedSales) * 100).toFixed(1) : 0}
+                              %{totalProjectedSalesNet > 0 ? ((
+                                  (personnelChartMetric === 'net'
+                                      ? projectionData.reduce((a: number,c: any) => a+c.projectedSalaryNet, 0)
+                                      : projectionData.reduce((a: number,c: any) => a+c.projectedSalary, 0))
+                                  / totalProjectedSalesNet) * 100).toFixed(1) : 0}
                           </div>
                       </div>
                   </div>
@@ -500,14 +613,14 @@ export function AnalysisTab() {
                 <TableHead rowSpan={2} className="align-middle">Ay</TableHead>
                 <TableHead colSpan={2} className="text-center border-l bg-muted/30">2025 Gerçekleşen</TableHead>
                 <TableHead colSpan={2} className="text-center border-l bg-blue-50/50">2026 Hedef / Gerçekleşen</TableHead>
-                <TableHead rowSpan={2} className="text-right text-red-600 border-l align-middle">Giderler</TableHead>
+                <TableHead rowSpan={2} className="text-right text-red-600 border-l align-middle">Giderler (Net)</TableHead>
                 <TableHead rowSpan={2} className="text-right text-orange-600 border-l align-middle">
                     <div className="flex items-center justify-end gap-1">
                         Personel 
                         {salaryMode === 'manual' ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
                     </div>
                 </TableHead>
-                <TableHead rowSpan={2} className="text-right font-bold text-green-700 border-l align-middle">Net Kar</TableHead>
+                <TableHead rowSpan={2} className="text-right font-bold text-green-700 border-l align-middle">Net Kar (KDV Hariç)</TableHead>
               </TableRow>
               <TableRow>
                  <TableHead className="text-right text-xs text-muted-foreground border-l">KDV'siz</TableHead>
@@ -548,10 +661,15 @@ export function AnalysisTab() {
                   </TableCell>
 
                   <TableCell className="text-right text-red-600 border-l">
-                    {formatCurrency(row.projectedExpense)}
+                    {formatCurrency(row.projectedExpenseNet)}
                   </TableCell>
                   <TableCell className="text-right text-orange-600 border-l">
-                    {salaryMode === 'manual' && !row.isActual ? ( // Can edit if valid month and Manual Mode
+                    {useSalaryPlan && !row.isActual ? (
+                        <div className="flex items-center justify-end gap-1 font-bold text-indigo-600">
+                            <ClipboardList className="w-3 h-3" />
+                            {formatCurrency(row.projectedSalary)}
+                        </div>
+                    ) : (salaryMode === 'manual' && !row.isActual ? ( // Can edit if valid month and Manual Mode
                         <Input 
                             className="h-8 w-24 text-right ml-auto text-xs" 
                             value={manualSalaries[row.value] || ''} 
@@ -560,7 +678,7 @@ export function AnalysisTab() {
                         />
                     ) : (
                         formatCurrency(row.projectedSalary)
-                    )}
+                    ))}
                   </TableCell>
                   <TableCell className={`text-right font-bold border-l ${row.profit > 0 ? 'text-green-700' : 'text-red-700'}`}>
                     {formatCurrency(row.profit)}
@@ -573,23 +691,23 @@ export function AnalysisTab() {
                     <TableCell className="font-bold">TOPLAM</TableCell>
                     {/* 2025 Totals */}
                     <TableCell className="text-right font-medium text-muted-foreground border-l">
-                        {formatCurrency(projectionData.reduce((a,c) => a+c.baseSalesNet, 0))}
+                        {formatCurrency(projectionData.reduce((a: number,c: any) => a+c.baseSalesNet, 0))}
                     </TableCell>
                     <TableCell className="text-right font-medium text-muted-foreground">
-                        {formatCurrency(projectionData.reduce((a,c) => a+c.baseSalesVAT, 0))}
+                        {formatCurrency(projectionData.reduce((a: number,c: any) => a+c.baseSalesVAT, 0))}
                     </TableCell>
-
+ 
                     {/* 2026 Totals */}
                     <TableCell className="text-right font-bold text-blue-700 border-l">
-                        {formatCurrency(projectionData.reduce((a,c) => a+c.projectedSalesNet, 0))}
+                        {formatCurrency(projectionData.reduce((a: number,c: any) => a+c.projectedSalesNet, 0))}
                     </TableCell>
                     <TableCell className="text-right font-bold text-blue-700">
-                        {formatCurrency(projectionData.reduce((a,c) => a+c.projectedSalesVAT, 0))}
+                        {formatCurrency(projectionData.reduce((a: number,c: any) => a+c.projectedSalesVAT, 0))}
                     </TableCell>
-
-                    <TableCell className="text-right font-bold text-red-600 border-l">{formatCurrency(projectionData.reduce((a,c) => a+c.projectedExpense,0))}</TableCell>
-                    <TableCell className="text-right font-bold text-orange-600 border-l">{formatCurrency(projectionData.reduce((a,c) => a+c.projectedSalary,0))}</TableCell>
-                    <TableCell className="text-right font-bold text-lg border-l">{formatCurrency(totalProjectedProfit)}</TableCell>
+ 
+                    <TableCell className="text-right font-bold text-red-600 border-l">{formatCurrency(projectionData.reduce((a: number,c: any) => a+c.projectedExpenseNet,0))}</TableCell>
+                    <TableCell className="text-right font-bold text-orange-600 border-l">{formatCurrency(projectionData.reduce((a: number,c: any) => a+c.projectedSalary,0))}</TableCell>
+                    <TableCell className="text-right font-bold text-lg border-l whitespace-nowrap">{formatCurrency(totalProjectedProfit)}</TableCell>
                 </TableRow>
             </TableFooter>
           </Table>

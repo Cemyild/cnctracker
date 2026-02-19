@@ -79,7 +79,8 @@ import { AIChat } from "@/components/AIChat";
         ];
 
         const currentYear = new Date().getFullYear();
-        const yillar = Array.from({length: 5 }, (_, i) => currentYear - i);
+        // Şu anki yıldan 1 yıl ileri ve 3 yıl geriye giden yıllar (örn: 2027, 2026, 2025, 2024, 2023)
+        const yillar = Array.from({length: 5 }, (_, i) => currentYear + 1 - i);
 
         function formatCurrency(value: string | number | null): string {
   if (value === null || value === undefined) return "₺0,00";
@@ -127,6 +128,16 @@ import { AIChat } from "@/components/AIChat";
 
         type ChartMetric = typeof chartMetricOptions[number]["value"];
 
+// Araç kategorileri - bu kategoriler seçildiğinde plaka sorulacak
+const ARAC_KATEGORILERI = ["ARAÇ BAKIM", "ARAÇ MUAYENE", "ARAÇ ŞARJ", "ARAÇ KİRA", "ARAÇ ALIM"];
+
+type Arac = {
+  id: string;
+  plaka: string;
+  marka: string | null;
+  model: string | null;
+};
+
         export default function Gumruk() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
         const [selectedAy, setSelectedAy] = useState<string>("");
@@ -147,7 +158,12 @@ import { AIChat } from "@/components/AIChat";
                         queryKey: ["/api/categories"],
                     });
 
-                    const handleInlineUpdate = async (id: string, field: 'sube' | 'kategori', value: string) => {
+                    // Araçlar listesi (plaka dropdown için)
+                    const { data: araclar } = useQuery<Arac[]>({
+                        queryKey: ["/api/araclar"],
+                    });
+
+                    const handleInlineUpdate = async (id: string, field: 'sube' | 'kategori' | 'plaka', value: string | null) => {
                         try {
                             const response = await fetch(`/api/giderler/${id}`, {
                                 method: 'PUT',
@@ -1306,19 +1322,20 @@ import { AIChat } from "@/components/AIChat";
                                         <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('kategori')}>
                                           <div className="flex items-center">Kategori <SortIcon column="kategori" /></div>
                                         </TableHead>
+                                        <TableHead>Plaka</TableHead>
                                         <TableHead className="w-[50px]"></TableHead>
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                       {giderlerLoading ? (
                                         <TableRow>
-                                          <TableCell colSpan={9} className="text-center py-8">
+                                          <TableCell colSpan={13} className="text-center py-8">
                                             <Loader2 className="w-8 h-8 animate-spin mx-auto text-muted-foreground" />
                                           </TableCell>
                                         </TableRow>
                                       ) : sortedGiderler?.length === 0 ? (
                                         <TableRow>
-                                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                                          <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
                                             Kayıt bulunamadı
                                           </TableCell>
                                         </TableRow>
@@ -1350,9 +1367,15 @@ import { AIChat } from "@/components/AIChat";
                                               </Select>
                                             </TableCell>
                                             <TableCell className="p-2">
-                                               <Select 
-                                                defaultValue={gider.kategori || ""} 
-                                                onValueChange={(val) => handleInlineUpdate(gider.id, 'kategori', val)}
+                                               <Select
+                                                defaultValue={gider.kategori || ""}
+                                                onValueChange={(val) => {
+                                                  handleInlineUpdate(gider.id, 'kategori', val);
+                                                  // Araç kategorisi değilse plakayı temizle
+                                                  if (!ARAC_KATEGORILERI.includes(val)) {
+                                                    handleInlineUpdate(gider.id, 'plaka', null);
+                                                  }
+                                                }}
                                               >
                                                 <SelectTrigger className="h-8 w-[140px]">
                                                   <SelectValue placeholder="Seçiniz" />
@@ -1363,6 +1386,25 @@ import { AIChat } from "@/components/AIChat";
                                                   ))}
                                                 </SelectContent>
                                               </Select>
+                                            </TableCell>
+                                            <TableCell className="p-2">
+                                              {ARAC_KATEGORILERI.includes(gider.kategori || "") ? (
+                                                <Select
+                                                  defaultValue={gider.plaka || ""}
+                                                  onValueChange={(val) => handleInlineUpdate(gider.id, 'plaka', val)}
+                                                >
+                                                  <SelectTrigger className="h-8 w-[120px]">
+                                                    <SelectValue placeholder="Plaka seç" />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    {araclar?.map((a) => (
+                                                      <SelectItem key={a.id} value={a.plaka}>{a.plaka}</SelectItem>
+                                                    ))}
+                                                  </SelectContent>
+                                                </Select>
+                                              ) : (
+                                                <span className="text-muted-foreground text-xs">-</span>
+                                              )}
                                             </TableCell>
                                             <TableCell>
                                               <Button variant="ghost" size="icon" onClick={() => { setEditingGider(gider); setIsEditModalOpen(true); }}>
@@ -1518,6 +1560,8 @@ import { AIChat } from "@/components/AIChat";
                                 <SelectContent>
                                   <SelectItem value="2024">2024</SelectItem>
                                   <SelectItem value="2025">2025</SelectItem>
+                                  <SelectItem value="2026">2026</SelectItem>
+                                  <SelectItem value="2027">2027</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>

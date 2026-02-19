@@ -274,6 +274,7 @@ export const giderler = pgTable("giderler", {
   tryTutar: decimal("try_tutar", { precision: 15, scale: 2 }), // TRY karşılığı (Toplam Tutar * Kur)
   sube: text("sube"), // Şube
   kategori: text("kategori"), // Kategori (Nakliye, Ardiye, vb.)
+  plaka: text("plaka"), // Araç kategorileri için opsiyonel (ARAÇ BAKIM, ARAÇ MUAYENE, vb.)
   ay: text("ay").notNull(),
   yil: integer("yil").notNull(),
   olusturmaTarihi: date("olusturma_tarihi").default(sql`CURRENT_DATE`),
