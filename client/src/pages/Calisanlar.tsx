@@ -882,7 +882,7 @@ export default function Calisanlar() {
             <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
                 <DialogContent className="sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>Bordro Yükle - {ayNumarasiToAd(parseInt(selectedAy))} {selectedYil}</DialogTitle></invoke>
+                        <DialogTitle>Bordro Yükle - {ayNumarasiToAd(parseInt(selectedAy))} {selectedYil}</DialogTitle>
                     </DialogHeader>
 
                     <div className="space-y-6 py-4">
