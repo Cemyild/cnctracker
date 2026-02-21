@@ -596,3 +596,238 @@ export function testYonetici(): MonthlyCalculation {
 export function testEmekli(): MonthlyCalculation {
     return aylikHesapla(25000, 'EMEKLİ', 1, 2025, 0, true);
 }
+
+// ============================================================================
+// 2026 YILI PARAMETRELERİ VE HESAPLAMALARI
+// Kaynak: turkey_payroll_2026.md
+// ============================================================================
+
+export const PARAMETRELER_2026 = {
+    // Asgari Ücret
+    BRUT_ASGARI_UCRET: 33030.00,
+    NET_ASGARI_UCRET: 28075.50,
+
+    // SGK Taban/Tavan
+    SGK_AYLIK_TAVAN: 297270.00,
+
+    // İşçi Kesinti Oranları - NORMAL
+    ISCI_SGK_ORANI: 0.14,              // %14
+    ISCI_ISSIZLIK_ORANI: 0.01,         // %1
+
+    // İşçi Kesinti Oranları - EMEKLİ (SGDP)
+    ISCI_SGK_ORANI_EMEKLI: 0.075,      // %7.5
+    ISCI_ISSIZLIK_ORANI_EMEKLI: 0,     // %0
+
+    // İşçi Kesinti Oranları - YÖNETİCİ (SGK/İşsizlik YOK)
+    ISCI_SGK_ORANI_YONETICI: 0,        // %0
+    ISCI_ISSIZLIK_ORANI_YONETICI: 0,   // %0
+
+    // Damga Vergisi
+    DAMGA_VERGISI_ORANI: 0.00759,      // Binde 7.59
+
+    // İşveren Kesinti Oranları - NORMAL
+    ISVEREN_SGK_ORANI: 0.2175,         // %21.75 (teşviksiz)
+    ISVEREN_SGK_ORANI_TESVIKLI: 0.1975, // %19.75 (%2 indirimli - 5510/81-ı)
+    ISVEREN_ISSIZLIK_ORANI: 0.02,      // %2
+
+    // İşveren Kesinti Oranları - EMEKLİ (SGDP)
+    ISVEREN_SGK_ORANI_EMEKLI: 0.2475,  // %24.75
+    ISVEREN_ISSIZLIK_ORANI_EMEKLI: 0,  // %0
+
+    // İşveren Kesinti Oranları - YÖNETİCİ (HİÇBİRİ UYGULANMAZ)
+    ISVEREN_SGK_ORANI_YONETICI: 0,     // %0
+    ISVEREN_ISSIZLIK_ORANI_YONETICI: 0, // %0
+
+    // Gelir Vergisi Dilimleri
+    GELIR_VERGISI_DILIMLERI: [
+        { ustSinir: 190000, oran: 0.15, oncekiDilimVergi: 0 },
+        { ustSinir: 400000, oran: 0.20, oncekiDilimVergi: 28500 },
+        { ustSinir: 1500000, oran: 0.27, oncekiDilimVergi: 70500 },
+        { ustSinir: 5300000, oran: 0.35, oncekiDilimVergi: 367500 },
+        { ustSinir: Infinity, oran: 0.40, oncekiDilimVergi: 1697500 }
+    ],
+
+    // Aylık Vergi İstisnaları (Ay indeksi 0-11)
+    AYLIK_GV_ISTISNALARI: [
+        4211.33, 4211.33, 4211.33, 4211.33, 4211.33, 4211.33,  // Ocak-Haziran
+        4537.75, 5615.10, 5615.10, 5615.10, 5615.10, 5615.10   // Temmuz-Aralık
+    ],
+    AYLIK_DV_ISTISNASI: 250.70
+} as const;
+
+// 2026 için ayrı hesaplama sonucu tipi
+export interface MonthlyCalculation2026 {
+    ay: number;
+    yil: number;
+
+    // Girdiler
+    brutMaas: number;
+
+    // Hesaplanan Matrahlar
+    sgkPrimMatrahi: number;
+    gelirVergisiMatrahi: number;
+    kumulatifGelirVergisiMatrahi: number;
+
+    // İşçi Kesintileri
+    sgkIsciPrimi: number;
+    issizlikIsciPrimi: number;
+    hesaplananGelirVergisi: number;
+    hesaplananDamgaVergisi: number;
+
+    // İstisnalar
+    asgariUcretGelirVergisiIstisnasi: number;
+    asgariUcretDamgaVergisiIstisnasi: number;
+
+    // Net Kesintiler
+    netGelirVergisi: number;
+    netDamgaVergisi: number;
+
+    // Net Maaş
+    netMaas: number;
+
+    // İşveren Maliyetleri
+    sgkIsverenPrimi: number;
+    issizlikIsverenPrimi: number;
+    toplamIsverenPayi: number;
+    toplamIsverenMaliyeti: number;
+}
+
+// ============================================================================
+// 2026 YARDIMCI FONKSİYONLAR
+// ============================================================================
+
+function sgkPrimMatrahiBelirle2026(brutMaas: number): number {
+    return Math.min(brutMaas, PARAMETRELER_2026.SGK_AYLIK_TAVAN);
+}
+
+function getIsciSgkOrani2026(statu: CalisanStatu): number {
+    switch (statu) {
+        case 'EMEKLİ': return PARAMETRELER_2026.ISCI_SGK_ORANI_EMEKLI;
+        case 'YÖNETİCİ': return PARAMETRELER_2026.ISCI_SGK_ORANI_YONETICI;
+        default: return PARAMETRELER_2026.ISCI_SGK_ORANI;
+    }
+}
+
+function getIsciIssizlikOrani2026(statu: CalisanStatu): number {
+    switch (statu) {
+        case 'EMEKLİ': return PARAMETRELER_2026.ISCI_ISSIZLIK_ORANI_EMEKLI;
+        case 'YÖNETİCİ': return PARAMETRELER_2026.ISCI_ISSIZLIK_ORANI_YONETICI;
+        default: return PARAMETRELER_2026.ISCI_ISSIZLIK_ORANI;
+    }
+}
+
+function dilimeGoreVergiHesapla2026(kumulatifMatrah: number): number {
+    if (kumulatifMatrah <= 0) return 0;
+
+    const dilimler = PARAMETRELER_2026.GELIR_VERGISI_DILIMLERI;
+    let oncekiUstSinir = 0;
+
+    for (const dilim of dilimler) {
+        if (kumulatifMatrah <= dilim.ustSinir) {
+            const fazlaMatrah = kumulatifMatrah - oncekiUstSinir;
+            return dilim.oncekiDilimVergi + (fazlaMatrah * dilim.oran);
+        }
+        oncekiUstSinir = dilim.ustSinir;
+    }
+
+    // Son dilim
+    const sonDilim = dilimler[dilimler.length - 1];
+    return sonDilim.oncekiDilimVergi + ((kumulatifMatrah - 5300000) * sonDilim.oran);
+}
+
+function gelirVergisiHesapla2026(aylikMatrah: number, oncekiKumulatifMatrah: number): number {
+    const yeniKumulatifMatrah = oncekiKumulatifMatrah + aylikMatrah;
+    const oncekiVergi = dilimeGoreVergiHesapla2026(oncekiKumulatifMatrah);
+    const yeniVergi = dilimeGoreVergiHesapla2026(yeniKumulatifMatrah);
+    return yeniVergi - oncekiVergi;
+}
+
+// ============================================================================
+// 2026 ANA HESAPLAMA FONKSİYONU - BRÜTTEN TÜM VERİLERİ HESAPLA
+// ============================================================================
+
+/**
+ * Brüt maaştan tüm kesinti ve maliyetleri hesapla (2026)
+ * PDF'den alınan brüt ücret üzerinden detaylı hesaplama yapar
+ */
+export function bruttenHesapla2026(
+    brutMaas: number,
+    statu: CalisanStatu,
+    ay: number,  // 1-12
+    kumulatifMatrah: number = 0,
+    hazineTesvikiVar: boolean = true
+): MonthlyCalculation2026 {
+    // 1. SGK Prim Matrahı (Tavan kontrolü)
+    const sgkPrimMatrahi = sgkPrimMatrahiBelirle2026(brutMaas);
+
+    // 2. İşçi oranları
+    const sgkOrani = getIsciSgkOrani2026(statu);
+    const issizlikOrani = getIsciIssizlikOrani2026(statu);
+
+    // 3. İşçi kesintileri
+    const sgkIsciPrimi = sgkPrimMatrahi * sgkOrani;
+    const issizlikIsciPrimi = sgkPrimMatrahi * issizlikOrani;
+
+    // 4. Gelir vergisi matrahı
+    const gelirVergisiMatrahi = brutMaas - sgkIsciPrimi - issizlikIsciPrimi;
+
+    // 5. Gelir vergisi hesaplama
+    const hesaplananGelirVergisi = gelirVergisiHesapla2026(gelirVergisiMatrahi, kumulatifMatrah);
+
+    // 6. Asgari ücret GV istisnası (ay indeksi 0-11)
+    const ayIndex = ay - 1;
+    const gvIstisnasi = PARAMETRELER_2026.AYLIK_GV_ISTISNALARI[ayIndex] || 0;
+    const netGelirVergisi = Math.max(0, hesaplananGelirVergisi - gvIstisnasi);
+
+    // 7. Damga vergisi
+    const hesaplananDamgaVergisi = brutMaas * PARAMETRELER_2026.DAMGA_VERGISI_ORANI;
+    const dvIstisnasi = PARAMETRELER_2026.AYLIK_DV_ISTISNASI;
+    const netDamgaVergisi = Math.max(0, hesaplananDamgaVergisi - dvIstisnasi);
+
+    // 8. Net maaş
+    const netMaas = brutMaas - sgkIsciPrimi - issizlikIsciPrimi - netGelirVergisi - netDamgaVergisi;
+
+    // 9. İşveren maliyetleri
+    let sgkIsverenPrimi = 0;
+    let issizlikIsverenPrimi = 0;
+
+    if (statu === 'YÖNETİCİ') {
+        sgkIsverenPrimi = 0;
+        issizlikIsverenPrimi = 0;
+    } else if (statu === 'EMEKLİ') {
+        sgkIsverenPrimi = sgkPrimMatrahi * PARAMETRELER_2026.ISVEREN_SGK_ORANI_EMEKLI;
+        issizlikIsverenPrimi = 0;
+    } else {
+        // Normal çalışan
+        const sgkOran = hazineTesvikiVar
+            ? PARAMETRELER_2026.ISVEREN_SGK_ORANI_TESVIKLI
+            : PARAMETRELER_2026.ISVEREN_SGK_ORANI;
+        sgkIsverenPrimi = sgkPrimMatrahi * sgkOran;
+        issizlikIsverenPrimi = sgkPrimMatrahi * PARAMETRELER_2026.ISVEREN_ISSIZLIK_ORANI;
+    }
+
+    const toplamIsverenPayi = sgkIsverenPrimi + issizlikIsverenPrimi;
+    const toplamIsverenMaliyeti = brutMaas + toplamIsverenPayi;
+
+    return {
+        ay,
+        yil: 2026,
+        brutMaas,
+        sgkPrimMatrahi,
+        gelirVergisiMatrahi,
+        kumulatifGelirVergisiMatrahi: kumulatifMatrah + gelirVergisiMatrahi,
+        sgkIsciPrimi,
+        issizlikIsciPrimi,
+        hesaplananGelirVergisi,
+        hesaplananDamgaVergisi,
+        asgariUcretGelirVergisiIstisnasi: gvIstisnasi,
+        asgariUcretDamgaVergisiIstisnasi: dvIstisnasi,
+        netGelirVergisi,
+        netDamgaVergisi,
+        netMaas,
+        sgkIsverenPrimi,
+        issizlikIsverenPrimi,
+        toplamIsverenPayi,
+        toplamIsverenMaliyeti
+    };
+}

@@ -31,8 +31,11 @@ import {
   yillikHesapla,
   belirliAyHesapla,
   PARAMETRELER_2025,
+  bruttenHesapla2026,
+  PARAMETRELER_2026,
   type CalisanStatu,
-  type MonthlyCalculation
+  type MonthlyCalculation,
+  type MonthlyCalculation2026
 } from "@shared/salaryCalculations";
 
 
@@ -1061,16 +1064,46 @@ export async function registerRoutes(
               if (hasRetiredCode) statu = "EMEKLİ";
               else if (hasNormalCode) statu = "NORMAL";
             }
-            // Calculate Worker SGK Share (User defined as Gross - Net)
-            const workerSgkShare = Number((brut - net).toFixed(2));
-
-            // Calculate Employer SGK Share
-            // Calculate Employer SGK Share
-            let employerSgkShare = 0;
-            // Determine month from req.body (from formData) or default
-            // Note: Multer middleware handling 'ay' field should ideally make it available in req.body
-            // If not available, default to 1 (January rates)
+            // Determine month and year from req.body (from formData) or default
             const monthVal = req.body.ay ? parseInt(req.body.ay) : 1;
+            const yilVal = req.body.yil ? parseInt(req.body.yil) : 2026;
+
+            // 2026+ için yeni detaylı hesaplama sistemi
+            if (yilVal >= 2026) {
+              const hesaplama = bruttenHesapla2026(
+                brut,
+                statu as CalisanStatu,
+                monthVal,
+                0, // Önizlemede kümülatif matrah 0, kayıtta DB'den çekilecek
+                true // Hazine teşviki var
+              );
+
+              return {
+                tcNo: emp.tcNo || "",
+                adSoyad: emp.adSoyad,
+                statu: statu,
+                sube: emp.sube || "Merkez",
+                isGirisTarihi: emp.isGirisTarihi || "",
+
+                brutUcret: brut,
+                netUcret: net, // PDF'den alınan net (karşılaştırma için)
+                hesaplananNet: hesaplama.netMaas, // Brütten hesaplanan net
+                sgkMatrahi: hesaplama.sgkPrimMatrahi,
+                gelirVergisiMatrahi: hesaplama.gelirVergisiMatrahi,
+                kumulatifVergiMatrahi: hesaplama.kumulatifGelirVergisiMatrahi,
+                gelirVergisi: hesaplama.netGelirVergisi,
+                damgaVergisi: hesaplama.netDamgaVergisi,
+                sigortaKesintisi: hesaplama.sgkIsciPrimi,
+                issizlikSigortasiKesintisi: hesaplama.issizlikIsciPrimi,
+                isverenSgkPayi: hesaplama.sgkIsverenPrimi,
+                isverenIssizlikPayi: hesaplama.issizlikIsverenPrimi,
+                toplamIsverenMaliyeti: hesaplama.toplamIsverenMaliyeti
+              };
+            }
+
+            // 2025 ve öncesi - ESKİ HESAPLAMA AYNEN KALACAK
+            const workerSgkShare = Number((brut - net).toFixed(2));
+            let employerSgkShare = 0;
 
             if (statu === "NORMAL") {
               const rate = (monthVal > 1) ? 0.1875 : 0.1775;
@@ -1171,23 +1204,77 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Geçersiz veri formatı" });
       }
 
-      // String 'ay' değerini sayısal olarak kontrol etmemiz gerekebilir ama 
-      // şemada 'text' olarak tutuluyor ("ocak" gibi değil, "1", "2" gibi string mi, yoksa ay ismi mi?)
-      // Front-end "1", "2" gönderiyor. Şema "text". Uygun. 
-      // Ancak eski verilerde "ocak", "subat" gibi de olabilir. 
-      // Biz "1", "2" gibi tutacağız artık.
+      const ayNum = parseInt(ay);
+      const yilNum = parseInt(yil);
 
       // 1. O ay ve yıla ait eski kayıtları sil
-      await storage.deleteCalisanlar(String(ay), parseInt(yil));
+      await storage.deleteCalisanlar(String(ay), yilNum);
 
-      // 2. Yeni kayıtları ekle
+      // 2026+ için yeni hesaplama sistemi
+      if (yilNum >= 2026) {
+        // Önceki ayların verilerini çek (kümülatif matrah hesabı için)
+        const tumOncekiVeriler = await storage.getCalisanlar(undefined, yilNum);
+
+        // TC bazında kümülatif matrah hesapla
+        const kumulatifMatrahlar: { [tcNo: string]: number } = {};
+        for (const kayit of tumOncekiVeriler) {
+          const kayitAy = parseInt(kayit.ay);
+          if (kayitAy < ayNum) {
+            const tcNo = kayit.tcNo;
+            const matrah = Number(kayit.gelirVergisiMatrahi || 0);
+            kumulatifMatrahlar[tcNo] = (kumulatifMatrahlar[tcNo] || 0) + matrah;
+          }
+        }
+
+        // Her çalışan için detaylı hesaplama yap
+        const calisanlarVerisi = data.map((item: any) => {
+          const tcNo = item.tcNo;
+          const kumulatifMatrah = kumulatifMatrahlar[tcNo] || 0;
+          const brutUcret = Number(item.brutUcret || 0);
+          const statu = (item.statu || "NORMAL") as CalisanStatu;
+
+          // 2026 hesaplama fonksiyonunu kullan
+          const hesaplama = bruttenHesapla2026(
+            brutUcret,
+            statu,
+            ayNum,
+            kumulatifMatrah,
+            true // Hazine teşviki var
+          );
+
+          return {
+            tcNo: item.tcNo,
+            adSoyad: item.adSoyad,
+            statu: item.statu,
+            sube: item.sube || "Merkez",
+            isGirisTarihi: item.isGirisTarihi || "",
+            ay: String(ay),
+            yil: yilNum,
+
+            brutUcret: String(brutUcret.toFixed(2)),
+            netUcret: String(hesaplama.netMaas.toFixed(2)),
+            sgkMatrahi: String(hesaplama.sgkPrimMatrahi.toFixed(2)),
+            gelirVergisiMatrahi: String(hesaplama.gelirVergisiMatrahi.toFixed(2)),
+            kumulatifVergiMatrahi: String((kumulatifMatrah + hesaplama.gelirVergisiMatrahi).toFixed(2)),
+            gelirVergisi: String(hesaplama.netGelirVergisi.toFixed(2)),
+            damgaVergisi: String(hesaplama.netDamgaVergisi.toFixed(2)),
+            sigortaKesintisi: String(hesaplama.sgkIsciPrimi.toFixed(2)),
+            issizlikSigortasiKesintisi: String(hesaplama.issizlikIsciPrimi.toFixed(2)),
+            isverenSgkPayi: String(hesaplama.sgkIsverenPrimi.toFixed(2)),
+            isverenIssizlikPayi: String(hesaplama.issizlikIsverenPrimi.toFixed(2)),
+            toplamIsverenMaliyeti: String(hesaplama.toplamIsverenMaliyeti.toFixed(2))
+          };
+        });
+
+        const saved = await storage.insertCalisanlar(calisanlarVerisi);
+        return res.json({ success: true, count: saved.length });
+      }
+
+      // 2025 ve öncesi - ESKİ HESAPLAMA AYNEN KALACAK
       const calisanlarVerisi = data.map((item: any) => ({
         ...item,
         ay: String(ay),
-        yil: parseInt(yil),
-        // Eksik alanlar için varsayılanlar veya hesaplamalar (basit toplama)
-        // Eğer excel'den gelmeyen bir alan varsa hesaplamak yerine 0 veriyoruz 
-        // çünkü artık otomatik hesaplama yok.
+        yil: yilNum,
       }));
 
       const saved = await storage.insertCalisanlar(calisanlarVerisi);
