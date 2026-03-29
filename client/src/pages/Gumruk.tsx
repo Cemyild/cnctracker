@@ -147,7 +147,7 @@ type Arac = {
 
                 // Giderler States
                 const [isGiderUploadModalOpen, setIsGiderUploadModalOpen] = useState(false);
-                const [selectedGiderAy, setSelectedGiderAy] = useState<string>("");
+                const [selectedGiderAy, setSelectedGiderAy] = useState<string>("toplam");
                   const [selectedGiderYil, setSelectedGiderYil] = useState<string>(String(currentYear));
                     const [sortConfig, setSortConfig] = useState<{ key: keyof Gider | 'tryTutar' | null; direction: 'asc' | 'desc' }>({key: null, direction: 'asc' });
                     const [editingGider, setEditingGider] = useState<Gider | null>(null);
@@ -240,9 +240,14 @@ type Arac = {
 
 
                     // Gider Data Queries
-                    const {data: giderler, isLoading: giderlerLoading, refetch: refetchGiderler } = useQuery<Gider[]>({
-                      queryKey: [`/api/giderler?ay=${selectedGiderAy}&yil=${selectedGiderYil}`],
-                    enabled: !!selectedGiderYil,
+                    const {data: giderler, isLoading: giderlerLoading, isError: giderlerError, refetch: refetchGiderler } = useQuery<Gider[]>({
+                      queryKey: ["/api/giderler", selectedGiderAy, selectedGiderYil],
+                    queryFn: async () => {
+                      const res = await fetch(`/api/giderler?ay=${selectedGiderAy}&yil=${selectedGiderYil}`, { credentials: "include" });
+                      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+                      return res.json();
+                    },
+                    enabled: !!selectedGiderYil && !!selectedGiderAy,
   });
 
                     const {data: giderStats, isLoading: giderStatsLoading, refetch: refetchGiderStats } = useQuery<{
@@ -251,8 +256,13 @@ type Arac = {
                     toplamKdv: number;
                     toplamTryTutar: number;
   }>({
-                      queryKey: [`/api/giderler/stats?ay=${selectedGiderAy}&yil=${selectedGiderYil}`],
-                    enabled: !!selectedGiderYil,
+                      queryKey: ["/api/giderler/stats", selectedGiderAy, selectedGiderYil],
+                    queryFn: async () => {
+                      const res = await fetch(`/api/giderler/stats?ay=${selectedGiderAy}&yil=${selectedGiderYil}`, { credentials: "include" });
+                      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+                      return res.json();
+                    },
+                    enabled: !!selectedGiderYil && !!selectedGiderAy,
   });
 
                     // Özet Summary Data
@@ -1331,6 +1341,12 @@ type Arac = {
                                         <TableRow>
                                           <TableCell colSpan={13} className="text-center py-8">
                                             <Loader2 className="w-8 h-8 animate-spin mx-auto text-muted-foreground" />
+                                          </TableCell>
+                                        </TableRow>
+                                      ) : giderlerError ? (
+                                        <TableRow>
+                                          <TableCell colSpan={13} className="text-center py-8 text-red-500">
+                                            Veriler yüklenirken hata oluştu. <button className="underline" onClick={() => refetchGiderler()}>Tekrar dene</button>
                                           </TableCell>
                                         </TableRow>
                                       ) : sortedGiderler?.length === 0 ? (
