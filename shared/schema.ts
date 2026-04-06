@@ -389,6 +389,7 @@ export const surveys = pgTable("surveys", {
   questions: jsonb("questions").notNull(), // Array of question objects: { id, text, type (rating/text) }
   requireIdentity: integer("require_identity").default(1), // 1 for true, 0 for false
   identityLabel: text("identity_label").default("Firma / Ad Soyad"),
+  contactFields: jsonb("contact_fields").default([]).notNull(), // Array of { id, label, placeholder, required }
   createdAt: timestamp("created_at").defaultNow(),
   isActive: integer("is_active").default(1),
 });
@@ -401,7 +402,8 @@ export type Survey = typeof surveys.$inferSelect;
 export const surveyResponses = pgTable("survey_responses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   surveyId: varchar("survey_id").references(() => surveys.id, { onDelete: 'cascade' }).notNull(),
-  customerName: text("customer_name"), // changed to nullable
+  customerName: text("customer_name"), // legacy single name field
+  contactInfo: jsonb("contact_info").default({}), // Maps custom field ids to their text values
   answers: jsonb("answers").notNull(), // Array of answer objects: { questionId, score (1-5), adjustedScore (20-100) }
   averageScore: decimal("average_score", { precision: 5, scale: 2 }).notNull(),
   comments: text("comments"),

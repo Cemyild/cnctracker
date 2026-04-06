@@ -17,7 +17,7 @@ export default function PublicSurvey() {
   const surveyId = params?.id;
   const { toast } = useToast();
 
-  const [customerName, setCustomerName] = useState("");
+  const [contactInfo, setContactInfo] = useState<Record<string, string>>({});
   const [comments, setComments] = useState("");
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -69,14 +69,26 @@ export default function PublicSurvey() {
       return;
     }
 
-    if (survey.requireIdentity !== 0 && !customerName.trim()) {
-      toast({
-        title: "Eksik Alanlar",
-        description: `Lütfen ${survey.identityLabel || "bilgi"} alanını girin.`,
-        variant: "destructive"
-      });
-      return;
+    let fields = Array.isArray(survey.contactFields) ? survey.contactFields : [];
+    if (fields.length === 0 && survey.identityLabel) {
+       fields = [{ id: 'legacy', label: survey.identityLabel, placeholder: 'Lütfen giriniz', required: survey.requireIdentity !== 0 }];
     }
+
+    let hasError = false;
+    fields.forEach((f: any) => {
+      if (f.required && !(contactInfo[f.id] || "").trim()) {
+        if (!hasError) {
+          toast({
+            title: "Eksik Alanlar",
+            description: `Lütfen "${f.label}" alanını girin.`,
+            variant: "destructive"
+          });
+          hasError = true;
+        }
+      }
+    });
+
+    if (hasError) return;
 
     const formattedAnswers = Object.entries(answers).map(([qId, score]) => {
       // 1:20, 2:40, 3:60, 4:80, 5:100
@@ -86,9 +98,12 @@ export default function PublicSurvey() {
 
     const averageScore = formattedAnswers.reduce((acc, curr) => acc + curr.adjustedScore, 0) / (formattedAnswers.length || 1);
 
+    const primaryName = fields.length > 0 ? (contactInfo[fields[0].id] || "") : "İsimsiz Yanıt";
+
     submitMutation.mutate({
       surveyId,
-      customerName,
+      customerName: primaryName,
+      contactInfo,
       answers: formattedAnswers,
       averageScore,
       comments
@@ -133,6 +148,11 @@ export default function PublicSurvey() {
   }
 
   const questionsList = Array.isArray(survey.questions) ? survey.questions : [];
+  
+  let fieldsToRender = Array.isArray(survey.contactFields) ? survey.contactFields : [];
+  if (fieldsToRender.length === 0 && survey.identityLabel) {
+     fieldsToRender = [{ id: 'legacy', label: survey.identityLabel, placeholder: 'Lütfen giriniz', required: survey.requireIdentity !== 0 }];
+  }
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center py-12 px-4 bg-slate-50">
@@ -147,21 +167,20 @@ export default function PublicSurvey() {
           </CardHeader>
           <CardContent className="pt-8">
             <form onSubmit={handleSubmit} className="space-y-8">
-              {(survey.identityLabel && survey.identityLabel.trim() !== "") ? (
-                <div className="space-y-3 bg-slate-50 p-6 rounded-lg border">
-                  <Label htmlFor="customerName" className="text-base font-semibold">
-                    {survey.identityLabel} {survey.requireIdentity !== 0 && <span className="text-red-500">*</span>}
+              {fieldsToRender.length > 0 && fieldsToRender.map((f: any) => (
+                <div key={f.id} className="space-y-3 bg-slate-50 p-6 rounded-lg border">
+                  <Label htmlFor={f.id} className="text-base font-semibold">
+                    {f.label} {f.required && <span className="text-red-500">*</span>}
                   </Label>
                   <Input 
-                    id="customerName" 
-                    placeholder="Lütfen giriniz" 
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
+                    id={f.id} 
+                    placeholder={f.placeholder || ""} 
+                    value={contactInfo[f.id] || ""}
+                    onChange={(e) => setContactInfo(prev => ({ ...prev, [f.id]: e.target.value }))}
                     className="bg-white"
-                    autoFocus
                   />
                 </div>
-              ) : null}
+              ))}
 
               <div className="space-y-6">
                 <div className="bg-slate-100 p-4 rounded text-sm text-center mb-6 text-muted-foreground">

@@ -75,6 +75,21 @@ function SurveyResponses({ survey, responses, isLoading }: { survey: Survey, res
                       <DialogTitle>{resp.customerName || "İsimsiz Yanıt"} - Yanıt Detayları</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 mt-4">
+                      {resp.contactInfo && Object.keys(resp.contactInfo).length > 0 && (
+                        <div className="grid gap-2 p-4 bg-slate-50 rounded-lg border text-sm mb-4">
+                          <h4 className="font-semibold text-xs text-primary uppercase tracking-wider mb-2">Müşteri / İletişim Bilgileri</h4>
+                          {Object.entries(resp.contactInfo).map(([id, val]) => {
+                            const fieldDef = Array.isArray(survey.contactFields) && survey.contactFields.find((f:any) => f.id === id);
+                            const label = fieldDef ? fieldDef.label : (id === 'legacy' ? (survey.identityLabel || "Bilgi") : id);
+                            return (
+                              <div key={id} className="flex flex-col">
+                                <span className="text-muted-foreground font-medium text-xs">{label}</span>
+                                <span>{val as string || "-"}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       <div className="grid gap-4">
                         {Array.isArray(resp.answers) && resp.answers.map((ans: any, idx: number) => {
                           const qList = Array.isArray(survey.questions) ? survey.questions : [];
@@ -162,8 +177,9 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [questionsText, setQuestionsText] = useState("");
-  const [identityLabel, setIdentityLabel] = useState("Firma / Ad Soyad");
-  const [requireIdentity, setRequireIdentity] = useState(true);
+  const [contactFields, setContactFields] = useState<{id: string, label: string, placeholder: string, required: boolean}[]>([]);
+  const [isAddingField, setIsAddingField] = useState(false);
+  const [newField, setNewField] = useState({ label: '', placeholder: '', required: true });
 
   const { toast } = useToast();
 
@@ -172,8 +188,13 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       setTitle(defaultSurvey?.title || "");
       setDescription(defaultSurvey?.description || "");
       setQuestionsText(defaultQuestions || "");
-      setIdentityLabel(defaultSurvey?.identityLabel || "Firma / Ad Soyad");
-      setRequireIdentity(defaultSurvey?.requireIdentity !== 0);
+      
+      let fields = Array.isArray(defaultSurvey?.contactFields) ? defaultSurvey.contactFields : [];
+      if (fields.length === 0 && defaultSurvey?.identityLabel) {
+        fields = [{ id: 'legacy', label: defaultSurvey.identityLabel, placeholder: 'Lütfen giriniz', required: defaultSurvey.requireIdentity !== 0 }];
+      }
+      setContactFields(fields);
+      setIsAddingField(false);
     }
   }, [open, defaultSurvey, defaultQuestions]);
 
@@ -208,8 +229,7 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       description,
       questions,
       isActive: 1,
-      identityLabel,
-      requireIdentity: requireIdentity ? 1 : 0
+      contactFields
     });
   };
 
@@ -229,21 +249,64 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[100px]" required />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Bilgi Alanı Başlığı (Örn: Firma Adı, Çalışan vb.)</Label>
-              <Input value={identityLabel} onChange={(e) => setIdentityLabel(e.target.value)} />
+          <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
+            <div className="flex justify-between items-center">
+              <Label className="text-base font-semibold">Bilgi Alanları (Firma, Ad Soyad vb.)</Label>
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsAddingField(true)}>
+                <Plus className="h-4 w-4 mr-1" /> Kutu Ekle
+              </Button>
             </div>
-            <div className="flex items-center space-x-2 pt-6">
-              <input 
-                type="checkbox" 
-                id="requireIdentity" 
-                checked={requireIdentity} 
-                onChange={(e) => setRequireIdentity(e.target.checked)} 
-                className="h-4 w-4"
-              />
-              <Label htmlFor="requireIdentity" className="cursor-pointer">Bu alanı doldurmak zorunlu olsun</Label>
-            </div>
+            
+            {contactFields.length > 0 && (
+              <div className="space-y-2">
+                {contactFields.map((cf, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-white p-3 border rounded shadow-sm">
+                    <div>
+                      <p className="font-medium text-sm">{cf.label} {cf.required && <span className="text-red-500">*</span>}</p>
+                      {cf.placeholder && <p className="text-xs text-muted-foreground">{cf.placeholder}</p>}
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setContactFields(prev => prev.filter((_, i) => i !== idx))}>
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {isAddingField && (
+              <div className="bg-white p-4 border flex flex-col gap-3 rounded shadow-sm border-primary/20">
+                <Input 
+                  placeholder="Kutu Açıklaması (Örn: Firma Adı, Ad Soyad)" 
+                  value={newField.label} 
+                  onChange={e => setNewField({...newField, label: e.target.value})}
+                  autoFocus
+                />
+                <Input 
+                  placeholder="Yönlendirici Açıklama (Opsiyonel)" 
+                  value={newField.placeholder} 
+                  onChange={e => setNewField({...newField, placeholder: e.target.value})}
+                />
+                <div className="flex items-center space-x-2">
+                  <input 
+                    type="checkbox" 
+                    id="reqField" 
+                    checked={newField.required} 
+                    onChange={e => setNewField({...newField, required: e.target.checked})}
+                    className="h-4 w-4"
+                  />
+                  <Label htmlFor="reqField">Zorunlu Alan</Label>
+                </div>
+                <div className="flex justify-end gap-2 mt-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setIsAddingField(false)}>İptal</Button>
+                  <Button type="button" size="sm" onClick={() => {
+                    if(!newField.label.trim()) return toast({title:"Hata", description:"Lütfen kutu açıklaması girin.", variant:"destructive"});
+                    setContactFields(prev => [...prev, { id: `cf_${Date.now()}`, ...newField }]);
+                    setNewField({ label: '', placeholder: '', required: true });
+                    setIsAddingField(false);
+                  }}>Ekle</Button>
+                </div>
+              </div>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Sorular (Her satıra bir soru yazın)</Label>
