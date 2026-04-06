@@ -96,12 +96,12 @@ export default function PublicSurvey() {
   };
 
   if (!surveyId) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50"><p>Geçersiz Anket Bağlantısı</p></div>;
+    return <div className="min-h-screen w-full flex items-center justify-center bg-slate-50"><p>Geçersiz Anket Bağlantısı</p></div>;
   }
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50">
+      <div className="min-h-screen w-full flex items-center justify-center p-4 bg-slate-50">
         <Card className="w-full max-w-2xl">
           <CardHeader><Skeleton className="h-8 w-3/4" /></CardHeader>
           <CardContent className="space-y-4">
@@ -115,12 +115,12 @@ export default function PublicSurvey() {
   }
 
   if (error || !survey) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-red-500"><p>Anket bulunamadı veya yüklenemedi.</p></div>;
+    return <div className="min-h-screen w-full flex items-center justify-center bg-slate-50 text-red-500"><p>Anket bulunamadı veya yüklenemedi.</p></div>;
   }
 
   if (isSubmitted) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50">
+      <div className="min-h-screen w-full flex items-center justify-center p-4 bg-slate-50">
         <Card className="w-full max-w-lg text-center p-8">
           <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
           <CardTitle className="text-2xl mb-2">Teşekkür Ederiz</CardTitle>
@@ -135,11 +135,14 @@ export default function PublicSurvey() {
   const questionsList = Array.isArray(survey.questions) ? survey.questions : [];
 
   return (
-    <div className="min-h-screen py-12 px-4 bg-slate-50">
-      <div className="max-w-3xl mx-auto">
-        <Card className="border-t-4 border-t-primary shadow-lg">
+    <div className="min-h-screen w-full flex items-center justify-center py-12 px-4 bg-slate-50">
+      <div className="w-full max-w-3xl mx-auto">
+        <Card className="border-t-4 border-t-slate-900 shadow-lg">
           <CardHeader className="text-center pb-8 border-b">
-            <CardTitle className="text-3xl font-bold tracking-tight text-primary mb-2">{survey.title}</CardTitle>
+            <div className="flex justify-center mb-6">
+              <img src="/logo.png" alt="Logo" className="h-16 w-auto object-contain" />
+            </div>
+            <CardTitle className="text-3xl font-bold tracking-tight text-slate-900 mb-2">{survey.title}</CardTitle>
             <CardDescription className="text-base text-muted-foreground whitespace-pre-wrap">{survey.description}</CardDescription>
           </CardHeader>
           <CardContent className="pt-8">
@@ -162,9 +165,9 @@ export default function PublicSurvey() {
                 </div>
                 
                 {questionsList.map((q: any, idx: number) => (
-                  <div key={q.id} className="p-6 rounded-lg border shadow-sm bg-white transition-all hover:border-primary/50">
+                  <div key={q.id} className="p-6 rounded-lg border shadow-sm bg-white transition-all hover:border-slate-900/50">
                     <Label className="text-base font-medium mb-4 block leading-relaxed">
-                      <span className="text-primary font-bold mr-2">{idx + 1}.</span> 
+                      <span className="text-slate-900 font-bold mr-2">{idx + 1}.</span> 
                       {q.text} <span className="text-red-500">*</span>
                     </Label>
                     <div className="flex flex-wrap gap-3 mt-4">
@@ -177,8 +180,8 @@ export default function PublicSurvey() {
                             w-12 h-12 rounded-full font-bold text-lg transition-all
                             flex items-center justify-center border-2
                             ${answers[q.id] === score 
-                              ? 'bg-primary text-primary-foreground border-primary scale-110 shadow-md' 
-                              : 'bg-white text-muted-foreground border-slate-200 hover:border-primary/50 hover:bg-slate-50'}
+                              ? 'bg-slate-900 text-white border-slate-900 scale-110 shadow-md' 
+                              : 'bg-white text-muted-foreground border-slate-200 hover:border-slate-900/50 hover:bg-slate-50'}
                           `}
                         >
                           {score}
@@ -204,7 +207,7 @@ export default function PublicSurvey() {
                 <Button 
                   type="submit" 
                   size="lg" 
-                  className="w-full sm:w-auto px-8 py-6 text-lg"
+                  className="w-full sm:w-auto px-8 py-6 text-lg bg-slate-900 hover:bg-slate-800 text-white"
                   disabled={submitMutation.isPending}
                 >
                   {submitMutation.isPending ? "Gönderiliyor..." : "Anketi Gönder"}

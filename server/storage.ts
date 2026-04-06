@@ -115,6 +115,7 @@ export interface IStorage {
   getSurveys(): Promise<Survey[]>;
   getSurvey(id: string): Promise<Survey | undefined>;
   createSurvey(survey: InsertSurvey): Promise<Survey>;
+  updateSurvey(id: string, survey: Partial<InsertSurvey>): Promise<Survey>;
   getSurveyResponses(surveyId: string): Promise<SurveyResponse[]>;
   createSurveyResponse(response: InsertSurveyResponse): Promise<SurveyResponse>;
 }
@@ -1474,6 +1475,12 @@ export class DatabaseStorage implements IStorage {
   async createSurvey(survey: InsertSurvey): Promise<Survey> {
     const [newSurvey] = await db.insert(surveys).values(survey).returning();
     return newSurvey;
+  }
+
+  async updateSurvey(id: string, survey: Partial<InsertSurvey>): Promise<Survey> {
+    const [updated] = await db.update(surveys).set(survey).where(eq(surveys.id, id)).returning();
+    if (!updated) throw new Error("Anket bulunamadı");
+    return updated;
   }
 
   async getSurveyResponses(surveyId: string): Promise<SurveyResponse[]> {

@@ -2399,6 +2399,15 @@ export async function registerRoutes(
     }
   });
 
+  app.put("/api/surveys/:id", async (req, res) => {
+    try {
+      const survey = await storage.updateSurvey(req.params.id, req.body);
+      res.json(survey);
+    } catch (error) {
+      res.status(500).json({ error: "Anket güncellenirken hata oluştu" });
+    }
+  });
+
   app.get("/api/surveys/:id/responses", async (req, res) => {
     try {
       const responses = await storage.getSurveyResponses(req.params.id);
