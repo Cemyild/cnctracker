@@ -69,10 +69,10 @@ export default function PublicSurvey() {
       return;
     }
 
-    if (!customerName.trim()) {
+    if (survey.requireIdentity !== 0 && !customerName.trim()) {
       toast({
         title: "Eksik Alanlar",
-        description: "Lütfen firma/müşteri adını girin.",
+        description: `Lütfen ${survey.identityLabel || "bilgi"} alanını girin.`,
         variant: "destructive"
       });
       return;
@@ -140,24 +140,28 @@ export default function PublicSurvey() {
         <Card className="border-t-4 border-t-slate-900 shadow-lg">
           <CardHeader className="text-center pb-8 border-b">
             <div className="flex justify-center mb-6">
-              <img src="/logo.png" alt="Logo" className="h-16 w-auto object-contain" />
+              <img src="/CNC_tranparanLOGO.png" alt="CNC Logo" className="h-40 max-w-full object-contain" />
             </div>
             <CardTitle className="text-3xl font-bold tracking-tight text-slate-900 mb-2">{survey.title}</CardTitle>
             <CardDescription className="text-base text-muted-foreground whitespace-pre-wrap">{survey.description}</CardDescription>
           </CardHeader>
           <CardContent className="pt-8">
             <form onSubmit={handleSubmit} className="space-y-8">
-              <div className="space-y-3 bg-slate-50 p-6 rounded-lg border">
-                <Label htmlFor="customerName" className="text-base font-semibold">Firma / Ad Soyad <span className="text-red-500">*</span></Label>
-                <Input 
-                  id="customerName" 
-                  placeholder="Firma unvanı veya adınızı giriniz" 
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  className="bg-white"
-                  autoFocus
-                />
-              </div>
+              {(survey.identityLabel && survey.identityLabel.trim() !== "") ? (
+                <div className="space-y-3 bg-slate-50 p-6 rounded-lg border">
+                  <Label htmlFor="customerName" className="text-base font-semibold">
+                    {survey.identityLabel} {survey.requireIdentity !== 0 && <span className="text-red-500">*</span>}
+                  </Label>
+                  <Input 
+                    id="customerName" 
+                    placeholder="Lütfen giriniz" 
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="bg-white"
+                    autoFocus
+                  />
+                </div>
+              ) : null}
 
               <div className="space-y-6">
                 <div className="bg-slate-100 p-4 rounded text-sm text-center mb-6 text-muted-foreground">

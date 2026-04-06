@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
-import { Copy, ExternalLink, Leaf, Plus, Edit, BarChart } from "lucide-react";
+import { Copy, ExternalLink, Leaf, Plus, Edit, BarChart, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useState, useEffect } from "react";
@@ -33,6 +33,17 @@ function SurveyResponses({ survey, responses, isLoading }: { survey: Survey, res
   if (isLoading) return <Skeleton className="h-[200px] w-full mt-4" />;
   if (!responses?.length) return <div className="text-center py-8 text-muted-foreground">Henüz yanıt bulunmuyor.</div>;
 
+  const { toast } = useToast();
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/surveys/responses/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/surveys"] });
+      toast({ title: "Başarılı", description: "Yanıt silindi." });
+    }
+  });
+
   return (
     <Table className="mt-4">
       <TableHeader>
@@ -46,7 +57,7 @@ function SurveyResponses({ survey, responses, isLoading }: { survey: Survey, res
       <TableBody>
         {responses.map((resp) => (
           <TableRow key={resp.id}>
-            <TableCell className="font-medium">{resp.customerName}</TableCell>
+            <TableCell className="font-medium">{resp.customerName || "İsimsiz Yanıt"}</TableCell>
             <TableCell>
               {resp.submittedAt ? format(new Date(resp.submittedAt), "dd MMM yyyy, HH:mm", { locale: tr }) : "-"}
             </TableCell>
@@ -54,41 +65,50 @@ function SurveyResponses({ survey, responses, isLoading }: { survey: Survey, res
               <ScoreHeatmap score={Number(resp.averageScore)} />
             </TableCell>
             <TableCell className="text-right">
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button variant="ghost" size="sm">Görüntüle</Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>{resp.customerName} - Yanıt Detayları</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4 mt-4">
-                    <div className="grid gap-4">
-                      {Array.isArray(resp.answers) && resp.answers.map((ans: any, idx: number) => {
-                        const qList = Array.isArray(survey.questions) ? survey.questions : [];
-                        const question = qList.find((q: any) => q.id === ans.questionId);
-                        return (
-                          <div key={idx} className="flex justify-between items-center border-b pb-2 last:border-0 p-2">
-                            <div className="flex-1 pr-4">
-                              <p className="text-sm font-medium">{question?.text || `Soru ID: ${ans.questionId}`}</p>
+              <div className="flex justify-end items-center gap-2">
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button variant="ghost" size="sm">Görüntüle</Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>{resp.customerName || "İsimsiz Yanıt"} - Yanıt Detayları</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-4">
+                      <div className="grid gap-4">
+                        {Array.isArray(resp.answers) && resp.answers.map((ans: any, idx: number) => {
+                          const qList = Array.isArray(survey.questions) ? survey.questions : [];
+                          const question = qList.find((q: any) => q.id === ans.questionId);
+                          return (
+                            <div key={idx} className="flex justify-between items-center border-b pb-2 last:border-0 p-2">
+                              <div className="flex-1 pr-4">
+                                <p className="text-sm font-medium">{question?.text || `Soru ID: ${ans.questionId}`}</p>
+                              </div>
+                              <div className="w-48">
+                                <ScoreHeatmap score={Number(ans.adjustedScore)} />
+                                <p className="text-xs text-muted-foreground mt-1 text-right">Verilen Puan: {ans.score}/5</p>
+                              </div>
                             </div>
-                            <div className="w-48">
-                              <ScoreHeatmap score={Number(ans.adjustedScore)} />
-                              <p className="text-xs text-muted-foreground mt-1 text-right">Verilen Puan: {ans.score}/5</p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {resp.comments && (
-                      <div className="mt-4 p-4 bg-muted/50 rounded-lg">
-                        <h4 className="text-sm font-semibold mb-2">Ek Yorumlar</h4>
-                        <p className="text-sm text-foreground">{resp.comments}</p>
+                          );
+                        })}
                       </div>
-                    )}
-                  </div>
-                </DialogContent>
-              </Dialog>
+                      {resp.comments && (
+                        <div className="mt-4 p-4 bg-muted/50 rounded-lg">
+                          <h4 className="text-sm font-semibold mb-2">Ek Yorumlar</h4>
+                          <p className="text-sm text-foreground">{resp.comments}</p>
+                        </div>
+                      )}
+                    </div>
+                  </DialogContent>
+                </Dialog>
+                <Button variant="ghost" size="icon" onClick={() => {
+                  if (confirm("Bu yanıtı silmek istediğinize emin misiniz?")) {
+                     deleteMutation.mutate(resp.id);
+                  }
+                }}>
+                  <Trash2 className="h-4 w-4 text-red-500" />
+                </Button>
+              </div>
             </TableCell>
           </TableRow>
         ))}
@@ -142,6 +162,8 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [questionsText, setQuestionsText] = useState("");
+  const [identityLabel, setIdentityLabel] = useState("Firma / Ad Soyad");
+  const [requireIdentity, setRequireIdentity] = useState(true);
 
   const { toast } = useToast();
 
@@ -150,6 +172,8 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       setTitle(defaultSurvey?.title || "");
       setDescription(defaultSurvey?.description || "");
       setQuestionsText(defaultQuestions || "");
+      setIdentityLabel(defaultSurvey?.identityLabel || "Firma / Ad Soyad");
+      setRequireIdentity(defaultSurvey?.requireIdentity !== 0);
     }
   }, [open, defaultSurvey, defaultQuestions]);
 
@@ -183,7 +207,9 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       title,
       description,
       questions,
-      isActive: 1
+      isActive: 1,
+      identityLabel,
+      requireIdentity: requireIdentity ? 1 : 0
     });
   };
 
@@ -201,6 +227,23 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
           <div className="space-y-2">
             <Label>Açıklama (Müşterinin Göreceği Yazı)</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[100px]" required />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Bilgi Alanı Başlığı (Örn: Firma Adı, Çalışan vb.)</Label>
+              <Input value={identityLabel} onChange={(e) => setIdentityLabel(e.target.value)} />
+            </div>
+            <div className="flex items-center space-x-2 pt-6">
+              <input 
+                type="checkbox" 
+                id="requireIdentity" 
+                checked={requireIdentity} 
+                onChange={(e) => setRequireIdentity(e.target.checked)} 
+                className="h-4 w-4"
+              />
+              <Label htmlFor="requireIdentity" className="cursor-pointer">Bu alanı doldurmak zorunlu olsun</Label>
+            </div>
           </div>
           <div className="space-y-2">
             <Label>Sorular (Her satıra bir soru yazın)</Label>

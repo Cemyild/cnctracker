@@ -118,6 +118,7 @@ export interface IStorage {
   updateSurvey(id: string, survey: Partial<InsertSurvey>): Promise<Survey>;
   getSurveyResponses(surveyId: string): Promise<SurveyResponse[]>;
   createSurveyResponse(response: InsertSurveyResponse): Promise<SurveyResponse>;
+  deleteSurveyResponse(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1490,6 +1491,10 @@ export class DatabaseStorage implements IStorage {
   async createSurveyResponse(response: InsertSurveyResponse): Promise<SurveyResponse> {
     const [newResponse] = await db.insert(surveyResponses).values(response).returning();
     return newResponse;
+  }
+
+  async deleteSurveyResponse(id: string): Promise<void> {
+    await db.delete(surveyResponses).where(eq(surveyResponses.id, id));
   }
 }
 

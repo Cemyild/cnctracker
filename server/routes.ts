@@ -2426,6 +2426,15 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/surveys/responses/:id", async (req, res) => {
+    try {
+      await storage.deleteSurveyResponse(req.params.id);
+      res.json({ message: "Başarıyla silindi" });
+    } catch (error) {
+      res.status(500).json({ error: "Silme işlemi başarısız" });
+    }
+  });
+
   app.post("/api/surveys/seed", async (req, res) => {
     try {
       const existing = await storage.getSurveys();
