@@ -15,6 +15,8 @@ import Tools from "@/pages/Tools";
 import Calisanlar from "@/pages/Calisanlar";
 import Hesaplamalar from "@/pages/Hesaplamalar";
 import Tahsilat from "@/pages/Tahsilat";
+import Anketler from "@/pages/Anketler";
+import PublicSurvey from "@/pages/PublicSurvey";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -27,6 +29,7 @@ const pageTitles: Record<string, string> = {
   "/calisanlar": "Çalışanlar",
   "/hesaplamalar": "Hesaplamalar",
   "/tahsilat": "Müşteri Tahsilat",
+  "/anketler": "Anketler",
 };
 
 function Router() {
@@ -41,6 +44,8 @@ function Router() {
       <Route path="/calisanlar" component={Calisanlar} />
       <Route path="/hesaplamalar" component={Hesaplamalar} />
       <Route path="/tahsilat" component={Tahsilat} />
+      <Route path="/anketler" component={Anketler} />
+      <Route path="/survey/:id" component={PublicSurvey} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -48,6 +53,11 @@ function Router() {
 
 function AppContent() {
   const [location] = useLocation();
+  
+  if (location.startsWith("/survey/")) {
+    return <Router />;
+  }
+
   const pageTitle = pageTitles[location] || "Dashboard";
 
   return (

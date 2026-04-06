@@ -1,4 +1,4 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull } from "drizzle-orm";
@@ -110,6 +110,13 @@ export interface IStorage {
   createExpenseCategory(category: InsertExpenseCategory): Promise<ExpenseCategory>;
   deleteExpenseCategory(id: string): Promise<void>;
   seedExpenseCategories(): Promise<void>;
+
+  // Surveys
+  getSurveys(): Promise<Survey[]>;
+  getSurvey(id: string): Promise<Survey | undefined>;
+  createSurvey(survey: InsertSurvey): Promise<Survey>;
+  getSurveyResponses(surveyId: string): Promise<SurveyResponse[]>;
+  createSurveyResponse(response: InsertSurveyResponse): Promise<SurveyResponse>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1452,6 +1459,30 @@ export class DatabaseStorage implements IStorage {
         .onConflictDoNothing()
         .returning();
     }
+  }
+
+  // Surveys
+  async getSurveys(): Promise<Survey[]> {
+    return await db.select().from(surveys).orderBy(desc(surveys.createdAt));
+  }
+
+  async getSurvey(id: string): Promise<Survey | undefined> {
+    const [survey] = await db.select().from(surveys).where(eq(surveys.id, id));
+    return survey;
+  }
+
+  async createSurvey(survey: InsertSurvey): Promise<Survey> {
+    const [newSurvey] = await db.insert(surveys).values(survey).returning();
+    return newSurvey;
+  }
+
+  async getSurveyResponses(surveyId: string): Promise<SurveyResponse[]> {
+    return await db.select().from(surveyResponses).where(eq(surveyResponses.surveyId, surveyId)).orderBy(desc(surveyResponses.submittedAt));
+  }
+
+  async createSurveyResponse(response: InsertSurveyResponse): Promise<SurveyResponse> {
+    const [newResponse] = await db.insert(surveyResponses).values(response).returning();
+    return newResponse;
   }
 }
 

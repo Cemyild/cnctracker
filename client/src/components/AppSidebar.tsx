@@ -23,6 +23,7 @@ import {
   Users,
   Calculator,
   HandCoins,
+  ClipboardList,
 } from "lucide-react";
 
 const navItems = [
@@ -35,6 +36,7 @@ const navItems = [
   { title: "Çalışanlar", icon: Users, href: "/calisanlar" },
   { title: "Hesaplamalar", icon: Calculator, href: "/hesaplamalar" },
   { title: "Müşteri Tahsilat", icon: HandCoins, href: "/tahsilat" },
+  { title: "Anketler", icon: ClipboardList, href: "/anketler" },
 ];
 
 export function AppSidebar() {

@@ -380,3 +380,32 @@ export const insertExpenseCategorySchema = createInsertSchema(expenseCategories)
 
 export type InsertExpenseCategory = z.infer<typeof insertExpenseCategorySchema>;
 export type ExpenseCategory = typeof expenseCategories.$inferSelect;
+
+// Surveys table
+export const surveys = pgTable("surveys", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description"),
+  questions: jsonb("questions").notNull(), // Array of question objects: { id, text, type (rating/text) }
+  createdAt: timestamp("created_at").defaultNow(),
+  isActive: integer("is_active").default(1),
+});
+
+export const insertSurveySchema = createInsertSchema(surveys).omit({ id: true, createdAt: true });
+export type InsertSurvey = z.infer<typeof insertSurveySchema>;
+export type Survey = typeof surveys.$inferSelect;
+
+// Survey Responses table
+export const surveyResponses = pgTable("survey_responses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  surveyId: varchar("survey_id").references(() => surveys.id, { onDelete: 'cascade' }).notNull(),
+  customerName: text("customer_name").notNull(),
+  answers: jsonb("answers").notNull(), // Array of answer objects: { questionId, score (1-5), adjustedScore (20-100) }
+  averageScore: decimal("average_score", { precision: 5, scale: 2 }).notNull(),
+  comments: text("comments"),
+  submittedAt: timestamp("submitted_at").defaultNow(),
+});
+
+export const insertSurveyResponseSchema = createInsertSchema(surveyResponses).omit({ id: true, submittedAt: true });
+export type InsertSurveyResponse = z.infer<typeof insertSurveyResponseSchema>;
+export type SurveyResponse = typeof surveyResponses.$inferSelect;

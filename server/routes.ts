@@ -2370,6 +2370,77 @@ export async function registerRoutes(
     }
   });
 
-  return httpServer;
+  // Surveys Endpoints
+  app.get("/api/surveys", async (req, res) => {
+    try {
+      const surveysList = await storage.getSurveys();
+      res.json(surveysList);
+    } catch (error) {
+      res.status(500).json({ error: "Anketler alınırken hata oluştu" });
+    }
+  });
 
+  app.get("/api/surveys/:id", async (req, res) => {
+    try {
+      const survey = await storage.getSurvey(req.params.id);
+      if (!survey) return res.status(404).json({ error: "Anket bulunamadı" });
+      res.json(survey);
+    } catch (error) {
+      res.status(500).json({ error: "Anket alınırken hata oluştu" });
+    }
+  });
+
+  app.post("/api/surveys", async (req, res) => {
+    try {
+      const survey = await storage.createSurvey(req.body);
+      res.status(201).json(survey);
+    } catch (error) {
+      res.status(500).json({ error: "Anket oluşturulurken hata oluştu" });
+    }
+  });
+
+  app.get("/api/surveys/:id/responses", async (req, res) => {
+    try {
+      const responses = await storage.getSurveyResponses(req.params.id);
+      res.json(responses);
+    } catch (error) {
+      res.status(500).json({ error: "Cevaplar alınırken hata oluştu" });
+    }
+  });
+
+  app.post("/api/surveys/submit", async (req, res) => {
+    try {
+      const response = await storage.createSurveyResponse(req.body);
+      res.status(201).json(response);
+    } catch (error) {
+      res.status(500).json({ error: "Cevap kaydedilirken hata oluştu" });
+    }
+  });
+
+  app.post("/api/surveys/seed", async (req, res) => {
+    try {
+      const existing = await storage.getSurveys();
+      if (existing.length > 0) return res.status(400).json({ error: "Zaten anketler var" });
+
+      const defaultSurvey = {
+        title: "Müşteri Memnuniyet Anketi",
+        description: "Değerli Müşterimiz,\n\nSizlere daha iyi hizmet sunabilmek ve süreçlerimizi mükemmelleştirmek adına görüşleriniz bizim için çok kıymetlidir. Lütfen aşağıdaki soruları bizimle olan deneyiminize göre 1 ile 5 arasında puanlayınız.",
+        questions: [
+          { id: "q1", text: "CNC Gümrük Müşavirliği'nin sunduğu gümrükleme hizmetlerinin genel hızından ne kadar memnunsunuz?", type: "rating" },
+          { id: "q2", text: "Operasyon ekibimizin ulaşılabilirliği ve iletişim kolaylığı nasıldı?", type: "rating" },
+          { id: "q3", text: "Sunduğumuz hizmetlerdeki şeffaflık (maliyet, süreç bilgilendirmesi) beklentilerinizi karşıladı mı?", type: "rating" },
+          { id: "q4", text: "Karşılaştığınız bir sorun olduğunda çözüm üretme potansiyelimizi nasıl değerlendirirsiniz?", type: "rating" },
+          { id: "q5", text: "Firmamızı başka iş ortaklarına tavsiye etme olasılığınız nedir?", type: "rating" }
+        ],
+        isActive: 1,
+      };
+
+      const survey = await storage.createSurvey(defaultSurvey);
+      res.status(201).json(survey);
+    } catch (error) {
+      res.status(500).json({ error: "Seed işlemi başarısız" });
+    }
+  });
+
+  return httpServer;
 }
