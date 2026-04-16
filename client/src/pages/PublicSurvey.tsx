@@ -160,7 +160,10 @@ export default function PublicSurvey() {
   if (isSubmitted) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center p-4 bg-slate-50">
-        <Card className="w-full max-w-lg text-center p-8">
+        <Card className="w-full max-w-lg text-center p-8 border-t-4 border-t-slate-900 shadow-lg">
+          <div className="flex justify-center mb-8">
+            <img src="/CNC_tranparanLOGO.png" alt="CNC Logo" className="h-40 max-w-full object-contain" />
+          </div>
           <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
           <CardTitle className="text-2xl mb-2">Teşekkür Ederiz</CardTitle>
           <CardDescription className="text-base">
