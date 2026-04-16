@@ -15,6 +15,7 @@ import { Copy, ExternalLink, Leaf, Plus, Edit, BarChart, Trash2 } from "lucide-r
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 
 function ScoreHeatmap({ score }: { score: number }) {
   let color = "bg-green-500";
@@ -141,8 +142,10 @@ function SurveyResponses({ survey, responses, isLoading }: { survey: Survey, res
   );
 }
 
-function SurveyCard({ survey, isActive, onSelect, onEdit }: { survey: Survey, isActive: boolean, onSelect: () => void, onEdit: () => void }) {
+function SurveyCard({ survey, onEdit }: { survey: Survey, onEdit: () => void }) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
+
   const handleCopyLink = (e: React.MouseEvent) => {
     e.stopPropagation();
     const url = `${window.location.origin}/survey/${survey.id}`;
@@ -151,7 +154,7 @@ function SurveyCard({ survey, isActive, onSelect, onEdit }: { survey: Survey, is
   };
 
   return (
-    <Card className={`cursor-pointer transition-colors ${isActive ? 'border-primary ring-1 ring-primary' : 'hover:border-primary/50'}`} onClick={onSelect}>
+    <Card className="transition-colors hover:border-primary/50 relative group">
       <CardHeader>
         <div className="flex justify-between items-start">
           <div className="flex-1">
@@ -161,10 +164,13 @@ function SurveyCard({ survey, isActive, onSelect, onEdit }: { survey: Survey, is
         </div>
       </CardHeader>
       <CardFooter className="gap-2 flex-wrap">
+        <Button variant="outline" size="sm" onClick={() => setLocation(`/anket-sonuclari/${survey.id}`)}>
+          <BarChart className="h-3 w-3 mr-1" /> Analiz
+        </Button>
         <Button variant="outline" size="sm" onClick={handleCopyLink}>
           <Copy className="h-3 w-3 mr-1" /> Link
         </Button>
-        <Button variant="outline" size="sm" asChild onClick={(e) => e.stopPropagation()}>
+        <Button variant="outline" size="sm" asChild>
           <a href={`/survey/${survey.id}`} target="_blank" rel="noreferrer">
             <ExternalLink className="h-3 w-3 mr-1" /> Aç
           </a>
@@ -403,26 +409,12 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
 
 export default function Anketler() {
   const { toast } = useToast();
-  const [activeSurveyId, setActiveSurveyId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editSurvey, setEditSurvey] = useState<Survey | undefined>(undefined);
   const [editQuestions, setEditQuestions] = useState<string>("");
 
   const { data: surveys, isLoading: isSurveysLoading } = useQuery<Survey[]>({
     queryKey: ["/api/surveys"],
-  });
-
-  const activeSurvey = surveys?.find(s => s.id === activeSurveyId) || surveys?.[0];
-
-  useEffect(() => {
-    if (activeSurvey && !activeSurveyId) {
-      setActiveSurveyId(activeSurvey.id);
-    }
-  }, [activeSurvey, activeSurveyId]);
-
-  const { data: responses, isLoading: isResponsesLoading } = useQuery<SurveyResponse[]>({
-    queryKey: ["/api/surveys", activeSurvey?.id, "responses"],
-    enabled: !!activeSurvey?.id,
   });
 
   const handleEdit = (survey: Survey) => {
@@ -452,49 +444,22 @@ export default function Anketler() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-4">
-        <div className="lg:col-span-1 space-y-4">
-          <h3 className="text-lg font-semibold border-b pb-2">Mevcut Anketler</h3>
-          {!surveys?.length ? (
-            <div className="p-8 text-center border rounded-lg bg-muted/20 text-muted-foreground">
-              Sistemde hiç anket bulunamadı.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {surveys.map(s => (
-                <SurveyCard 
-                  key={s.id} 
-                  survey={s} 
-                  isActive={activeSurvey?.id === s.id}
-                  onSelect={() => setActiveSurveyId(s.id)}
-                  onEdit={() => handleEdit(s)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="lg:col-span-2 space-y-4">
-          {activeSurvey ? (
-            <Card className="h-full border-t-4 border-t-primary shadow-sm flex flex-col">
-              <CardHeader className="bg-muted/10 border-b">
-                <div className="flex justify-between items-center">
-                  <CardTitle className="text-xl flex items-center">
-                    <BarChart className="h-5 w-5 mr-2 text-primary" />
-                    {activeSurvey.title} - Sonuçları
-                  </CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1 overflow-auto p-4">
-                <SurveyResponses survey={activeSurvey} responses={responses} isLoading={isResponsesLoading} />
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="h-full flex items-center justify-center border rounded-lg border-dashed p-8 text-muted-foreground">
-              Detayları görmek için sol taraftan bir anket seçin.
-            </div>
-          )}
-        </div>
+      <div className="mt-4">
+        {!surveys?.length ? (
+          <div className="p-8 text-center border rounded-lg bg-muted/20 text-muted-foreground">
+            Sistemde hiç anket bulunamadı.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {surveys.map(s => (
+              <SurveyCard 
+                key={s.id} 
+                survey={s} 
+                onEdit={() => handleEdit(s)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       <SurveyFormModal 

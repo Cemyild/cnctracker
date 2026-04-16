@@ -17,6 +17,7 @@ import Hesaplamalar from "@/pages/Hesaplamalar";
 import Tahsilat from "@/pages/Tahsilat";
 import Anketler from "@/pages/Anketler";
 import PublicSurvey from "@/pages/PublicSurvey";
+import SurveyAnalysis from "@/pages/SurveyAnalysis";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -45,6 +46,7 @@ function Router() {
       <Route path="/hesaplamalar" component={Hesaplamalar} />
       <Route path="/tahsilat" component={Tahsilat} />
       <Route path="/anketler" component={Anketler} />
+      <Route path="/anket-sonuclari/:id" component={SurveyAnalysis} />
       <Route path="/survey/:id" component={PublicSurvey} />
       <Route component={NotFound} />
     </Switch>
