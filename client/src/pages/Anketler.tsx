@@ -75,15 +75,15 @@ function SurveyResponses({ survey, responses, isLoading }: { survey: Survey, res
                       <DialogTitle>{resp.customerName || "İsimsiz Yanıt"} - Yanıt Detayları</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 mt-4">
-                      {resp.contactInfo && Object.keys(resp.contactInfo).length > 0 && (
+                      {!!resp.contactInfo && Object.keys(resp.contactInfo as Record<string, string>).length > 0 && (
                         <div className="grid gap-2 p-4 bg-slate-50 rounded-lg border text-sm mb-4">
                           <h4 className="font-semibold text-xs text-primary uppercase tracking-wider mb-2">Müşteri / İletişim Bilgileri</h4>
-                          {Object.entries(resp.contactInfo).map(([id, val]) => {
+                          {Object.entries(resp.contactInfo as Record<string, string>).map(([id, val]) => {
                             const fieldDef = Array.isArray(survey.contactFields) && survey.contactFields.find((f:any) => f.id === id);
                             const label = fieldDef ? fieldDef.label : (id === 'legacy' ? (survey.identityLabel || "Bilgi") : id);
                             return (
                               <div key={id} className="flex flex-col">
-                                <span className="text-muted-foreground font-medium text-xs">{label}</span>
+                                <span className="text-muted-foreground font-medium text-xs">{String(label)}</span>
                                 <span>{val as string || "-"}</span>
                               </div>
                             );
