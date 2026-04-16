@@ -384,6 +384,7 @@ export type ExpenseCategory = typeof expenseCategories.$inferSelect;
 // Surveys table
 export const surveys = pgTable("surveys", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: text("slug").unique(),
   title: text("title").notNull(),
   description: text("description"),
   questions: jsonb("questions").notNull(), // Array of question objects: { id, text, type (rating/text) }

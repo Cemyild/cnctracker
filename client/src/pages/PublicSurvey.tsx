@@ -125,7 +125,7 @@ export default function PublicSurvey() {
     const primaryName = fields.length > 0 ? (contactInfo[fields[0].id] || "") : "İsimsiz Yanıt";
 
     submitMutation.mutate({
-      surveyId,
+      surveyId: survey!.id,
       customerName: primaryName,
       contactInfo,
       answers: formattedAnswers,

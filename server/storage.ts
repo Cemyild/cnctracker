@@ -1,7 +1,7 @@
 import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, sql, inArray, desc, isNotNull } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, isNotNull, or } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -1469,7 +1469,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSurvey(id: string): Promise<Survey | undefined> {
-    const [survey] = await db.select().from(surveys).where(eq(surveys.id, id));
+    const [survey] = await db.select().from(surveys).where(or(eq(surveys.id, id), eq(surveys.slug, id)));
     return survey;
   }
 

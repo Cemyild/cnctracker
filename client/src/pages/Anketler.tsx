@@ -148,7 +148,7 @@ function SurveyCard({ survey, onEdit }: { survey: Survey, onEdit: () => void }) 
 
   const handleCopyLink = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const url = `${window.location.origin}/survey/${survey.id}`;
+    const url = `${window.location.origin}/survey/${survey.slug || survey.id}`;
     navigator.clipboard.writeText(url);
     toast({ title: "Kopyalandı", description: "Bağlantı panoya kopyalandı." });
   };
@@ -171,7 +171,7 @@ function SurveyCard({ survey, onEdit }: { survey: Survey, onEdit: () => void }) 
           <Copy className="h-3 w-3 mr-1" /> Link
         </Button>
         <Button variant="outline" size="sm" asChild>
-          <a href={`/survey/${survey.id}`} target="_blank" rel="noreferrer">
+          <a href={`/survey/${survey.slug || survey.id}`} target="_blank" rel="noreferrer">
             <ExternalLink className="h-3 w-3 mr-1" /> Aç
           </a>
         </Button>
@@ -199,6 +199,7 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
   const [isAddingField, setIsAddingField] = useState(false);
   const [newField, setNewField] = useState({ label: '', placeholder: '', required: true });
   const [targetScore, setTargetScore] = useState<number>(80);
+  const [slug, setSlug] = useState("");
 
   const { toast } = useToast();
 
@@ -218,6 +219,7 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       setFeedbackFields(fFields.map((f:any) => ({ id: f.id, text: f.text, required: !!f.required })));
       setIsAddingFeedback(false);
       setTargetScore(defaultSurvey?.targetScore ?? 80);
+      setSlug(defaultSurvey?.slug || "");
     }
   }, [open, defaultSurvey, defaultQuestions]);
 
@@ -255,7 +257,8 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       questions,
       isActive: 1,
       contactFields,
-      targetScore
+      targetScore,
+      slug: slug || null
     });
   };
 
@@ -266,12 +269,16 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
           <DialogTitle>{defaultSurvey ? "Anketi Düzenle" : "Yeni Anket Oluştur"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="md:col-span-3 space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="md:col-span-2 space-y-2">
               <Label>Anket Başlığı</Label>
               <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
             </div>
-            <div className="space-y-2">
+            <div className="md:col-span-2 space-y-2">
+              <Label>Özel Link (ornek_anket_adi vb.)</Label>
+              <Input value={slug} onChange={(e) => setSlug(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))} placeholder="Boş bırakılırsa oto. oluşur" />
+            </div>
+            <div className="md:col-span-1 space-y-2">
               <Label>Hedef Puan</Label>
               <Input type="number" min="0" max="100" value={targetScore} onChange={(e) => setTargetScore(parseInt(e.target.value) || 0)} required />
             </div>
