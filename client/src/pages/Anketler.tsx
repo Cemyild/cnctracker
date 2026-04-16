@@ -70,7 +70,7 @@ function SurveyResponses({ survey, responses, isLoading }: { survey: Survey, res
                   <DialogTrigger asChild>
                     <Button variant="ghost" size="sm">Görüntüle</Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
+                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>{resp.customerName || "İsimsiz Yanıt"} - Yanıt Detayları</DialogTitle>
                     </DialogHeader>
