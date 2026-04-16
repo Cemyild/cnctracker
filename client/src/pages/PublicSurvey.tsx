@@ -20,6 +20,7 @@ export default function PublicSurvey() {
   const [contactInfo, setContactInfo] = useState<Record<string, string>>({});
   const [comments, setComments] = useState("");
   const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [textAnswers, setTextAnswers] = useState<Record<string, string>>({});
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   const { data: survey, isLoading, error } = useQuery<Survey>({
@@ -57,10 +58,12 @@ export default function PublicSurvey() {
     if (!survey || !surveyId) return;
 
     const questionsList = Array.isArray(survey.questions) ? survey.questions : [];
+    const ratingQuestions = questionsList.filter((q: any) => q.type === 'rating' || !q.type);
+    const feedbackQuestions = questionsList.filter((q: any) => q.type === 'text');
     
-    // Check if all questions are answered
-    const unanswered = questionsList.filter((q: any) => q.type === 'rating' && !answers[q.id]);
-    if (unanswered.length > 0) {
+    // Check if all rating questions are answered
+    const unansweredRating = ratingQuestions.filter((q: any) => !answers[q.id]);
+    if (unansweredRating.length > 0) {
       toast({
         title: "Eksik Alanlar",
         description: "Lütfen tüm soruları oylayın.",
@@ -90,13 +93,34 @@ export default function PublicSurvey() {
 
     if (hasError) return;
 
-    const formattedAnswers = Object.entries(answers).map(([qId, score]) => {
+    let hasFeedbackError = false;
+    feedbackQuestions.forEach((q: any) => {
+      if (q.required && !(textAnswers[q.id] || "").trim()) {
+        if (!hasFeedbackError) {
+          toast({
+            title: "Eksik Alanlar",
+            description: `Lütfen zorunlu geri bildirim sorularını doldurun.`,
+            variant: "destructive"
+          });
+          hasFeedbackError = true;
+        }
+      }
+    });
+
+    if (hasFeedbackError) return;
+
+    const formattedRatingAnswers = Object.entries(answers).map(([qId, score]) => {
       // 1:20, 2:40, 3:60, 4:80, 5:100
       const adjustedScore = score * 20;
       return { questionId: qId, score, adjustedScore };
     });
 
-    const averageScore = formattedAnswers.reduce((acc, curr) => acc + curr.adjustedScore, 0) / (formattedAnswers.length || 1);
+    const formattedFeedbackAnswers = Object.entries(textAnswers).map(([qId, textValue]) => {
+      return { questionId: qId, textValue, score: null, adjustedScore: null };
+    });
+
+    const formattedAnswers = [...formattedRatingAnswers, ...formattedFeedbackAnswers];
+    const averageScore = formattedRatingAnswers.length > 0 ? (formattedRatingAnswers.reduce((acc, curr) => acc + curr.adjustedScore, 0) / formattedRatingAnswers.length) : 0;
 
     const primaryName = fields.length > 0 ? (contactInfo[fields[0].id] || "") : "İsimsiz Yanıt";
 
@@ -148,6 +172,8 @@ export default function PublicSurvey() {
   }
 
   const questionsList = Array.isArray(survey.questions) ? survey.questions : [];
+  const ratingQuestions = questionsList.filter((q: any) => q.type === 'rating' || !q.type);
+  const feedbackQuestions = questionsList.filter((q: any) => q.type === 'text');
   
   let fieldsToRender = Array.isArray(survey.contactFields) ? survey.contactFields : [];
   if (fieldsToRender.length === 0 && survey.identityLabel) {
@@ -187,7 +213,7 @@ export default function PublicSurvey() {
                   Lütfen aşağıdaki alanları 1 (En Düşük) ile 5 (En Yüksek) arasında değerlendiriniz.
                 </div>
                 
-                {questionsList.map((q: any, idx: number) => (
+                {ratingQuestions.map((q: any, idx: number) => (
                   <div key={q.id} className="p-6 rounded-lg border shadow-sm bg-white transition-all hover:border-slate-900/50">
                     <Label className="text-base font-medium mb-4 block leading-relaxed">
                       <span className="text-slate-900 font-bold mr-2">{idx + 1}.</span> 
@@ -214,6 +240,25 @@ export default function PublicSurvey() {
                   </div>
                 ))}
               </div>
+
+              {feedbackQuestions.length > 0 && (
+                <div className="space-y-6">
+                  {feedbackQuestions.map((q: any, idx: number) => (
+                    <div key={q.id} className="p-6 rounded-lg border shadow-sm bg-white transition-all hover:border-slate-900/50">
+                      <Label className="text-base font-medium mb-4 block leading-relaxed">
+                        <span className="text-slate-900 font-bold mr-2">{ratingQuestions.length + idx + 1}.</span> 
+                        {q.text} {q.required && <span className="text-red-500">*</span>}
+                      </Label>
+                      <Textarea 
+                        placeholder="Yanıtınızı buraya yazabilirsiniz..." 
+                        value={textAnswers[q.id] || ""}
+                        onChange={(e) => setTextAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        className="bg-white min-h-[100px] mt-4 text-base p-4"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="space-y-3 p-6 rounded-lg border bg-white shadow-sm">
                 <Label htmlFor="comments" className="text-base font-medium">Eklemek istediğiniz görüş veya önerileriniz (Opsiyonel)</Label>

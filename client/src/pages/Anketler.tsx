@@ -96,13 +96,22 @@ function SurveyResponses({ survey, responses, isLoading }: { survey: Survey, res
                           const question = qList.find((q: any) => q.id === ans.questionId);
                           return (
                             <div key={idx} className="flex justify-between items-center border-b pb-2 last:border-0 p-2">
-                              <div className="flex-1 pr-4">
-                                <p className="text-sm font-medium">{question?.text || `Soru ID: ${ans.questionId}`}</p>
-                              </div>
-                              <div className="w-48">
-                                <ScoreHeatmap score={Number(ans.adjustedScore)} />
-                                <p className="text-xs text-muted-foreground mt-1 text-right">Verilen Puan: {ans.score}/5</p>
-                              </div>
+                              {question?.type === 'text' ? (
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium">{question?.text || `Soru ID: ${ans.questionId}`}</p>
+                                  <p className="text-sm text-foreground mt-2 bg-white p-3 rounded-md border text-left whitespace-pre-wrap">{ans.textValue || "Yanıt yok"}</p>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="flex-1 pr-4">
+                                    <p className="text-sm font-medium">{question?.text || `Soru ID: ${ans.questionId}`}</p>
+                                  </div>
+                                  <div className="w-48">
+                                    <ScoreHeatmap score={Number(ans.adjustedScore)} />
+                                    <p className="text-xs text-muted-foreground mt-1 text-right">Verilen Puan: {ans.score}/5</p>
+                                  </div>
+                                </>
+                              )}
                             </div>
                           );
                         })}
@@ -178,6 +187,9 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
   const [description, setDescription] = useState("");
   const [questionsText, setQuestionsText] = useState("");
   const [contactFields, setContactFields] = useState<{id: string, label: string, placeholder: string, required: boolean}[]>([]);
+  const [feedbackFields, setFeedbackFields] = useState<{id: string, text: string, required: boolean}[]>([]);
+  const [isAddingFeedback, setIsAddingFeedback] = useState(false);
+  const [newFeedback, setNewFeedback] = useState({ text: '', required: true });
   const [isAddingField, setIsAddingField] = useState(false);
   const [newField, setNewField] = useState({ label: '', placeholder: '', required: true });
 
@@ -195,6 +207,9 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       }
       setContactFields(fields);
       setIsAddingField(false);
+      let fFields = Array.isArray(defaultSurvey?.questions) ? defaultSurvey.questions.filter((q: any) => q.type === 'text') : [];
+      setFeedbackFields(fFields.map((f:any) => ({ id: f.id, text: f.text, required: !!f.required })));
+      setIsAddingFeedback(false);
     }
   }, [open, defaultSurvey, defaultQuestions]);
 
@@ -222,7 +237,9 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       toast({ title: "Eksik", description: "En az bir soru girmelisiniz.", variant: "destructive" });
       return;
     }
-    const questions = lines.map((text, idx) => ({ id: `q${idx + 1}`, text, type: "rating" }));
+    const ratingQuestions = lines.map((text, idx) => ({ id: `q${idx + 1}`, text, type: "rating" }));
+    const feedbackQuestions = feedbackFields.map((f, idx) => ({ id: f.id || `f${idx + 1}_${Date.now()}`, text: f.text, type: "text", required: f.required }));
+    const questions = [...ratingQuestions, ...feedbackQuestions];
     
     saveMutation.mutate({
       title,
@@ -309,7 +326,7 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
             )}
           </div>
           <div className="space-y-2">
-            <Label>Sorular (Her satıra bir soru yazın)</Label>
+            <Label>Puanlama Soruları (Her satıra bir soru yazın)</Label>
             <Textarea 
               value={questionsText} 
               onChange={(e) => setQuestionsText(e.target.value)} 
@@ -318,6 +335,61 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
               required 
             />
           </div>
+
+          <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
+            <div className="flex justify-between items-center">
+              <Label className="text-base font-semibold">Geri Bildirim Soruları (Yazılı Yanıtlar)</Label>
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsAddingFeedback(true)}>
+                <Plus className="h-4 w-4 mr-1" /> Soru Ekle
+              </Button>
+            </div>
+            
+            {feedbackFields.length > 0 && (
+              <div className="space-y-2">
+                {feedbackFields.map((f, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-white p-3 border rounded shadow-sm">
+                    <div>
+                      <p className="font-medium text-sm">{f.text} {f.required && <span className="text-red-500">*</span>}</p>
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setFeedbackFields(prev => prev.filter((_, i) => i !== idx))}>
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {isAddingFeedback && (
+              <div className="bg-white p-4 border flex flex-col gap-3 rounded shadow-sm border-primary/20">
+                <Input 
+                  placeholder="Geri bildirim sorunuz (Örn: Önerileriniz nelerdir?)" 
+                  value={newFeedback.text} 
+                  onChange={e => setNewFeedback({...newFeedback, text: e.target.value})}
+                  autoFocus
+                />
+                <div className="flex items-center space-x-2">
+                  <input 
+                    type="checkbox" 
+                    id="reqFeedback" 
+                    checked={newFeedback.required} 
+                    onChange={e => setNewFeedback({...newFeedback, required: e.target.checked})}
+                    className="h-4 w-4"
+                  />
+                  <Label htmlFor="reqFeedback">Zorunlu Alan</Label>
+                </div>
+                <div className="flex justify-end gap-2 mt-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setIsAddingFeedback(false)}>İptal</Button>
+                  <Button type="button" size="sm" onClick={() => {
+                    if(!newFeedback.text.trim()) return toast({title:"Hata", description:"Lütfen soru metni girin.", variant:"destructive"});
+                    setFeedbackFields(prev => [...prev, { id: `fb_${Date.now()}`, ...newFeedback }]);
+                    setNewFeedback({ text: '', required: true });
+                    setIsAddingFeedback(false);
+                  }}>Ekle</Button>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end pt-4">
             <Button type="submit" disabled={saveMutation.isPending}>
               {saveMutation.isPending ? "Kaydediliyor..." : "Kaydet"}
@@ -356,7 +428,7 @@ export default function Anketler() {
   const handleEdit = (survey: Survey) => {
     setEditSurvey(survey);
     const qList = Array.isArray(survey.questions) ? survey.questions : [];
-    const qText = qList.map((q: any) => q.text).join('\n');
+    const qText = qList.filter((q: any) => q.type === 'rating' || !q.type).map((q: any) => q.text).join('\n');
     setEditQuestions(qText);
     setIsModalOpen(true);
   };
