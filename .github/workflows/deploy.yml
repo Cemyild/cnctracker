@@ -24,7 +24,8 @@ jobs:
             cd /var/www/cnctracker
 
             echo "📥 Pulling latest changes..."
-            git pull origin main
+            git fetch origin
+            git reset --hard origin/main
 
             echo "📦 Installing dependencies..."
             npm install --legacy-peer-deps
