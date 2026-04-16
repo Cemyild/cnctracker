@@ -198,6 +198,7 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
   const [newFeedback, setNewFeedback] = useState({ text: '', required: true });
   const [isAddingField, setIsAddingField] = useState(false);
   const [newField, setNewField] = useState({ label: '', placeholder: '', required: true });
+  const [targetScore, setTargetScore] = useState<number>(80);
 
   const { toast } = useToast();
 
@@ -216,6 +217,7 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       let fFields = Array.isArray(defaultSurvey?.questions) ? defaultSurvey.questions.filter((q: any) => q.type === 'text') : [];
       setFeedbackFields(fFields.map((f:any) => ({ id: f.id, text: f.text, required: !!f.required })));
       setIsAddingFeedback(false);
+      setTargetScore(defaultSurvey?.targetScore ?? 80);
     }
   }, [open, defaultSurvey, defaultQuestions]);
 
@@ -252,7 +254,8 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
       description,
       questions,
       isActive: 1,
-      contactFields
+      contactFields,
+      targetScore
     });
   };
 
@@ -263,9 +266,15 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange }
           <DialogTitle>{defaultSurvey ? "Anketi Düzenle" : "Yeni Anket Oluştur"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-          <div className="space-y-2">
-            <Label>Anket Başlığı</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="md:col-span-3 space-y-2">
+              <Label>Anket Başlığı</Label>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label>Hedef Puan</Label>
+              <Input type="number" min="0" max="100" value={targetScore} onChange={(e) => setTargetScore(parseInt(e.target.value) || 0)} required />
+            </div>
           </div>
           <div className="space-y-2">
             <Label>Açıklama (Müşterinin Göreceği Yazı)</Label>

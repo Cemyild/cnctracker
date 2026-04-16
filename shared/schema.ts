@@ -390,6 +390,7 @@ export const surveys = pgTable("surveys", {
   requireIdentity: integer("require_identity").default(1), // 1 for true, 0 for false
   identityLabel: text("identity_label").default("Firma / Ad Soyad"),
   contactFields: jsonb("contact_fields").default([]).notNull(), // Array of { id, label, placeholder, required }
+  targetScore: integer("target_score").default(80).notNull(), // Target score threshold
   createdAt: timestamp("created_at").defaultNow(),
   isActive: integer("is_active").default(1),
 });

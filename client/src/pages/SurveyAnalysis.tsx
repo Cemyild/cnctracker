@@ -1,13 +1,27 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { type Survey, type SurveyResponse } from "@shared/schema";
 import { useRoute } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function SurveyAnalysis() {
   const [, params] = useRoute("/anket-sonuclari/:id");
   const surveyId = params?.id;
+  const { toast } = useToast();
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/surveys/responses/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/surveys", surveyId, "responses"] });
+      toast({ title: "Başarılı", description: "Yanıt silindi." });
+    }
+  });
 
   const { data: survey, isLoading: isSurveyLoading } = useQuery<Survey>({
     queryKey: [`/api/surveys/${surveyId}`],
@@ -29,6 +43,9 @@ export default function SurveyAnalysis() {
 
   const questionsList = Array.isArray(survey.questions) ? survey.questions : [];
   const ratingQuestions = questionsList.filter((q: any) => q.type === 'rating' || !q.type);
+  const textQuestions = questionsList.filter((q: any) => q.type === 'text');
+  
+  const targetScore = survey.targetScore ?? 80;
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return "text-green-600 bg-green-50";
@@ -83,7 +100,7 @@ export default function SurveyAnalysis() {
         <div className="flex items-center gap-4">
           <div className="text-right flex items-center gap-4 bg-slate-50 py-2 px-4 rounded-xl border">
             <div>
-              <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-1">Genel Ortalama (Hedef: 80)</p>
+              <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-1">Genel Ortalama (Hedef: {targetScore})</p>
               <p className={`text-2xl font-bold ${getScoreColor(globalAverage).split(' ')[0]}`}>
                 {globalAverage > 0 ? globalAverage.toFixed(2) : "0.00"}
               </p>
@@ -106,6 +123,7 @@ export default function SurveyAnalysis() {
                     </th>
                   ))}
                   <th className="px-4 py-4 text-center font-extrabold whitespace-nowrap bg-slate-200 border-b border-slate-300">ORTALAMA</th>
+                  <th className="px-4 py-4 text-center font-bold whitespace-nowrap bg-slate-100 border-b border-l border-slate-200">İŞLEM</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -121,7 +139,76 @@ export default function SurveyAnalysis() {
                   return (
                     <tr key={r.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-4 py-3 font-medium text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 z-10 border-r border-slate-200">{index + 1}</td>
-                      <td className="px-4 py-3 font-medium text-slate-900 sticky left-[64px] bg-white group-hover:bg-slate-50 z-10 border-r border-slate-200 truncate max-w-[250px]" title={String(nameInfo)}>{nameInfo}</td>
+                      <td className="px-4 py-3 font-medium text-slate-900 sticky left-[64px] bg-white group-hover:bg-slate-50 z-10 border-r border-slate-200 truncate max-w-[250px]" title={String(nameInfo)}>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <span className="cursor-pointer hover:underline text-primary font-semibold">{nameInfo}</span>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                              <DialogTitle>{nameInfo} - Yanıt Detayları</DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-6 mt-4">
+                              {!!r.contactInfo && Object.keys(r.contactInfo as Record<string, string>).length > 0 && (
+                                <div className="grid gap-2 p-4 bg-slate-50 rounded-lg border text-sm">
+                                  <h4 className="font-semibold text-xs text-primary uppercase tracking-wider mb-2">Müşteri / İletişim Bilgileri</h4>
+                                  {Object.entries(r.contactInfo as Record<string, string>).map(([id, val]) => {
+                                    const fieldDef = Array.isArray(survey.contactFields) && survey.contactFields.find((f:any) => f.id === id);
+                                    const label = fieldDef ? fieldDef.label : (id === 'legacy' ? (survey.identityLabel || "Bilgi") : id);
+                                    return (
+                                      <div key={id} className="flex flex-col">
+                                        <span className="text-muted-foreground font-medium text-xs">{String(label)}</span>
+                                        <span>{val as string || "-"}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              
+                              <div className="space-y-4">
+                                <h4 className="font-semibold text-sm border-b pb-2">Puanlama Yanıtları</h4>
+                                {ratingQuestions.map((q, idx) => {
+                                  const ans = Array.isArray(r.answers) ? r.answers.find((a:any) => a.questionId === q.id) : null;
+                                  return (
+                                    <div key={q.id} className="flex justify-between items-start gap-4">
+                                      <p className="text-sm flex-1">{idx + 1}. {q.text}</p>
+                                      {ans && ans.adjustedScore != null ? (
+                                        <div className={`px-3 py-1 rounded font-bold text-sm ${getScoreColor(ans.adjustedScore)}`}>
+                                          {ans.adjustedScore}
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-400 text-sm">Yanıt yok</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {textQuestions.length > 0 && (
+                                <div className="space-y-4">
+                                  <h4 className="font-semibold text-sm border-b pb-2">Yazılı Görüşler</h4>
+                                  {textQuestions.map((q, idx) => {
+                                    const ans = Array.isArray(r.answers) ? r.answers.find((a:any) => a.questionId === q.id) : null;
+                                    return (
+                                      <div key={q.id} className="space-y-2">
+                                        <p className="text-sm font-medium">{q.text}</p>
+                                        <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-md border whitespace-pre-wrap">{ans?.textValue || "Yanıt yok"}</p>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {r.comments && (
+                                <div className="p-4 bg-muted/50 rounded-lg">
+                                  <h4 className="text-sm font-semibold mb-2">Genel Yorum</h4>
+                                  <p className="text-sm text-foreground whitespace-pre-wrap">{r.comments}</p>
+                                </div>
+                              )}
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                      </td>
                       
                       {ratingQuestions.map(q => {
                         const ans = Array.isArray(r.answers) ? r.answers.find((a:any) => a.questionId === q.id) : null;
@@ -142,6 +229,15 @@ export default function SurveyAnalysis() {
                       <td className={`px-4 py-3 text-center font-bold border-l-2 border-slate-200 bg-slate-50 group-hover:bg-slate-100 transition-colors ${getScoreColor(avg).split(' ')[0]}`}>
                         {avg > 0 ? avg.toFixed(2) : "-"}
                       </td>
+                      <td className="px-4 py-3 text-center border-l border-slate-200">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-red-50 hover:text-red-500" onClick={() => {
+                          if (confirm("Bu yanıtı silmek istediğinize emin misiniz?")) {
+                             deleteMutation.mutate(r.id);
+                          }
+                        }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
                     </tr>
                   )
                 })}
@@ -161,6 +257,7 @@ export default function SurveyAnalysis() {
                   <td className="px-4 py-4 text-center text-lg bg-slate-200 border-l border-slate-300 text-slate-900">
                     {globalAverage > 0 ? globalAverage.toFixed(2) : "-"}
                   </td>
+                  <td className="px-4 py-4 bg-slate-100 border-l border-slate-200" colSpan={1}></td>
                 </tr>
                 <tr className="bg-slate-200/50 border-t border-slate-300">
                   <td className="px-4 py-3 text-slate-600 sticky left-0 z-30 bg-slate-200/50 border-r border-slate-300" colSpan={1}></td>
@@ -171,8 +268,9 @@ export default function SurveyAnalysis() {
                     </td>
                   ))}
                   <td className="px-4 py-3 text-center text-slate-600 bg-slate-300/50 border-l border-slate-300">
-                    80
+                    {targetScore}
                   </td>
+                  <td className="px-4 py-3 bg-slate-200/50 border-l border-slate-300" colSpan={1}></td>
                 </tr>
               </tfoot>
             </table>
