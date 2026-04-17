@@ -1,4 +1,8 @@
+import { useState, useEffect } from "react";
 import { Switch, Route, useLocation } from "wouter";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Lock } from "lucide-react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -55,9 +59,52 @@ function Router() {
 
 function AppContent() {
   const [location] = useLocation();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [password, setPassword] = useState("");
+  const [errorAuth, setErrorAuth] = useState(false);
+
+  useEffect(() => {
+    if (localStorage.getItem("cnctracker_admin_auth") === "true") {
+      setIsAuthenticated(true);
+    }
+  }, []);
   
   if (location.startsWith("/survey/")) {
     return <Router />;
+  }
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password === "cnc2024") { 
+      localStorage.setItem("cnctracker_admin_auth", "true");
+      setIsAuthenticated(true);
+      setErrorAuth(false);
+    } else {
+      setErrorAuth(true);
+    }
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-slate-50">
+        <form onSubmit={handleLogin} className="p-8 bg-white rounded-xl shadow-lg border max-w-sm w-full space-y-4">
+          <div className="flex justify-center mb-6 text-primary">
+            <Lock className="w-12 h-12" />
+          </div>
+          <h2 className="text-2xl font-bold text-center">Yönetici Girişi</h2>
+          <p className="text-sm text-center text-slate-500 mb-4">Sisteme erişmek için şifre giriniz.</p>
+          <Input 
+            type="password" 
+            placeholder="Şifre" 
+            value={password} 
+            onChange={(e) => setPassword(e.target.value)}
+            className={errorAuth ? "border-red-500" : ""}
+          />
+          {errorAuth && <p className="text-xs text-red-500">Hatalı şifre</p>}
+          <Button type="submit" className="w-full">Giriş Yap</Button>
+        </form>
+      </div>
+    );
   }
 
   const pageTitle = pageTitles[location] || "Dashboard";
