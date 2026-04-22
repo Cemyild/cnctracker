@@ -2985,5 +2985,55 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
+  // ─── Yönetim Gözden Geçirme ─────────────────────────────────────────────
+
+  app.get("/api/yonetim-toplantilari", async (_req, res) => {
+    const list = await storage.getToplantılar();
+    res.json(list);
+  });
+
+  app.get("/api/yonetim-toplantilari/:id", async (req, res) => {
+    const toplantı = await storage.getToplantı(req.params.id);
+    if (!toplantı) return res.status(404).json({ error: "Bulunamadı" });
+    res.json(toplantı);
+  });
+
+  app.post("/api/yonetim-toplantilari", async (req, res) => {
+    const toplantı = await storage.createToplantı(req.body);
+    res.json(toplantı);
+  });
+
+  app.put("/api/yonetim-toplantilari/:id", async (req, res) => {
+    const toplantı = await storage.updateToplantı(req.params.id, req.body);
+    if (!toplantı) return res.status(404).json({ error: "Bulunamadı" });
+    res.json(toplantı);
+  });
+
+  app.delete("/api/yonetim-toplantilari/:id", async (req, res) => {
+    await storage.deleteToplantı(req.params.id);
+    res.json({ ok: true });
+  });
+
+  app.get("/api/yonetim-aksiyonlar", async (_req, res) => {
+    const list = await storage.getAksiyonlar();
+    res.json(list);
+  });
+
+  app.post("/api/yonetim-aksiyonlar", async (req, res) => {
+    const aksiyon = await storage.createAksiyon(req.body);
+    res.json(aksiyon);
+  });
+
+  app.put("/api/yonetim-aksiyonlar/:id", async (req, res) => {
+    const aksiyon = await storage.updateAksiyon(req.params.id, req.body);
+    if (!aksiyon) return res.status(404).json({ error: "Bulunamadı" });
+    res.json(aksiyon);
+  });
+
+  app.delete("/api/yonetim-aksiyonlar/:id", async (req, res) => {
+    await storage.deleteAksiyon(req.params.id);
+    res.json({ ok: true });
+  });
+
   return httpServer;
 }
