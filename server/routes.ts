@@ -2934,6 +2934,7 @@ export async function registerRoutes(
 
   app.put("/api/tedarikcilar/:id", async (req, res) => {
     const tedarikci = await storage.updateTedarikci(req.params.id, req.body);
+    if (!tedarikci) return res.status(404).json({ error: "Bulunamadı" });
     res.json(tedarikci);
   });
 
@@ -2975,6 +2976,7 @@ export async function registerRoutes(
 
   app.put("/api/tedarikci-degerlendirme-kriterleri/:id", async (req, res) => {
     const kriter = await storage.updateTedarikciKriter(req.params.id, req.body);
+    if (!kriter) return res.status(404).json({ error: "Bulunamadı" });
     res.json(kriter);
   });
 
