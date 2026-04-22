@@ -20,6 +20,10 @@ import Calisanlar from "@/pages/Calisanlar";
 import Hesaplamalar from "@/pages/Hesaplamalar";
 import Tahsilat from "@/pages/Tahsilat";
 import Anketler from "@/pages/Anketler";
+import { Redirect } from "wouter";
+import ISO9001Anketler from "@/pages/ISO9001Anketler";
+import ISO9001Duf from "@/pages/ISO9001Duf";
+import ISO9001Tetkik from "@/pages/ISO9001Tetkik";
 import PublicSurvey from "@/pages/PublicSurvey";
 import SurveyAnalysis from "@/pages/SurveyAnalysis";
 import NotFound from "@/pages/not-found";
@@ -35,6 +39,9 @@ const pageTitles: Record<string, string> = {
   "/hesaplamalar": "Hesaplamalar",
   "/tahsilat": "Müşteri Tahsilat",
   "/anketler": "Anketler",
+  "/iso9001/anketler": "ISO9001-2015 — Anketler",
+  "/iso9001/duf": "ISO9001-2015 — Düzeltici Faaliyet",
+  "/iso9001/tetkik": "ISO9001-2015 — İç Tetkik",
 };
 
 function Router() {
@@ -49,7 +56,12 @@ function Router() {
       <Route path="/calisanlar" component={Calisanlar} />
       <Route path="/hesaplamalar" component={Hesaplamalar} />
       <Route path="/tahsilat" component={Tahsilat} />
-      <Route path="/anketler" component={Anketler} />
+      <Route path="/anketler">
+        <Redirect to="/iso9001/anketler" />
+      </Route>
+      <Route path="/iso9001/anketler" component={ISO9001Anketler} />
+      <Route path="/iso9001/duf" component={ISO9001Duf} />
+      <Route path="/iso9001/tetkik" component={ISO9001Tetkik} />
       <Route path="/anket-sonuclari/:id" component={SurveyAnalysis} />
       <Route path="/survey/:id" component={PublicSurvey} />
       <Route component={NotFound} />
