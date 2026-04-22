@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart3, Plus, Pencil, Trash2, ChevronDown, ChevronRight, CheckCircle2, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -124,6 +124,7 @@ export default function ISO9001YonetimGozdenGecirme() {
       fetch(`/api/yonetim-toplantilari/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/yonetim-toplantilari"] });
+      qc.invalidateQueries({ queryKey: ["/api/yonetim-toplantilari", expandedId] });
       setModal({ open: false, editing: null });
       toast({ title: "Toplantı güncellendi" });
     },
@@ -237,13 +238,13 @@ export default function ISO9001YonetimGozdenGecirme() {
                 <tr>
                   <th className="text-left p-3 font-medium">Tarih</th>
                   <th className="text-left p-3 font-medium">Katılımcılar</th>
-                  <th className="text-left p-3 font-medium">Aksiyon</th>
+                  <th className="text-left p-3 font-medium">Aksiyon Sayısı</th>
                   <th className="text-right p-3 font-medium">İşlemler</th>
                 </tr>
               </thead>
               <tbody>
                 {toplantılar.map(t => (
-                  <>
+                  <React.Fragment key={t.id}>
                     <tr
                       key={t.id}
                       className="border-t cursor-pointer hover:bg-muted/30 transition-colors"
@@ -342,7 +343,7 @@ export default function ISO9001YonetimGozdenGecirme() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 ))}
                 {toplantılar.length === 0 && (
                   <tr><td colSpan={4} className="p-6 text-center text-muted-foreground">Henüz toplantı kaydı yok.</td></tr>
