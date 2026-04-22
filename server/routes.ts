@@ -47,6 +47,18 @@ const tetkikStorage = multer.diskStorage({
 });
 const uploadTetkik = multer({ storage: tetkikStorage });
 
+const belgeStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = "uploads/belgeler";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  },
+});
+const uploadBelge = multer({ storage: belgeStorage });
+
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar } from "@shared/schema";
 import { createHash } from "crypto";
 import { z } from "zod";
@@ -2401,6 +2413,59 @@ export async function registerRoutes(
       res.json(stats);
     } catch (e) {
       res.status(500).json({ error: "Stats alınamadı" });
+    }
+  });
+
+  // Belge Arşivi
+  app.get("/api/belgeler", async (req, res) => {
+    try {
+      const { anaKategori, altKategori, durum, baslangic, bitis, arama } = req.query as Record<string, string>;
+      const belgelerList = await storage.getBelgeler({ anaKategori, altKategori, durum, baslangic, bitis, arama });
+      res.json(belgelerList);
+    } catch (e) {
+      res.status(500).json({ error: "Belge listesi alınamadı" });
+    }
+  });
+
+  app.post("/api/belgeler", uploadBelge.single("dosya"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Dosya zorunludur" });
+      const data = JSON.parse(req.body.data ?? "{}");
+      data.dosyaYolu = `/uploads/belgeler/${req.file.filename}`;
+      const belge = await storage.createBelge(data);
+      res.status(201).json(belge);
+    } catch (e) {
+      res.status(400).json({ error: "Belge oluşturulamadı" });
+    }
+  });
+
+  app.delete("/api/belgeler/:id", async (req, res) => {
+    try {
+      await storage.deleteBelge(req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Belge silinemedi" });
+    }
+  });
+
+  app.get("/api/belgeler/:id/versiyonlar", async (req, res) => {
+    try {
+      const versiyonlar = await storage.getBelgeVersiyonlar(req.params.id);
+      res.json(versiyonlar);
+    } catch (e) {
+      res.status(500).json({ error: "Versiyonlar alınamadı" });
+    }
+  });
+
+  app.post("/api/belgeler/:id/versiyonlar", uploadBelge.single("dosya"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Dosya zorunludur" });
+      const data = JSON.parse(req.body.data ?? "{}");
+      data.dosyaYolu = `/uploads/belgeler/${req.file.filename}`;
+      const versiyon = await storage.addBelgeVersiyon(req.params.id, data);
+      res.status(201).json(versiyon);
+    } catch (e) {
+      res.status(400).json({ error: "Versiyon eklenemedi" });
     }
   });
 
