@@ -1,7 +1,7 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse, duf, type Duf, type InsertDuf, tetkikPlanlar, type TetkikPlan, type InsertTetkikPlan, tetkikBulgular, type TetkikBulgu, type InsertTetkikBulgu } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, sql, inArray, desc, isNotNull, or } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -119,6 +119,40 @@ export interface IStorage {
   getSurveyResponses(surveyId: string): Promise<SurveyResponse[]>;
   createSurveyResponse(response: InsertSurveyResponse): Promise<SurveyResponse>;
   deleteSurveyResponse(id: string): Promise<void>;
+
+  // ISO9001 Stats
+  getIso9001Stats(): Promise<{
+    surveyCountMusteri: number;
+    surveyCountCalisanlar: number;
+    dufAcik: number;
+    dufGecikmiş: number;
+    dufKapali: number;
+    tetkikSonTarih: string | null;
+    tetkikPlanlanan: number;
+  }>;
+
+  // DÜF
+  getDufList(): Promise<Duf[]>;
+  getDuf(id: string): Promise<Duf | undefined>;
+  createDuf(data: InsertDuf): Promise<Duf>;
+  updateDuf(id: string, data: Partial<InsertDuf>): Promise<Duf>;
+  deleteDuf(id: string): Promise<void>;
+
+  // Tetkik Planlar
+  getTetkikPlanlar(): Promise<TetkikPlan[]>;
+  getTetkikPlan(id: string): Promise<TetkikPlan | undefined>;
+  createTetkikPlan(data: InsertTetkikPlan): Promise<TetkikPlan>;
+  updateTetkikPlan(id: string, data: Partial<InsertTetkikPlan>): Promise<TetkikPlan>;
+  deleteTetkikPlan(id: string): Promise<void>;
+
+  // Tetkik Bulgular
+  getTetkikBulgular(tetkikPlanId?: string): Promise<TetkikBulgu[]>;
+  createTetkikBulgu(data: InsertTetkikBulgu): Promise<TetkikBulgu>;
+  updateTetkikBulgu(id: string, data: Partial<InsertTetkikBulgu>): Promise<TetkikBulgu>;
+  deleteTetkikBulgu(id: string): Promise<void>;
+
+  // Survey type filter
+  getSurveysByType(type: string): Promise<Survey[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1495,6 +1529,115 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSurveyResponse(id: string): Promise<void> {
     await db.delete(surveyResponses).where(eq(surveyResponses.id, id));
+  }
+
+  async getSurveysByType(type: string): Promise<Survey[]> {
+    return await db.select().from(surveys).where(eq(surveys.type, type)).orderBy(desc(surveys.createdAt));
+  }
+
+  async getIso9001Stats() {
+    const today = new Date().toISOString().split("T")[0];
+
+    const [musteriCount] = await db.select({ count: sql<number>`count(*)::int` }).from(surveys).where(eq(surveys.type, "musteri"));
+    const [calisanCount] = await db.select({ count: sql<number>`count(*)::int` }).from(surveys).where(eq(surveys.type, "calisanlar"));
+
+    const [dufAcik] = await db.select({ count: sql<number>`count(*)::int` }).from(duf).where(eq(duf.durum, "acik"));
+    const [dufDevam] = await db.select({ count: sql<number>`count(*)::int` }).from(duf).where(eq(duf.durum, "devam_ediyor"));
+    const [dufKapali] = await db.select({ count: sql<number>`count(*)::int` }).from(duf).where(eq(duf.durum, "kapali"));
+
+    const gecikmisDuf = await db.select({ count: sql<number>`count(*)::int` }).from(duf)
+      .where(and(
+        sql`${duf.hedefKapanisTarihi} < ${today}`,
+        ne(duf.durum, "kapali")
+      ));
+
+    const tamamlananTetkikler = await db.select()
+      .from(tetkikPlanlar)
+      .where(eq(tetkikPlanlar.durum, "tamamlandi"))
+      .orderBy(desc(tetkikPlanlar.planlananTarih))
+      .limit(1);
+
+    const [planlananTetkik] = await db.select({ count: sql<number>`count(*)::int` }).from(tetkikPlanlar).where(eq(tetkikPlanlar.durum, "planlandi"));
+
+    return {
+      surveyCountMusteri: musteriCount.count,
+      surveyCountCalisanlar: calisanCount.count,
+      dufAcik: dufAcik.count + dufDevam.count,
+      dufGecikmiş: gecikmisDuf[0].count,
+      dufKapali: dufKapali.count,
+      tetkikSonTarih: tamamlananTetkikler[0]?.planlananTarih ?? null,
+      tetkikPlanlanan: planlananTetkik.count,
+    };
+  }
+
+  async getDufList(): Promise<Duf[]> {
+    return await db.select().from(duf).orderBy(desc(duf.olusturmaTarihi));
+  }
+
+  async getDuf(id: string): Promise<Duf | undefined> {
+    const [row] = await db.select().from(duf).where(eq(duf.id, id));
+    return row;
+  }
+
+  async createDuf(data: InsertDuf): Promise<Duf> {
+    const [row] = await db.insert(duf).values(data).returning();
+    return row;
+  }
+
+  async updateDuf(id: string, data: Partial<InsertDuf>): Promise<Duf> {
+    const [row] = await db.update(duf).set(data).where(eq(duf.id, id)).returning();
+    if (!row) throw new Error("DÜF bulunamadı");
+    return row;
+  }
+
+  async deleteDuf(id: string): Promise<void> {
+    await db.delete(duf).where(eq(duf.id, id));
+  }
+
+  async getTetkikPlanlar(): Promise<TetkikPlan[]> {
+    return await db.select().from(tetkikPlanlar).orderBy(desc(tetkikPlanlar.planlananTarih));
+  }
+
+  async getTetkikPlan(id: string): Promise<TetkikPlan | undefined> {
+    const [row] = await db.select().from(tetkikPlanlar).where(eq(tetkikPlanlar.id, id));
+    return row;
+  }
+
+  async createTetkikPlan(data: InsertTetkikPlan): Promise<TetkikPlan> {
+    const [row] = await db.insert(tetkikPlanlar).values(data).returning();
+    return row;
+  }
+
+  async updateTetkikPlan(id: string, data: Partial<InsertTetkikPlan>): Promise<TetkikPlan> {
+    const [row] = await db.update(tetkikPlanlar).set(data).where(eq(tetkikPlanlar.id, id)).returning();
+    if (!row) throw new Error("Tetkik planı bulunamadı");
+    return row;
+  }
+
+  async deleteTetkikPlan(id: string): Promise<void> {
+    await db.delete(tetkikPlanlar).where(eq(tetkikPlanlar.id, id));
+  }
+
+  async getTetkikBulgular(tetkikPlanId?: string): Promise<TetkikBulgu[]> {
+    if (tetkikPlanId) {
+      return await db.select().from(tetkikBulgular).where(eq(tetkikBulgular.tetkikPlanId, tetkikPlanId)).orderBy(desc(tetkikBulgular.olusturmaTarihi));
+    }
+    return await db.select().from(tetkikBulgular).orderBy(desc(tetkikBulgular.olusturmaTarihi));
+  }
+
+  async createTetkikBulgu(data: InsertTetkikBulgu): Promise<TetkikBulgu> {
+    const [row] = await db.insert(tetkikBulgular).values(data).returning();
+    return row;
+  }
+
+  async updateTetkikBulgu(id: string, data: Partial<InsertTetkikBulgu>): Promise<TetkikBulgu> {
+    const [row] = await db.update(tetkikBulgular).set(data).where(eq(tetkikBulgular.id, id)).returning();
+    if (!row) throw new Error("Bulgu bulunamadı");
+    return row;
+  }
+
+  async deleteTetkikBulgu(id: string): Promise<void> {
+    await db.delete(tetkikBulgular).where(eq(tetkikBulgular.id, id));
   }
 }
 
