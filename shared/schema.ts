@@ -528,3 +528,83 @@ export const kaliteOlcumler = pgTable("kalite_olcumler", {
 export const insertKaliteOlcumSchema = createInsertSchema(kaliteOlcumler).omit({ id: true, olusturmaTarihi: true });
 export type InsertKaliteOlcum = z.infer<typeof insertKaliteOlcumSchema>;
 export type KaliteOlcum = typeof kaliteOlcumler.$inferSelect;
+
+// ISO Personeller (ISO modülüne özel)
+export const isoPersoneller = pgTable("iso_personeller", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ad: text("ad").notNull(),
+  pozisyon: text("pozisyon"),
+  departman: text("departman"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertIsoPersonelSchema = createInsertSchema(isoPersoneller).omit({ id: true, olusturmaTarihi: true });
+export type InsertIsoPersonel = z.infer<typeof insertIsoPersonelSchema>;
+export type IsoPersonel = typeof isoPersoneller.$inferSelect;
+
+// Eğitimler
+export const egitimler = pgTable("egitimler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  baslik: text("baslik").notNull(),
+  egitimTarihi: text("egitim_tarihi").notNull(),
+  sure: text("sure"),
+  egitimci: text("egitimci"),
+  aciklama: text("aciklama"),
+  sertifikaDosyaYolu: text("sertifika_dosya_yolu"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertEgitimSchema = createInsertSchema(egitimler).omit({ id: true, olusturmaTarihi: true });
+export type InsertEgitim = z.infer<typeof insertEgitimSchema>;
+export type Egitim = typeof egitimler.$inferSelect;
+
+// Eğitim Katılımcıları
+export const egitimKatilimcilar = pgTable("egitim_katilimcilar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  egitimId: varchar("egitim_id").references(() => egitimler.id, { onDelete: "cascade" }).notNull(),
+  personelId: varchar("personel_id").references(() => isoPersoneller.id, { onDelete: "cascade" }).notNull(),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertEgitimKatilimciSchema = createInsertSchema(egitimKatilimcilar).omit({ id: true, olusturmaTarihi: true });
+export type InsertEgitimKatilimci = z.infer<typeof insertEgitimKatilimciSchema>;
+export type EgitimKatilimci = typeof egitimKatilimcilar.$inferSelect;
+
+// Değerlendirme Şablonu Soruları
+export const egitimDegerlendirmeSorulari = pgTable("egitim_degerlendirme_sorulari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  soru: text("soru").notNull(),
+  tip: text("tip").notNull(),
+  sira: integer("sira").notNull(),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertEgitimDegerlendirmeSoruSchema = createInsertSchema(egitimDegerlendirmeSorulari).omit({ id: true, olusturmaTarihi: true });
+export type InsertEgitimDegerlendirmeSoru = z.infer<typeof insertEgitimDegerlendirmeSoruSchema>;
+export type EgitimDegerlendirmeSoru = typeof egitimDegerlendirmeSorulari.$inferSelect;
+
+// Değerlendirmeler (her form dolduruluşu)
+export const egitimDegerlendirmeler = pgTable("egitim_degerlendirmeler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  egitimId: varchar("egitim_id").references(() => egitimler.id, { onDelete: "cascade" }).notNull(),
+  katilimciAdi: text("katilimci_adi").notNull(),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertEgitimDegerlendirmeSchema = createInsertSchema(egitimDegerlendirmeler).omit({ id: true, olusturmaTarihi: true });
+export type InsertEgitimDegerlendirme = z.infer<typeof insertEgitimDegerlendirmeSchema>;
+export type EgitimDegerlendirme = typeof egitimDegerlendirmeler.$inferSelect;
+
+// Değerlendirme Cevapları
+export const egitimDegerlendirmeCevaplari = pgTable("egitim_degerlendirme_cevaplari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  degerlendirmeId: varchar("degerlendirme_id").references(() => egitimDegerlendirmeler.id, { onDelete: "cascade" }).notNull(),
+  soruId: varchar("soru_id").references(() => egitimDegerlendirmeSorulari.id, { onDelete: "cascade" }).notNull(),
+  puan: integer("puan"),
+  cevap: text("cevap"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertEgitimDegerlendirmeCevapSchema = createInsertSchema(egitimDegerlendirmeCevaplari).omit({ id: true, olusturmaTarihi: true });
+export type InsertEgitimDegerlendirmeCevap = z.infer<typeof insertEgitimDegerlendirmeCevapSchema>;
+export type EgitimDegerlendirmeCevap = typeof egitimDegerlendirmeCevaplari.$inferSelect;
