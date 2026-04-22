@@ -1,4 +1,4 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse, duf, type Duf, type InsertDuf, tetkikPlanlar, type TetkikPlan, type InsertTetkikPlan, tetkikBulgular, type TetkikBulgu, type InsertTetkikBulgu, belgeler, belgeVersiyonlar, type Belge, type BelgeVersiyon, type InsertBelge } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse, duf, type Duf, type InsertDuf, tetkikPlanlar, type TetkikPlan, type InsertTetkikPlan, tetkikBulgular, type TetkikBulgu, type InsertTetkikBulgu, belgeler, belgeVersiyonlar, type Belge, type BelgeVersiyon, type InsertBelge, kaliteHedefleri, kaliteOlcumler, type KaliteHedef, type KaliteOlcum, type InsertKaliteHedef, type InsertKaliteOlcum } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne } from "drizzle-orm";
@@ -123,6 +123,8 @@ export interface IStorage {
   // ISO9001 Stats
   getIso9001Stats(): Promise<{
     belgeCount: number;
+    hedefCount: number;
+    hedefYesilCount: number;
     surveyCountMusteri: number;
     surveyCountCalisanlar: number;
     dufAcik: number;
@@ -154,6 +156,15 @@ export interface IStorage {
 
   // Survey type filter
   getSurveysByType(type: string): Promise<Survey[]>;
+
+  // Kalite Hedefleri
+  getKaliteHedefleri(): Promise<(KaliteHedef & { sonOlcum: KaliteOlcum | null })[]>;
+  createKaliteHedef(data: InsertKaliteHedef): Promise<KaliteHedef>;
+  updateKaliteHedef(id: string, data: Partial<InsertKaliteHedef>): Promise<KaliteHedef>;
+  deleteKaliteHedef(id: string): Promise<void>;
+  getKaliteOlcumler(): Promise<(KaliteOlcum & { hedef: KaliteHedef })[]>;
+  createKaliteOlcum(data: InsertKaliteOlcum): Promise<KaliteOlcum>;
+  deleteKaliteOlcum(id: string): Promise<void>;
 
   // Belge Arşivi
   getBelgeler(filters: { anaKategori?: string; altKategori?: string; durum?: string; baslangic?: string; bitis?: string; arama?: string }): Promise<(Belge & { aktifVersiyon: BelgeVersiyon | null })[]>;
@@ -1569,8 +1580,23 @@ export class DatabaseStorage implements IStorage {
 
     const [planlananTetkik] = await db.select({ count: sql<number>`count(*)::int` }).from(tetkikPlanlar).where(eq(tetkikPlanlar.durum, "planlandi"));
 
+    const aktifHedefler = await db.select().from(kaliteHedefleri).where(eq(kaliteHedefleri.durum, "Aktif"));
+    const tumOlcumler = await db.select().from(kaliteOlcumler).orderBy(desc(kaliteOlcumler.olcumTarihi));
+
+    let hedefYesilCount = 0;
+    for (const hedef of aktifHedefler) {
+      const sonOlcum = tumOlcumler.find(o => o.hedefId === hedef.id);
+      if (!sonOlcum) continue;
+      const g = Number(sonOlcum.gerceklesenDeger);
+      const h = Number(hedef.hedefDeger);
+      const yesil = hedef.yon === "yuksek_iyi" ? g >= h : g <= h;
+      if (yesil) hedefYesilCount++;
+    }
+
     return {
       belgeCount: belgeCount.count,
+      hedefCount: aktifHedefler.length,
+      hedefYesilCount,
       surveyCountMusteri: musteriCount.count,
       surveyCountCalisanlar: calisanCount.count,
       dufAcik: dufAcik.count + dufDevam.count,
@@ -1712,6 +1738,48 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBelge(id: string): Promise<void> {
     await db.delete(belgeler).where(eq(belgeler.id, id));
+  }
+
+  async getKaliteHedefleri(): Promise<(KaliteHedef & { sonOlcum: KaliteOlcum | null })[]> {
+    const hedefler = await db.select().from(kaliteHedefleri).orderBy(desc(kaliteHedefleri.olusturmaTarihi));
+    const olcumler = await db.select().from(kaliteOlcumler).orderBy(desc(kaliteOlcumler.olcumTarihi));
+    return hedefler.map(h => ({
+      ...h,
+      sonOlcum: olcumler.find(o => o.hedefId === h.id) ?? null,
+    }));
+  }
+
+  async createKaliteHedef(data: InsertKaliteHedef): Promise<KaliteHedef> {
+    const [row] = await db.insert(kaliteHedefleri).values(data).returning();
+    return row;
+  }
+
+  async updateKaliteHedef(id: string, data: Partial<InsertKaliteHedef>): Promise<KaliteHedef> {
+    const [row] = await db.update(kaliteHedefleri).set(data).where(eq(kaliteHedefleri.id, id)).returning();
+    return row;
+  }
+
+  async deleteKaliteHedef(id: string): Promise<void> {
+    await db.delete(kaliteHedefleri).where(eq(kaliteHedefleri.id, id));
+  }
+
+  async getKaliteOlcumler(): Promise<(KaliteOlcum & { hedef: KaliteHedef })[]> {
+    const rows = await db.select({
+      olcum: kaliteOlcumler,
+      hedef: kaliteHedefleri,
+    }).from(kaliteOlcumler)
+      .innerJoin(kaliteHedefleri, eq(kaliteOlcumler.hedefId, kaliteHedefleri.id))
+      .orderBy(desc(kaliteOlcumler.olcumTarihi));
+    return rows.map(r => ({ ...r.olcum, hedef: r.hedef }));
+  }
+
+  async createKaliteOlcum(data: InsertKaliteOlcum): Promise<KaliteOlcum> {
+    const [row] = await db.insert(kaliteOlcumler).values(data).returning();
+    return row;
+  }
+
+  async deleteKaliteOlcum(id: string): Promise<void> {
+    await db.delete(kaliteOlcumler).where(eq(kaliteOlcumler.id, id));
   }
 }
 
