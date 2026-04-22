@@ -1,4 +1,4 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse, duf, type Duf, type InsertDuf, tetkikPlanlar, type TetkikPlan, type InsertTetkikPlan, tetkikBulgular, type TetkikBulgu, type InsertTetkikBulgu } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse, duf, type Duf, type InsertDuf, tetkikPlanlar, type TetkikPlan, type InsertTetkikPlan, tetkikBulgular, type TetkikBulgu, type InsertTetkikBulgu, belgeler, belgeVersiyonlar, type Belge, type BelgeVersiyon, type InsertBelge } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne } from "drizzle-orm";
@@ -122,6 +122,7 @@ export interface IStorage {
 
   // ISO9001 Stats
   getIso9001Stats(): Promise<{
+    belgeCount: number;
     surveyCountMusteri: number;
     surveyCountCalisanlar: number;
     dufAcik: number;
@@ -153,6 +154,13 @@ export interface IStorage {
 
   // Survey type filter
   getSurveysByType(type: string): Promise<Survey[]>;
+
+  // Belge Arşivi
+  getBelgeler(filters: { anaKategori?: string; altKategori?: string; durum?: string; baslangic?: string; bitis?: string; arama?: string }): Promise<(Belge & { aktifVersiyon: BelgeVersiyon | null })[]>;
+  getBelgeVersiyonlar(belgeId: string): Promise<BelgeVersiyon[]>;
+  createBelge(data: InsertBelge & { versiyonNo: string; degisiklikNotu?: string; dosyaYolu: string }): Promise<Belge>;
+  addBelgeVersiyon(belgeId: string, data: { versiyonNo: string; degisiklikNotu?: string; dosyaYolu: string }): Promise<BelgeVersiyon>;
+  deleteBelge(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1538,6 +1546,8 @@ export class DatabaseStorage implements IStorage {
   async getIso9001Stats() {
     const today = new Date().toISOString().split("T")[0];
 
+    const [belgeCount] = await db.select({ count: sql<number>`count(*)::int` }).from(belgeler);
+
     const [musteriCount] = await db.select({ count: sql<number>`count(*)::int` }).from(surveys).where(eq(surveys.type, "musteri"));
     const [calisanCount] = await db.select({ count: sql<number>`count(*)::int` }).from(surveys).where(eq(surveys.type, "calisanlar"));
 
@@ -1560,6 +1570,7 @@ export class DatabaseStorage implements IStorage {
     const [planlananTetkik] = await db.select({ count: sql<number>`count(*)::int` }).from(tetkikPlanlar).where(eq(tetkikPlanlar.durum, "planlandi"));
 
     return {
+      belgeCount: belgeCount.count,
       surveyCountMusteri: musteriCount.count,
       surveyCountCalisanlar: calisanCount.count,
       dufAcik: dufAcik.count + dufDevam.count,
@@ -1638,6 +1649,69 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTetkikBulgu(id: string): Promise<void> {
     await db.delete(tetkikBulgular).where(eq(tetkikBulgular.id, id));
+  }
+
+  // ==========================================================
+  // BELGE ARŞİVİ IMPLEMENTATION
+  // ==========================================================
+
+  async getBelgeler(filters: { anaKategori?: string; altKategori?: string; durum?: string; baslangic?: string; bitis?: string; arama?: string }) {
+    const tumBelgeler = await db.select().from(belgeler).orderBy(desc(belgeler.olusturmaTarihi));
+    const tumVersiyonlar = await db.select().from(belgeVersiyonlar);
+
+    let result = tumBelgeler.map(b => {
+      const versiyonlar = tumVersiyonlar.filter(v => v.belgeId === b.id);
+      const aktifVersiyon = versiyonlar.find(v => v.isAktif) ?? null;
+      return { ...b, aktifVersiyon };
+    });
+
+    if (filters.anaKategori) result = result.filter(b => b.anaKategori === filters.anaKategori);
+    if (filters.altKategori) result = result.filter(b => b.altKategori.toLowerCase().includes(filters.altKategori!.toLowerCase()));
+    if (filters.arama) result = result.filter(b => b.baslik.toLowerCase().includes(filters.arama!.toLowerCase()));
+    if (filters.durum === "aktif") result = result.filter(b => b.aktifVersiyon !== null);
+    if (filters.durum === "arsiv") result = result.filter(b => b.aktifVersiyon === null);
+    if (filters.baslangic) result = result.filter(b => b.olusturmaTarihi && b.olusturmaTarihi >= new Date(filters.baslangic!));
+    if (filters.bitis) result = result.filter(b => b.olusturmaTarihi && b.olusturmaTarihi <= new Date(filters.bitis!));
+
+    return result;
+  }
+
+  async getBelgeVersiyonlar(belgeId: string): Promise<BelgeVersiyon[]> {
+    return await db.select().from(belgeVersiyonlar)
+      .where(eq(belgeVersiyonlar.belgeId, belgeId))
+      .orderBy(desc(belgeVersiyonlar.olusturmaTarihi));
+  }
+
+  async createBelge(data: InsertBelge & { versiyonNo: string; degisiklikNotu?: string; dosyaYolu: string }): Promise<Belge> {
+    const { versiyonNo, degisiklikNotu, dosyaYolu, ...belgeData } = data;
+    const [belge] = await db.insert(belgeler).values(belgeData).returning();
+    await db.insert(belgeVersiyonlar).values({
+      belgeId: belge.id,
+      versiyonNo,
+      degisiklikNotu: degisiklikNotu ?? null,
+      dosyaYolu,
+      isAktif: true,
+    });
+    return belge;
+  }
+
+  async addBelgeVersiyon(belgeId: string, data: { versiyonNo: string; degisiklikNotu?: string; dosyaYolu: string }): Promise<BelgeVersiyon> {
+    await db.update(belgeVersiyonlar)
+      .set({ isAktif: false })
+      .where(and(eq(belgeVersiyonlar.belgeId, belgeId), eq(belgeVersiyonlar.isAktif, true)));
+
+    const [versiyon] = await db.insert(belgeVersiyonlar).values({
+      belgeId,
+      versiyonNo: data.versiyonNo,
+      degisiklikNotu: data.degisiklikNotu ?? null,
+      dosyaYolu: data.dosyaYolu,
+      isAktif: true,
+    }).returning();
+    return versiyon;
+  }
+
+  async deleteBelge(id: string): Promise<void> {
+    await db.delete(belgeler).where(eq(belgeler.id, id));
   }
 }
 
