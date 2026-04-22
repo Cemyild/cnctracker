@@ -1,4 +1,10 @@
-import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse, duf, type Duf, type InsertDuf, tetkikPlanlar, type TetkikPlan, type InsertTetkikPlan, tetkikBulgular, type TetkikBulgu, type InsertTetkikBulgu, belgeler, belgeVersiyonlar, type Belge, type BelgeVersiyon, type InsertBelge, kaliteHedefleri, kaliteOlcumler, type KaliteHedef, type KaliteOlcum, type InsertKaliteHedef, type InsertKaliteOlcum } from "@shared/schema";
+import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, type InsertGumrukVerisi, araclar, type Arac, type InsertArac, aracGiderler, type AracGider, type InsertAracGider, nakliyeVerileri, type NakliyeVerisi, type InsertNakliyeVerisi, calisanlar, type Calisan, type InsertCalisan, giderler, type Gider, type InsertGiderler, sigortaPoliceleri, type SigortaPolice, type InsertSigortaPolice, sigortaMuhasebeKayitlari, type SigortaMuhasebe, type InsertSigortaMuhasebe, salaryPlans, type SalaryPlan, type InsertSalaryPlan, expenseCategories, type ExpenseCategory, type InsertExpenseCategory, gumrukDosyalar, type GumrukDosya, type InsertGumrukDosya, surveys, surveyResponses, type Survey, type InsertSurvey, type SurveyResponse, type InsertSurveyResponse, duf, type Duf, type InsertDuf, tetkikPlanlar, type TetkikPlan, type InsertTetkikPlan, tetkikBulgular, type TetkikBulgu, type InsertTetkikBulgu, belgeler, belgeVersiyonlar, type Belge, type BelgeVersiyon, type InsertBelge, kaliteHedefleri, kaliteOlcumler, type KaliteHedef, type KaliteOlcum, type InsertKaliteHedef, type InsertKaliteOlcum,
+  isoPersoneller, type IsoPersonel, type InsertIsoPersonel,
+  egitimler, type Egitim, type InsertEgitim,
+  egitimKatilimcilar, type EgitimKatilimci,
+  egitimDegerlendirmeSorulari, type EgitimDegerlendirmeSoru, type InsertEgitimDegerlendirmeSoru,
+  egitimDegerlendirmeler, type EgitimDegerlendirme,
+  egitimDegerlendirmeCevaplari, type EgitimDegerlendirmeCevap } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne } from "drizzle-orm";
@@ -132,6 +138,8 @@ export interface IStorage {
     dufKapali: number;
     tetkikSonTarih: string | null;
     tetkikPlanlanan: number;
+    egitimCount: number;
+    toplamKatilimciCount: number;
   }>;
 
   // DÜF
@@ -172,6 +180,33 @@ export interface IStorage {
   createBelge(data: InsertBelge & { versiyonNo: string; degisiklikNotu?: string; dosyaYolu: string }): Promise<Belge>;
   addBelgeVersiyon(belgeId: string, data: { versiyonNo: string; degisiklikNotu?: string; dosyaYolu: string }): Promise<BelgeVersiyon>;
   deleteBelge(id: string): Promise<void>;
+
+  // ISO Personeller
+  getIsoPersoneller(): Promise<(IsoPersonel & { egitimSayisi: number })[]>;
+  getIsoPersonelKart(id: string): Promise<{ personel: IsoPersonel; egitimler: { egitimId: string; baslik: string; egitimTarihi: string; degerlendirmeDoldu: boolean }[] }>;
+  createIsoPersonel(data: InsertIsoPersonel): Promise<IsoPersonel>;
+  updateIsoPersonel(id: string, data: Partial<InsertIsoPersonel>): Promise<IsoPersonel>;
+  deleteIsoPersonel(id: string): Promise<void>;
+
+  // Eğitimler
+  getEgitimler(): Promise<(Egitim & { katilimciSayisi: number; degerlendirmeSayisi: number })[]>;
+  getEgitimKatilimcilar(egitimId: string): Promise<(EgitimKatilimci & { personel: IsoPersonel })[]>;
+  createEgitim(data: InsertEgitim): Promise<Egitim>;
+  updateEgitim(id: string, data: Partial<InsertEgitim>): Promise<Egitim>;
+  deleteEgitim(id: string): Promise<void>;
+  addEgitimKatilimcilar(egitimId: string, personelIds: string[]): Promise<void>;
+  removeEgitimKatilimci(egitimId: string, personelId: string): Promise<void>;
+
+  // Değerlendirme Şablonu
+  getDegerlendirmeSorulari(): Promise<EgitimDegerlendirmeSoru[]>;
+  createDegerlendirmeSoru(data: InsertEgitimDegerlendirmeSoru): Promise<EgitimDegerlendirmeSoru>;
+  updateDegerlendirmeSoru(id: string, data: Partial<InsertEgitimDegerlendirmeSoru>): Promise<EgitimDegerlendirmeSoru>;
+  deleteDegerlendirmeSoru(id: string): Promise<void>;
+
+  // Public: Değerlendirme
+  getEgitimForDegerlendirme(egitimId: string): Promise<{ egitim: Egitim; sorular: EgitimDegerlendirmeSoru[] } | null>;
+  createEgitimDegerlendirme(data: { egitimId: string; katilimciAdi: string; cevaplar: { soruId: string; puan?: number; cevap?: string }[] }): Promise<void>;
+  getEgitimDegerlendirmeleri(egitimId: string): Promise<(EgitimDegerlendirme & { cevaplar: EgitimDegerlendirmeCevap[] })[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1593,6 +1628,9 @@ export class DatabaseStorage implements IStorage {
       if (yesil) hedefYesilCount++;
     }
 
+    const [egitimCountRow] = await db.select({ count: sql<number>`count(*)::int` }).from(egitimler);
+    const [katilimciCountRow] = await db.select({ count: sql<number>`count(*)::int` }).from(egitimKatilimcilar);
+
     return {
       belgeCount: belgeCount.count,
       hedefCount: aktifHedefler.length,
@@ -1604,6 +1642,8 @@ export class DatabaseStorage implements IStorage {
       dufKapali: dufKapali.count,
       tetkikSonTarih: tamamlananTetkikler[0]?.planlananTarih ?? null,
       tetkikPlanlanan: planlananTetkik.count,
+      egitimCount: egitimCountRow.count,
+      toplamKatilimciCount: katilimciCountRow.count,
     };
   }
 
@@ -1780,6 +1820,178 @@ export class DatabaseStorage implements IStorage {
 
   async deleteKaliteOlcum(id: string): Promise<void> {
     await db.delete(kaliteOlcumler).where(eq(kaliteOlcumler.id, id));
+  }
+
+  async getIsoPersoneller(): Promise<(IsoPersonel & { egitimSayisi: number })[]> {
+    const personeller = await db.select().from(isoPersoneller).orderBy(asc(isoPersoneller.ad));
+    const counts = await db.select({
+      personelId: egitimKatilimcilar.personelId,
+      count: sql<number>`count(*)::int`,
+    }).from(egitimKatilimcilar).groupBy(egitimKatilimcilar.personelId);
+    const countMap = new Map(counts.map(c => [c.personelId, c.count]));
+    return personeller.map(p => ({ ...p, egitimSayisi: countMap.get(p.id) ?? 0 }));
+  }
+
+  async getIsoPersonelKart(id: string): Promise<{ personel: IsoPersonel; egitimler: { egitimId: string; baslik: string; egitimTarihi: string; degerlendirmeDoldu: boolean }[] }> {
+    const [personel] = await db.select().from(isoPersoneller).where(eq(isoPersoneller.id, id));
+    if (!personel) throw new Error("Personel bulunamadı");
+
+    const katilimlar = await db
+      .select({ egitimId: egitimKatilimcilar.egitimId, baslik: egitimler.baslik, egitimTarihi: egitimler.egitimTarihi })
+      .from(egitimKatilimcilar)
+      .innerJoin(egitimler, eq(egitimKatilimcilar.egitimId, egitimler.id))
+      .where(eq(egitimKatilimcilar.personelId, id))
+      .orderBy(desc(egitimler.egitimTarihi));
+
+    const degerlendirmeler = await db.select({ egitimId: egitimDegerlendirmeler.egitimId, katilimciAdi: egitimDegerlendirmeler.katilimciAdi })
+      .from(egitimDegerlendirmeler);
+
+    const egitimlerWithDurum = katilimlar.map(k => ({
+      egitimId: k.egitimId,
+      baslik: k.baslik,
+      egitimTarihi: k.egitimTarihi,
+      degerlendirmeDoldu: degerlendirmeler.some(d => d.egitimId === k.egitimId && d.katilimciAdi.toLowerCase() === personel.ad.toLowerCase()),
+    }));
+
+    return { personel, egitimler: egitimlerWithDurum };
+  }
+
+  async createIsoPersonel(data: InsertIsoPersonel): Promise<IsoPersonel> {
+    const [row] = await db.insert(isoPersoneller).values(data).returning();
+    return row;
+  }
+
+  async updateIsoPersonel(id: string, data: Partial<InsertIsoPersonel>): Promise<IsoPersonel> {
+    const [row] = await db.update(isoPersoneller).set(data).where(eq(isoPersoneller.id, id)).returning();
+    if (!row) throw new Error("Personel bulunamadı");
+    return row;
+  }
+
+  async deleteIsoPersonel(id: string): Promise<void> {
+    await db.delete(isoPersoneller).where(eq(isoPersoneller.id, id));
+  }
+
+  async getEgitimler(): Promise<(Egitim & { katilimciSayisi: number; degerlendirmeSayisi: number })[]> {
+    const tumEgitimler = await db.select().from(egitimler).orderBy(desc(egitimler.egitimTarihi));
+    const katilimCounts = await db.select({
+      egitimId: egitimKatilimcilar.egitimId,
+      count: sql<number>`count(*)::int`,
+    }).from(egitimKatilimcilar).groupBy(egitimKatilimcilar.egitimId);
+    const degerlendirmeCounts = await db.select({
+      egitimId: egitimDegerlendirmeler.egitimId,
+      count: sql<number>`count(*)::int`,
+    }).from(egitimDegerlendirmeler).groupBy(egitimDegerlendirmeler.egitimId);
+
+    const katMap = new Map(katilimCounts.map(c => [c.egitimId, c.count]));
+    const degMap = new Map(degerlendirmeCounts.map(c => [c.egitimId, c.count]));
+
+    return tumEgitimler.map(e => ({
+      ...e,
+      katilimciSayisi: katMap.get(e.id) ?? 0,
+      degerlendirmeSayisi: degMap.get(e.id) ?? 0,
+    }));
+  }
+
+  async getEgitimKatilimcilar(egitimId: string): Promise<(EgitimKatilimci & { personel: IsoPersonel })[]> {
+    return await db
+      .select({
+        id: egitimKatilimcilar.id,
+        egitimId: egitimKatilimcilar.egitimId,
+        personelId: egitimKatilimcilar.personelId,
+        olusturmaTarihi: egitimKatilimcilar.olusturmaTarihi,
+        personel: isoPersoneller,
+      })
+      .from(egitimKatilimcilar)
+      .innerJoin(isoPersoneller, eq(egitimKatilimcilar.personelId, isoPersoneller.id))
+      .where(eq(egitimKatilimcilar.egitimId, egitimId))
+      .orderBy(asc(isoPersoneller.ad));
+  }
+
+  async createEgitim(data: InsertEgitim): Promise<Egitim> {
+    const [row] = await db.insert(egitimler).values(data).returning();
+    return row;
+  }
+
+  async updateEgitim(id: string, data: Partial<InsertEgitim>): Promise<Egitim> {
+    const [row] = await db.update(egitimler).set(data).where(eq(egitimler.id, id)).returning();
+    if (!row) throw new Error("Eğitim bulunamadı");
+    return row;
+  }
+
+  async deleteEgitim(id: string): Promise<void> {
+    await db.delete(egitimler).where(eq(egitimler.id, id));
+  }
+
+  async addEgitimKatilimcilar(egitimId: string, personelIds: string[]): Promise<void> {
+    if (personelIds.length === 0) return;
+    const values = personelIds.map(personelId => ({ egitimId, personelId }));
+    await db.insert(egitimKatilimcilar).values(values).onConflictDoNothing();
+  }
+
+  async removeEgitimKatilimci(egitimId: string, personelId: string): Promise<void> {
+    await db.delete(egitimKatilimcilar).where(
+      and(eq(egitimKatilimcilar.egitimId, egitimId), eq(egitimKatilimcilar.personelId, personelId))
+    );
+  }
+
+  async getDegerlendirmeSorulari(): Promise<EgitimDegerlendirmeSoru[]> {
+    return await db.select().from(egitimDegerlendirmeSorulari).orderBy(asc(egitimDegerlendirmeSorulari.sira));
+  }
+
+  async createDegerlendirmeSoru(data: InsertEgitimDegerlendirmeSoru): Promise<EgitimDegerlendirmeSoru> {
+    const [row] = await db.insert(egitimDegerlendirmeSorulari).values(data).returning();
+    return row;
+  }
+
+  async updateDegerlendirmeSoru(id: string, data: Partial<InsertEgitimDegerlendirmeSoru>): Promise<EgitimDegerlendirmeSoru> {
+    const [row] = await db.update(egitimDegerlendirmeSorulari).set(data).where(eq(egitimDegerlendirmeSorulari.id, id)).returning();
+    if (!row) throw new Error("Soru bulunamadı");
+    return row;
+  }
+
+  async deleteDegerlendirmeSoru(id: string): Promise<void> {
+    await db.delete(egitimDegerlendirmeSorulari).where(eq(egitimDegerlendirmeSorulari.id, id));
+  }
+
+  async getEgitimForDegerlendirme(egitimId: string): Promise<{ egitim: Egitim; sorular: EgitimDegerlendirmeSoru[] } | null> {
+    const [egitim] = await db.select().from(egitimler).where(eq(egitimler.id, egitimId));
+    if (!egitim) return null;
+    const sorular = await db.select().from(egitimDegerlendirmeSorulari).orderBy(asc(egitimDegerlendirmeSorulari.sira));
+    return { egitim, sorular };
+  }
+
+  async createEgitimDegerlendirme(data: { egitimId: string; katilimciAdi: string; cevaplar: { soruId: string; puan?: number; cevap?: string }[] }): Promise<void> {
+    const [degerlendirme] = await db.insert(egitimDegerlendirmeler).values({
+      egitimId: data.egitimId,
+      katilimciAdi: data.katilimciAdi,
+    }).returning();
+
+    if (data.cevaplar.length > 0) {
+      await db.insert(egitimDegerlendirmeCevaplari).values(
+        data.cevaplar.map(c => ({
+          degerlendirmeId: degerlendirme.id,
+          soruId: c.soruId,
+          puan: c.puan ?? null,
+          cevap: c.cevap ?? null,
+        }))
+      );
+    }
+  }
+
+  async getEgitimDegerlendirmeleri(egitimId: string): Promise<(EgitimDegerlendirme & { cevaplar: EgitimDegerlendirmeCevap[] })[]> {
+    const degerlendirmelerList = await db.select().from(egitimDegerlendirmeler)
+      .where(eq(egitimDegerlendirmeler.egitimId, egitimId))
+      .orderBy(desc(egitimDegerlendirmeler.olusturmaTarihi));
+
+    if (degerlendirmelerList.length === 0) return [];
+
+    const cevaplar = await db.select().from(egitimDegerlendirmeCevaplari)
+      .where(inArray(egitimDegerlendirmeCevaplari.degerlendirmeId, degerlendirmelerList.map(d => d.id)));
+
+    return degerlendirmelerList.map(d => ({
+      ...d,
+      cevaplar: cevaplar.filter(c => c.degerlendirmeId === d.id),
+    }));
   }
 }
 
