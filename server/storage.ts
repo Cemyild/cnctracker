@@ -8,7 +8,9 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   tedarikcilar, type Tedarikci, type InsertTedarikci,
   tedarikciDegerlendirmeKriterleri, type TedarikciDegerlendirmeKriter, type InsertTedarikciDegerlendirmeKriter,
   tedarikciDegerlendirmeler, type TedarikciDegerlendirme, type InsertTedarikciDegerlendirme,
-  tedarikciDegerlendirmeCevaplari, type TedarikciDegerlendirmeCevap } from "@shared/schema";
+  tedarikciDegerlendirmeCevaplari, type TedarikciDegerlendirmeCevap,
+  yonetimGozdenGecirmeler, type YonetimGozdenGecirme, type InsertYonetimGozdenGecirme,
+  yonetimAksiyonlar, type YonetimAksiyon, type InsertYonetimAksiyon } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne } from "drizzle-orm";
@@ -146,6 +148,8 @@ export interface IStorage {
     toplamKatilimciCount: number;
     tedarikciCount: number;
     buYilDegerlendirmeCount: number;
+    sonToplantıTarihi: string | null;
+    acikAksiyon: number;
   }>;
 
   // Tedarikçiler
@@ -165,6 +169,17 @@ export interface IStorage {
   getTedarikciDegerlendirme(tedarikciId: string, degerlendirmeId: string): Promise<(TedarikciDegerlendirme & { cevaplar: TedarikciDegerlendirmeCevap[] }) | null>;
   createTedarikciDegerlendirme(data: { tedarikciId: string; tarih: string; degerlendiren?: string; notlar?: string; cevaplar: { kriterId: string; puan?: number; cevap?: string }[] }): Promise<void>;
   deleteTedarikciDegerlendirme(tedarikciId: string, degerlendirmeId: string): Promise<void>;
+
+  // Yönetim Gözden Geçirme
+  getToplantılar(): Promise<(YonetimGozdenGecirme & { aksiyon_sayisi: number })[]>;
+  getToplantı(id: string): Promise<(YonetimGozdenGecirme & { aksiyonlar: YonetimAksiyon[] }) | null>;
+  createToplantı(data: InsertYonetimGozdenGecirme): Promise<YonetimGozdenGecirme>;
+  updateToplantı(id: string, data: Partial<InsertYonetimGozdenGecirme>): Promise<YonetimGozdenGecirme>;
+  deleteToplantı(id: string): Promise<void>;
+  getAksiyonlar(): Promise<(YonetimAksiyon & { toplantıTarihi: string })[]>;
+  createAksiyon(data: InsertYonetimAksiyon): Promise<YonetimAksiyon>;
+  updateAksiyon(id: string, data: Partial<InsertYonetimAksiyon>): Promise<YonetimAksiyon>;
+  deleteAksiyon(id: string): Promise<void>;
 
   // DÜF
   getDufList(): Promise<Duf[]>;
@@ -1698,6 +1713,71 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
+  async getToplantılar(): Promise<(YonetimGozdenGecirme & { aksiyon_sayisi: number })[]> {
+    const list = await db.select().from(yonetimGozdenGecirmeler).orderBy(desc(yonetimGozdenGecirmeler.tarih));
+    const counts = await db.select({
+      toplantId: yonetimAksiyonlar.toplantId,
+      count: sql<number>`count(*)::int`,
+    }).from(yonetimAksiyonlar).groupBy(yonetimAksiyonlar.toplantId);
+    const countMap = new Map(counts.map(c => [c.toplantId, c.count]));
+    return list.map(t => ({ ...t, aksiyon_sayisi: countMap.get(t.id) ?? 0 }));
+  }
+
+  async getToplantı(id: string): Promise<(YonetimGozdenGecirme & { aksiyonlar: YonetimAksiyon[] }) | null> {
+    const [row] = await db.select().from(yonetimGozdenGecirmeler).where(eq(yonetimGozdenGecirmeler.id, id));
+    if (!row) return null;
+    const aksiyonlar = await db.select().from(yonetimAksiyonlar)
+      .where(eq(yonetimAksiyonlar.toplantId, id))
+      .orderBy(asc(yonetimAksiyonlar.olusturmaTarihi));
+    return { ...row, aksiyonlar };
+  }
+
+  async createToplantı(data: InsertYonetimGozdenGecirme): Promise<YonetimGozdenGecirme> {
+    const [row] = await db.insert(yonetimGozdenGecirmeler).values(data).returning();
+    return row;
+  }
+
+  async updateToplantı(id: string, data: Partial<InsertYonetimGozdenGecirme>): Promise<YonetimGozdenGecirme> {
+    const [row] = await db.update(yonetimGozdenGecirmeler).set(data).where(eq(yonetimGozdenGecirmeler.id, id)).returning();
+    return row;
+  }
+
+  async deleteToplantı(id: string): Promise<void> {
+    await db.delete(yonetimGozdenGecirmeler).where(eq(yonetimGozdenGecirmeler.id, id));
+  }
+
+  async getAksiyonlar(): Promise<(YonetimAksiyon & { toplantıTarihi: string })[]> {
+    const rows = await db
+      .select({
+        id: yonetimAksiyonlar.id,
+        toplantId: yonetimAksiyonlar.toplantId,
+        aksiyon: yonetimAksiyonlar.aksiyon,
+        sorumlu: yonetimAksiyonlar.sorumlu,
+        hedefTarih: yonetimAksiyonlar.hedefTarih,
+        durum: yonetimAksiyonlar.durum,
+        olusturmaTarihi: yonetimAksiyonlar.olusturmaTarihi,
+        toplantıTarihi: yonetimGozdenGecirmeler.tarih,
+      })
+      .from(yonetimAksiyonlar)
+      .innerJoin(yonetimGozdenGecirmeler, eq(yonetimAksiyonlar.toplantId, yonetimGozdenGecirmeler.id))
+      .orderBy(desc(yonetimGozdenGecirmeler.tarih));
+    return rows as (YonetimAksiyon & { toplantıTarihi: string })[];
+  }
+
+  async createAksiyon(data: InsertYonetimAksiyon): Promise<YonetimAksiyon> {
+    const [row] = await db.insert(yonetimAksiyonlar).values(data).returning();
+    return row;
+  }
+
+  async updateAksiyon(id: string, data: Partial<InsertYonetimAksiyon>): Promise<YonetimAksiyon> {
+    const [row] = await db.update(yonetimAksiyonlar).set(data).where(eq(yonetimAksiyonlar.id, id)).returning();
+    return row;
+  }
+
+  async deleteAksiyon(id: string): Promise<void> {
+    await db.delete(yonetimAksiyonlar).where(eq(yonetimAksiyonlar.id, id));
+  }
+
   async getIso9001Stats() {
     const today = new Date().toISOString().split("T")[0];
 
@@ -1745,6 +1825,14 @@ export class DatabaseStorage implements IStorage {
       .from(tedarikciDegerlendirmeler)
       .where(sql`${tedarikciDegerlendirmeler.tarih} like ${currentYear + '%'}`);
 
+    const sonToplantıRows = await db.select({ tarih: yonetimGozdenGecirmeler.tarih })
+      .from(yonetimGozdenGecirmeler)
+      .orderBy(desc(yonetimGozdenGecirmeler.tarih))
+      .limit(1);
+    const [acikAksiyon] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(yonetimAksiyonlar)
+      .where(eq(yonetimAksiyonlar.durum, "acik"));
+
     return {
       belgeCount: belgeCount.count,
       hedefCount: aktifHedefler.length,
@@ -1760,6 +1848,8 @@ export class DatabaseStorage implements IStorage {
       toplamKatilimciCount: katilimciCountRow.count,
       tedarikciCount: tedarikciCountRow.count,
       buYilDegerlendirmeCount: buYilDegerlendirmeRow.count,
+      sonToplantıTarihi: sonToplantıRows[0]?.tarih ?? null,
+      acikAksiyon: acikAksiyon.count,
     };
   }
 
