@@ -495,3 +495,36 @@ export const belgeVersiyonlar = pgTable("belge_versiyonlar", {
 export const insertBelgeVersiyonSchema = createInsertSchema(belgeVersiyonlar).omit({ id: true, olusturmaTarihi: true });
 export type InsertBelgeVersiyon = z.infer<typeof insertBelgeVersiyonSchema>;
 export type BelgeVersiyon = typeof belgeVersiyonlar.$inferSelect;
+
+// Kalite Hedefleri tablosu
+export const kaliteHedefleri = pgTable("kalite_hedefleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  baslik: text("baslik").notNull(),
+  hedefDeger: decimal("hedef_deger", { precision: 10, scale: 2 }).notNull(),
+  olcumBirimi: text("olcum_birimi").notNull(),
+  yon: text("yon").notNull().default("yuksek_iyi"), // yuksek_iyi | dusuk_iyi
+  sorumluKisi: text("sorumlu_kisi").notNull(),
+  terminTarihi: text("termin_tarihi").notNull(),
+  isoMaddesi: text("iso_maddesi"),
+  periyot: text("periyot").notNull(), // Aylık | Çeyreklik | Yıllık
+  durum: text("durum").notNull().default("Aktif"), // Aktif | Pasif
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertKaliteHedefSchema = createInsertSchema(kaliteHedefleri).omit({ id: true, olusturmaTarihi: true });
+export type InsertKaliteHedef = z.infer<typeof insertKaliteHedefSchema>;
+export type KaliteHedef = typeof kaliteHedefleri.$inferSelect;
+
+// Kalite Ölçümleri tablosu
+export const kaliteOlcumler = pgTable("kalite_olcumler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  hedefId: varchar("hedef_id").references(() => kaliteHedefleri.id, { onDelete: "cascade" }).notNull(),
+  olcumTarihi: text("olcum_tarihi").notNull(),
+  gerceklesenDeger: decimal("gerceklesen_deger", { precision: 10, scale: 2 }).notNull(),
+  notlar: text("notlar"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertKaliteOlcumSchema = createInsertSchema(kaliteOlcumler).omit({ id: true, olusturmaTarihi: true });
+export type InsertKaliteOlcum = z.infer<typeof insertKaliteOlcumSchema>;
+export type KaliteOlcum = typeof kaliteOlcumler.$inferSelect;
