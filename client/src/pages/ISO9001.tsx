@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Award, ClipboardList, AlertTriangle, Search, FileText, Target, GraduationCap, Truck, BarChart3 } from "lucide-react";
 
 type Iso9001Stats = {
+  belgeCount: number;
   surveyCountMusteri: number;
   surveyCountCalisanlar: number;
   dufAcik: number;
@@ -74,7 +75,9 @@ export default function ISO9001() {
           <p>Planlanan: <span className="font-medium text-foreground">{stats?.tetkikPlanlanan ?? "—"}</span></p>
         </ActiveCard>
 
-        <ComingSoonCard icon={FileText} title="Belge Arşivi" />
+        <ActiveCard href="/iso9001/belgeler" icon={FileText} title="Belge Arşivi">
+          <p>Toplam belge: <span className="font-medium text-foreground">{stats?.belgeCount ?? "—"}</span></p>
+        </ActiveCard>
         <ComingSoonCard icon={Target} title="Kalite Hedefleri" />
         <ComingSoonCard icon={GraduationCap} title="Eğitim Kayıtları" />
         <ComingSoonCard icon={Truck} title="Tedarikçi Değerlendirme" />
