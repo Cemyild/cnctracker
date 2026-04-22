@@ -608,3 +608,58 @@ export const egitimDegerlendirmeCevaplari = pgTable("egitim_degerlendirme_cevapl
 export const insertEgitimDegerlendirmeCevapSchema = createInsertSchema(egitimDegerlendirmeCevaplari).omit({ id: true, olusturmaTarihi: true });
 export type InsertEgitimDegerlendirmeCevap = z.infer<typeof insertEgitimDegerlendirmeCevapSchema>;
 export type EgitimDegerlendirmeCevap = typeof egitimDegerlendirmeCevaplari.$inferSelect;
+
+// ─── Tedarikçi Değerlendirme ────────────────────────────────────────────────
+
+export const tedarikcilar = pgTable("tedarikcilar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ad: text("ad").notNull(),
+  kategori: text("kategori"),
+  yetkiliAdi: text("yetkili_adi"),
+  telefon: text("telefon"),
+  email: text("email"),
+  aciklama: text("aciklama"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertTedarikciSchema = createInsertSchema(tedarikcilar).omit({ id: true, olusturmaTarihi: true });
+export type InsertTedarikci = z.infer<typeof insertTedarikciSchema>;
+export type Tedarikci = typeof tedarikcilar.$inferSelect;
+
+export const tedarikciDegerlendirmeKriterleri = pgTable("tedarikci_degerlendirme_kriterleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kriter: text("kriter").notNull(),
+  tip: text("tip").notNull(),
+  sira: integer("sira").notNull(),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertTedarikciDegerlendirmeKriterSchema = createInsertSchema(tedarikciDegerlendirmeKriterleri).omit({ id: true, olusturmaTarihi: true });
+export type InsertTedarikciDegerlendirmeKriter = z.infer<typeof insertTedarikciDegerlendirmeKriterSchema>;
+export type TedarikciDegerlendirmeKriter = typeof tedarikciDegerlendirmeKriterleri.$inferSelect;
+
+export const tedarikciDegerlendirmeler = pgTable("tedarikci_degerlendirmeler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tedarikciId: varchar("tedarikci_id").references(() => tedarikcilar.id, { onDelete: "cascade" }).notNull(),
+  tarih: text("tarih").notNull(),
+  degerlendiren: text("degerlendiren"),
+  notlar: text("notlar"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertTedarikciDegerlendirmeSchema = createInsertSchema(tedarikciDegerlendirmeler).omit({ id: true, olusturmaTarihi: true });
+export type InsertTedarikciDegerlendirme = z.infer<typeof insertTedarikciDegerlendirmeSchema>;
+export type TedarikciDegerlendirme = typeof tedarikciDegerlendirmeler.$inferSelect;
+
+export const tedarikciDegerlendirmeCevaplari = pgTable("tedarikci_degerlendirme_cevaplari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  degerlendirmeId: varchar("degerlendirme_id").references(() => tedarikciDegerlendirmeler.id, { onDelete: "cascade" }).notNull(),
+  kriterId: varchar("kriter_id").references(() => tedarikciDegerlendirmeKriterleri.id, { onDelete: "cascade" }).notNull(),
+  puan: integer("puan"),
+  cevap: text("cevap"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertTedarikciDegerlendirmeCevapSchema = createInsertSchema(tedarikciDegerlendirmeCevaplari).omit({ id: true, olusturmaTarihi: true });
+export type InsertTedarikciDegerlendirmeCevap = z.infer<typeof insertTedarikciDegerlendirmeCevapSchema>;
+export type TedarikciDegerlendirmeCevap = typeof tedarikciDegerlendirmeCevaplari.$inferSelect;
