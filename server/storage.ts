@@ -1843,8 +1843,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(egitimKatilimcilar.personelId, id))
       .orderBy(desc(egitimler.egitimTarihi));
 
-    const degerlendirmeler = await db.select({ egitimId: egitimDegerlendirmeler.egitimId, katilimciAdi: egitimDegerlendirmeler.katilimciAdi })
-      .from(egitimDegerlendirmeler);
+    const katilimEgitimIds = katilimlar.map(k => k.egitimId);
+    const degerlendirmeler = katilimEgitimIds.length > 0
+      ? await db.select({ egitimId: egitimDegerlendirmeler.egitimId, katilimciAdi: egitimDegerlendirmeler.katilimciAdi })
+          .from(egitimDegerlendirmeler)
+          .where(inArray(egitimDegerlendirmeler.egitimId, katilimEgitimIds))
+      : [];
 
     const egitimlerWithDurum = katilimlar.map(k => ({
       egitimId: k.egitimId,
