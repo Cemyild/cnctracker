@@ -693,6 +693,6 @@ export const yonetimAksiyonlar = pgTable("yonetim_aksiyonlar", {
   olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
 });
 
-export const insertYonetimAksiyon = createInsertSchema(yonetimAksiyonlar).omit({ id: true, olusturmaTarihi: true });
-export type InsertYonetimAksiyon = z.infer<typeof insertYonetimAksiyon>;
+export const insertYonetimAksiyonSchema = createInsertSchema(yonetimAksiyonlar).omit({ id: true, olusturmaTarihi: true });
+export type InsertYonetimAksiyon = z.infer<typeof insertYonetimAksiyonSchema>;
 export type YonetimAksiyon = typeof yonetimAksiyonlar.$inferSelect;
