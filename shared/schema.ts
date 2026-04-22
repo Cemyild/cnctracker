@@ -456,8 +456,8 @@ export type TetkikPlan = typeof tetkikPlanlar.$inferSelect;
 export const tetkikBulgular = pgTable("tetkik_bulgular", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tetkikPlanId: varchar("tetkik_plan_id").references(() => tetkikPlanlar.id, { onDelete: "cascade" }).notNull(),
-  bulgTuru: text("bulgu_turu").notNull(),
-  bulgAciklamasi: text("bulgu_aciklamasi").notNull(),
+  bulguTuru: text("bulgu_turu").notNull(),
+  bulguAciklamasi: text("bulgu_aciklamasi").notNull(),
   ilgiliIsoMaddesi: text("ilgili_iso_maddesi"),
   durum: text("durum").notNull().default("acik"),
   olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
