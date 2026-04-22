@@ -663,3 +663,36 @@ export const tedarikciDegerlendirmeCevaplari = pgTable("tedarikci_degerlendirme_
 export const insertTedarikciDegerlendirmeCevapSchema = createInsertSchema(tedarikciDegerlendirmeCevaplari).omit({ id: true, olusturmaTarihi: true });
 export type InsertTedarikciDegerlendirmeCevap = z.infer<typeof insertTedarikciDegerlendirmeCevapSchema>;
 export type TedarikciDegerlendirmeCevap = typeof tedarikciDegerlendirmeCevaplari.$inferSelect;
+
+// ─── Yönetim Gözden Geçirme ─────────────────────────────────────────────────
+
+export const yonetimGozdenGecirmeler = pgTable("yonetim_gozden_gecirmeler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tarih: text("tarih").notNull(),
+  katilimcilar: text("katilimcilar"),
+  gundem: text("gundem"),
+  musteriSikayetleri: text("musteri_sikayetleri"),
+  tedarikciPerformansi: text("tedarikci_performansi"),
+  urunUygunsuzluk: text("urun_uygunsuzluk"),
+  oncekiKararDurum: text("onceki_karar_durum"),
+  sonuclar: text("sonuclar"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertYonetimGozdenGecirmeSchema = createInsertSchema(yonetimGozdenGecirmeler).omit({ id: true, olusturmaTarihi: true });
+export type InsertYonetimGozdenGecirme = z.infer<typeof insertYonetimGozdenGecirmeSchema>;
+export type YonetimGozdenGecirme = typeof yonetimGozdenGecirmeler.$inferSelect;
+
+export const yonetimAksiyonlar = pgTable("yonetim_aksiyonlar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  toplantId: varchar("toplanti_id").references(() => yonetimGozdenGecirmeler.id, { onDelete: "cascade" }).notNull(),
+  aksiyon: text("aksiyon").notNull(),
+  sorumlu: text("sorumlu").notNull(),
+  hedefTarih: text("hedef_tarih"),
+  durum: text("durum").notNull().default("acik"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertYonetimAksiyon = createInsertSchema(yonetimAksiyonlar).omit({ id: true, olusturmaTarihi: true });
+export type InsertYonetimAksiyon = z.infer<typeof insertYonetimAksiyon>;
+export type YonetimAksiyon = typeof yonetimAksiyonlar.$inferSelect;
