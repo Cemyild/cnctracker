@@ -30,6 +30,9 @@ jobs:
             echo "📦 Installing dependencies..."
             npm install --legacy-peer-deps
 
+            echo "🗄️ Applying database migrations..."
+            npm run db:push
+
             echo "🔨 Building application..."
             npm run build
 
