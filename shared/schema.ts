@@ -394,6 +394,7 @@ export const surveys = pgTable("surveys", {
   targetScore: integer("target_score").default(80).notNull(), // Target score threshold
   createdAt: timestamp("created_at").defaultNow(),
   isActive: integer("is_active").default(1),
+  type: text("type").default("musteri").notNull(),
 });
 
 export const insertSurveySchema = createInsertSchema(surveys).omit({ id: true, createdAt: true });
@@ -415,3 +416,53 @@ export const surveyResponses = pgTable("survey_responses", {
 export const insertSurveyResponseSchema = createInsertSchema(surveyResponses).omit({ id: true, submittedAt: true });
 export type InsertSurveyResponse = z.infer<typeof insertSurveyResponseSchema>;
 export type SurveyResponse = typeof surveyResponses.$inferSelect;
+
+// DÜF (Düzeltici Faaliyet) tablosu
+export const duf = pgTable("duf", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  baslik: text("baslik").notNull(),
+  uygunsuzlukKaynagi: text("uygunsuzluk_kaynagi").notNull(),
+  aciklama: text("aciklama").notNull(),
+  sorumluKisi: text("sorumlu_kisi").notNull(),
+  hedefKapanisTarihi: text("hedef_kapanis_tarihi").notNull(),
+  durum: text("durum").notNull().default("acik"),
+  kokNedenAnalizi: text("kok_neden_analizi"),
+  alinanAksiyon: text("alinan_aksiyon"),
+  dosyaEki: text("dosya_eki"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertDufSchema = createInsertSchema(duf).omit({ id: true, olusturmaTarihi: true });
+export type InsertDuf = z.infer<typeof insertDufSchema>;
+export type Duf = typeof duf.$inferSelect;
+
+// İç Tetkik Planları tablosu
+export const tetkikPlanlar = pgTable("tetkik_planlar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tetkikAdi: text("tetkik_adi").notNull(),
+  planlananTarih: text("planlanan_tarih").notNull(),
+  tetkikEdilenBolum: text("tetkik_edilen_bolum").notNull(),
+  basTetkikci: text("bas_tetkikci").notNull(),
+  durum: text("durum").notNull().default("planlandi"),
+  dosyaEki: text("dosya_eki"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertTetkikPlanSchema = createInsertSchema(tetkikPlanlar).omit({ id: true, olusturmaTarihi: true });
+export type InsertTetkikPlan = z.infer<typeof insertTetkikPlanSchema>;
+export type TetkikPlan = typeof tetkikPlanlar.$inferSelect;
+
+// İç Tetkik Bulguları tablosu
+export const tetkikBulgular = pgTable("tetkik_bulgular", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tetkikPlanId: varchar("tetkik_plan_id").references(() => tetkikPlanlar.id, { onDelete: "cascade" }).notNull(),
+  bulgTuru: text("bulgu_turu").notNull(),
+  bulgAciklamasi: text("bulgu_aciklamasi").notNull(),
+  ilgiliIsoMaddesi: text("ilgili_iso_maddesi"),
+  durum: text("durum").notNull().default("acik"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertTetkikBulguSchema = createInsertSchema(tetkikBulgular).omit({ id: true, olusturmaTarihi: true });
+export type InsertTetkikBulgu = z.infer<typeof insertTetkikBulguSchema>;
+export type TetkikBulgu = typeof tetkikBulgular.$inferSelect;
