@@ -4,6 +4,8 @@ import { Award, ClipboardList, AlertTriangle, Search, FileText, Target, Graduati
 
 type Iso9001Stats = {
   belgeCount: number;
+  hedefCount: number;
+  hedefYesilCount: number;
   surveyCountMusteri: number;
   surveyCountCalisanlar: number;
   dufAcik: number;
@@ -78,7 +80,10 @@ export default function ISO9001() {
         <ActiveCard href="/iso9001/belgeler" icon={FileText} title="Belge Arşivi">
           <p>Toplam belge: <span className="font-medium text-foreground">{stats?.belgeCount ?? "—"}</span></p>
         </ActiveCard>
-        <ComingSoonCard icon={Target} title="Kalite Hedefleri" />
+        <ActiveCard href="/iso9001/hedefler" icon={Target} title="Kalite Hedefleri">
+          <p>Hedef: <span className="font-medium text-foreground">{stats?.hedefCount ?? "—"}</span></p>
+          <p>Yeşil: <span className="font-medium text-green-600">{stats?.hedefYesilCount ?? "—"}</span></p>
+        </ActiveCard>
         <ComingSoonCard icon={GraduationCap} title="Eğitim Kayıtları" />
         <ComingSoonCard icon={Truck} title="Tedarikçi Değerlendirme" />
         <ComingSoonCard icon={BarChart3} title="Yönetim Gözden Geçirme" />
