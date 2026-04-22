@@ -23,6 +23,30 @@ const ruhsatStorage = multer.diskStorage({
 });
 const uploadRuhsat = multer({ storage: ruhsatStorage });
 
+const dufStorage = multer.diskStorage({
+  destination: function (_req, _file, cb) {
+    const dir = "uploads/duf";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (_req, file, cb) {
+    cb(null, `duf-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`);
+  },
+});
+const uploadDuf = multer({ storage: dufStorage });
+
+const tetkikStorage = multer.diskStorage({
+  destination: function (_req, _file, cb) {
+    const dir = "uploads/tetkik";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (_req, file, cb) {
+    cb(null, `tetkik-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`);
+  },
+});
+const uploadTetkik = multer({ storage: tetkikStorage });
+
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar } from "@shared/schema";
 import { createHash } from "crypto";
 import { z } from "zod";
@@ -2370,13 +2394,141 @@ export async function registerRoutes(
     }
   });
 
+  // ISO9001 Stats
+  app.get("/api/iso9001/stats", async (_req, res) => {
+    try {
+      const stats = await storage.getIso9001Stats();
+      res.json(stats);
+    } catch (e) {
+      res.status(500).json({ error: "Stats alınamadı" });
+    }
+  });
+
+  // DÜF
+  app.get("/api/duf", async (_req, res) => {
+    try {
+      res.json(await storage.getDufList());
+    } catch (e) {
+      res.status(500).json({ error: "DÜF listesi alınamadı" });
+    }
+  });
+
+  app.post("/api/duf", uploadDuf.single("dosyaEki"), async (req, res) => {
+    try {
+      const data = JSON.parse(req.body.data ?? "{}");
+      if (req.file) data.dosyaEki = `/uploads/duf/${req.file.filename}`;
+      const row = await storage.createDuf(data);
+      res.status(201).json(row);
+    } catch (e) {
+      res.status(400).json({ error: "DÜF oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/duf/:id", uploadDuf.single("dosyaEki"), async (req, res) => {
+    try {
+      const data = JSON.parse(req.body.data ?? "{}");
+      if (req.file) data.dosyaEki = `/uploads/duf/${req.file.filename}`;
+      const row = await storage.updateDuf(req.params.id, data);
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: "DÜF güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/duf/:id", async (req, res) => {
+    try {
+      await storage.deleteDuf(req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "DÜF silinemedi" });
+    }
+  });
+
+  // Tetkik Planlar
+  app.get("/api/tetkik/planlar", async (_req, res) => {
+    try {
+      res.json(await storage.getTetkikPlanlar());
+    } catch (e) {
+      res.status(500).json({ error: "Tetkik planları alınamadı" });
+    }
+  });
+
+  app.post("/api/tetkik/planlar", uploadTetkik.single("dosyaEki"), async (req, res) => {
+    try {
+      const data = JSON.parse(req.body.data ?? "{}");
+      if (req.file) data.dosyaEki = `/uploads/tetkik/${req.file.filename}`;
+      const row = await storage.createTetkikPlan(data);
+      res.status(201).json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Tetkik planı oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/tetkik/planlar/:id", uploadTetkik.single("dosyaEki"), async (req, res) => {
+    try {
+      const data = JSON.parse(req.body.data ?? "{}");
+      if (req.file) data.dosyaEki = `/uploads/tetkik/${req.file.filename}`;
+      const row = await storage.updateTetkikPlan(req.params.id, data);
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Tetkik planı güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/tetkik/planlar/:id", async (req, res) => {
+    try {
+      await storage.deleteTetkikPlan(req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Tetkik planı silinemedi" });
+    }
+  });
+
+  // Tetkik Bulgular
+  app.get("/api/tetkik/bulgular", async (req, res) => {
+    try {
+      const planId = req.query.planId as string | undefined;
+      res.json(await storage.getTetkikBulgular(planId));
+    } catch (e) {
+      res.status(500).json({ error: "Bulgular alınamadı" });
+    }
+  });
+
+  app.post("/api/tetkik/bulgular", async (req, res) => {
+    try {
+      const row = await storage.createTetkikBulgu(req.body);
+      res.status(201).json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Bulgu oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/tetkik/bulgular/:id", async (req, res) => {
+    try {
+      const row = await storage.updateTetkikBulgu(req.params.id, req.body);
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Bulgu güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/tetkik/bulgular/:id", async (req, res) => {
+    try {
+      await storage.deleteTetkikBulgu(req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Bulgu silinemedi" });
+    }
+  });
+
   // Surveys Endpoints
   app.get("/api/surveys", async (req, res) => {
     try {
-      const surveysList = await storage.getSurveys();
-      res.json(surveysList);
-    } catch (error) {
-      res.status(500).json({ error: "Anketler alınırken hata oluştu" });
+      const type = req.query.type as string | undefined;
+      const list = type ? await storage.getSurveysByType(type) : await storage.getSurveys();
+      res.json(list);
+    } catch (e) {
+      res.status(500).json({ error: "Anketler alınamadı" });
     }
   });
 
