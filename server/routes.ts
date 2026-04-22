@@ -2920,5 +2920,68 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Tedarikçi Değerlendirme ────────────────────────────────────────────
+
+  app.get("/api/tedarikcilar", async (_req, res) => {
+    const list = await storage.getTedarikcilar();
+    res.json(list);
+  });
+
+  app.post("/api/tedarikcilar", async (req, res) => {
+    const tedarikci = await storage.createTedarikci(req.body);
+    res.json(tedarikci);
+  });
+
+  app.put("/api/tedarikcilar/:id", async (req, res) => {
+    const tedarikci = await storage.updateTedarikci(req.params.id, req.body);
+    res.json(tedarikci);
+  });
+
+  app.delete("/api/tedarikcilar/:id", async (req, res) => {
+    await storage.deleteTedarikci(req.params.id);
+    res.json({ ok: true });
+  });
+
+  app.get("/api/tedarikcilar/:id/degerlendirmeler", async (req, res) => {
+    const list = await storage.getTedarikciDegerlendirmeleri(req.params.id);
+    res.json(list);
+  });
+
+  app.post("/api/tedarikcilar/:id/degerlendirmeler", async (req, res) => {
+    await storage.createTedarikciDegerlendirme({ tedarikciId: req.params.id, ...req.body });
+    res.json({ ok: true });
+  });
+
+  app.get("/api/tedarikcilar/:id/degerlendirmeler/:degerlendirmeId", async (req, res) => {
+    const result = await storage.getTedarikciDegerlendirme(req.params.id, req.params.degerlendirmeId);
+    if (!result) return res.status(404).json({ error: "Bulunamadı" });
+    res.json(result);
+  });
+
+  app.delete("/api/tedarikcilar/:id/degerlendirmeler/:degerlendirmeId", async (req, res) => {
+    await storage.deleteTedarikciDegerlendirme(req.params.id, req.params.degerlendirmeId);
+    res.json({ ok: true });
+  });
+
+  app.get("/api/tedarikci-degerlendirme-kriterleri", async (_req, res) => {
+    const list = await storage.getTedarikciKriterleri();
+    res.json(list);
+  });
+
+  app.post("/api/tedarikci-degerlendirme-kriterleri", async (req, res) => {
+    const kriter = await storage.createTedarikciKriter(req.body);
+    res.json(kriter);
+  });
+
+  app.put("/api/tedarikci-degerlendirme-kriterleri/:id", async (req, res) => {
+    const kriter = await storage.updateTedarikciKriter(req.params.id, req.body);
+    res.json(kriter);
+  });
+
+  app.delete("/api/tedarikci-degerlendirme-kriterleri/:id", async (req, res) => {
+    await storage.deleteTedarikciKriter(req.params.id);
+    res.json({ ok: true });
+  });
+
   return httpServer;
 }
