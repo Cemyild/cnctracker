@@ -4,7 +4,11 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   egitimKatilimcilar, type EgitimKatilimci,
   egitimDegerlendirmeSorulari, type EgitimDegerlendirmeSoru, type InsertEgitimDegerlendirmeSoru,
   egitimDegerlendirmeler, type EgitimDegerlendirme,
-  egitimDegerlendirmeCevaplari, type EgitimDegerlendirmeCevap } from "@shared/schema";
+  egitimDegerlendirmeCevaplari, type EgitimDegerlendirmeCevap,
+  tedarikcilar, type Tedarikci, type InsertTedarikci,
+  tedarikciDegerlendirmeKriterleri, type TedarikciDegerlendirmeKriter, type InsertTedarikciDegerlendirmeKriter,
+  tedarikciDegerlendirmeler, type TedarikciDegerlendirme, type InsertTedarikciDegerlendirme,
+  tedarikciDegerlendirmeCevaplari, type TedarikciDegerlendirmeCevap } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne } from "drizzle-orm";
@@ -140,7 +144,27 @@ export interface IStorage {
     tetkikPlanlanan: number;
     egitimCount: number;
     toplamKatilimciCount: number;
+    tedarikciCount: number;
+    buYilDegerlendirmeCount: number;
   }>;
+
+  // Tedarikçiler
+  getTedarikcilar(): Promise<(Tedarikci & { degerlendirmeSayisi: number })[]>;
+  createTedarikci(data: InsertTedarikci): Promise<Tedarikci>;
+  updateTedarikci(id: string, data: Partial<InsertTedarikci>): Promise<Tedarikci>;
+  deleteTedarikci(id: string): Promise<void>;
+
+  // Tedarikçi Değerlendirme Kriterleri
+  getTedarikciKriterleri(): Promise<TedarikciDegerlendirmeKriter[]>;
+  createTedarikciKriter(data: InsertTedarikciDegerlendirmeKriter): Promise<TedarikciDegerlendirmeKriter>;
+  updateTedarikciKriter(id: string, data: Partial<InsertTedarikciDegerlendirmeKriter>): Promise<TedarikciDegerlendirmeKriter>;
+  deleteTedarikciKriter(id: string): Promise<void>;
+
+  // Tedarikçi Değerlendirmeler
+  getTedarikciDegerlendirmeleri(tedarikciId: string): Promise<(TedarikciDegerlendirme & { ortPuan: number | null })[]>;
+  getTedarikciDegerlendirme(tedarikciId: string, degerlendirmeId: string): Promise<(TedarikciDegerlendirme & { cevaplar: TedarikciDegerlendirmeCevap[] }) | null>;
+  createTedarikciDegerlendirme(data: { tedarikciId: string; tarih: string; degerlendiren?: string; notlar?: string; cevaplar: { kriterId: string; puan?: number; cevap?: string }[] }): Promise<void>;
+  deleteTedarikciDegerlendirme(tedarikciId: string, degerlendirmeId: string): Promise<void>;
 
   // DÜF
   getDufList(): Promise<Duf[]>;
@@ -1589,6 +1613,91 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(surveys).where(eq(surveys.type, type)).orderBy(desc(surveys.createdAt));
   }
 
+  async getTedarikcilar(): Promise<(Tedarikci & { degerlendirmeSayisi: number })[]> {
+    const tumTedarikcilar = await db.select().from(tedarikcilar).orderBy(asc(tedarikcilar.ad));
+    const counts = await db.select({
+      tedarikciId: tedarikciDegerlendirmeler.tedarikciId,
+      count: sql<number>`count(*)::int`,
+    }).from(tedarikciDegerlendirmeler).groupBy(tedarikciDegerlendirmeler.tedarikciId);
+    const countMap = new Map(counts.map(c => [c.tedarikciId, c.count]));
+    return tumTedarikcilar.map(t => ({ ...t, degerlendirmeSayisi: countMap.get(t.id) ?? 0 }));
+  }
+
+  async createTedarikci(data: InsertTedarikci): Promise<Tedarikci> {
+    const [row] = await db.insert(tedarikcilar).values(data).returning();
+    return row;
+  }
+
+  async updateTedarikci(id: string, data: Partial<InsertTedarikci>): Promise<Tedarikci> {
+    const [row] = await db.update(tedarikcilar).set(data).where(eq(tedarikcilar.id, id)).returning();
+    return row;
+  }
+
+  async deleteTedarikci(id: string): Promise<void> {
+    await db.delete(tedarikcilar).where(eq(tedarikcilar.id, id));
+  }
+
+  async getTedarikciKriterleri(): Promise<TedarikciDegerlendirmeKriter[]> {
+    return await db.select().from(tedarikciDegerlendirmeKriterleri).orderBy(asc(tedarikciDegerlendirmeKriterleri.sira));
+  }
+
+  async createTedarikciKriter(data: InsertTedarikciDegerlendirmeKriter): Promise<TedarikciDegerlendirmeKriter> {
+    const [row] = await db.insert(tedarikciDegerlendirmeKriterleri).values(data).returning();
+    return row;
+  }
+
+  async updateTedarikciKriter(id: string, data: Partial<InsertTedarikciDegerlendirmeKriter>): Promise<TedarikciDegerlendirmeKriter> {
+    const [row] = await db.update(tedarikciDegerlendirmeKriterleri).set(data).where(eq(tedarikciDegerlendirmeKriterleri.id, id)).returning();
+    return row;
+  }
+
+  async deleteTedarikciKriter(id: string): Promise<void> {
+    await db.delete(tedarikciDegerlendirmeKriterleri).where(eq(tedarikciDegerlendirmeKriterleri.id, id));
+  }
+
+  async getTedarikciDegerlendirmeleri(tedarikciId: string): Promise<(TedarikciDegerlendirme & { ortPuan: number | null })[]> {
+    const list = await db.select().from(tedarikciDegerlendirmeler)
+      .where(eq(tedarikciDegerlendirmeler.tedarikciId, tedarikciId))
+      .orderBy(desc(tedarikciDegerlendirmeler.tarih));
+    if (list.length === 0) return [];
+    const cevaplar = await db.select().from(tedarikciDegerlendirmeCevaplari)
+      .where(inArray(tedarikciDegerlendirmeCevaplari.degerlendirmeId, list.map(d => d.id)));
+    return list.map(d => {
+      const puanlar = cevaplar.filter(c => c.degerlendirmeId === d.id && c.puan !== null).map(c => c.puan as number);
+      const ortPuan = puanlar.length > 0 ? Math.round((puanlar.reduce((a, b) => a + b, 0) / puanlar.length) * 10) / 10 : null;
+      return { ...d, ortPuan };
+    });
+  }
+
+  async getTedarikciDegerlendirme(tedarikciId: string, degerlendirmeId: string): Promise<(TedarikciDegerlendirme & { cevaplar: TedarikciDegerlendirmeCevap[] }) | null> {
+    const [row] = await db.select().from(tedarikciDegerlendirmeler)
+      .where(and(eq(tedarikciDegerlendirmeler.id, degerlendirmeId), eq(tedarikciDegerlendirmeler.tedarikciId, tedarikciId)));
+    if (!row) return null;
+    const cevaplar = await db.select().from(tedarikciDegerlendirmeCevaplari)
+      .where(eq(tedarikciDegerlendirmeCevaplari.degerlendirmeId, degerlendirmeId));
+    return { ...row, cevaplar };
+  }
+
+  async createTedarikciDegerlendirme(data: { tedarikciId: string; tarih: string; degerlendiren?: string; notlar?: string; cevaplar: { kriterId: string; puan?: number; cevap?: string }[] }): Promise<void> {
+    const [degerlendirme] = await db.insert(tedarikciDegerlendirmeler).values({
+      tedarikciId: data.tedarikciId,
+      tarih: data.tarih,
+      degerlendiren: data.degerlendiren,
+      notlar: data.notlar,
+    }).returning();
+    if (data.cevaplar.length > 0) {
+      await db.insert(tedarikciDegerlendirmeCevaplari).values(
+        data.cevaplar.map(c => ({ degerlendirmeId: degerlendirme.id, kriterId: c.kriterId, puan: c.puan ?? null, cevap: c.cevap ?? null }))
+      );
+    }
+  }
+
+  async deleteTedarikciDegerlendirme(tedarikciId: string, degerlendirmeId: string): Promise<void> {
+    await db.delete(tedarikciDegerlendirmeler).where(
+      and(eq(tedarikciDegerlendirmeler.id, degerlendirmeId), eq(tedarikciDegerlendirmeler.tedarikciId, tedarikciId))
+    );
+  }
+
   async getIso9001Stats() {
     const today = new Date().toISOString().split("T")[0];
 
@@ -1630,6 +1739,11 @@ export class DatabaseStorage implements IStorage {
 
     const [egitimCountRow] = await db.select({ count: sql<number>`count(*)::int` }).from(egitimler);
     const [katilimciCountRow] = await db.select({ count: sql<number>`count(*)::int` }).from(egitimKatilimcilar);
+    const [tedarikciCountRow] = await db.select({ count: sql<number>`count(*)::int` }).from(tedarikcilar);
+    const currentYear = new Date().getFullYear().toString();
+    const [buYilDegerlendirmeRow] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(tedarikciDegerlendirmeler)
+      .where(sql`${tedarikciDegerlendirmeler.tarih} like ${currentYear + '%'}`);
 
     return {
       belgeCount: belgeCount.count,
@@ -1644,6 +1758,8 @@ export class DatabaseStorage implements IStorage {
       tetkikPlanlanan: planlananTetkik.count,
       egitimCount: egitimCountRow.count,
       toplamKatilimciCount: katilimciCountRow.count,
+      tedarikciCount: tedarikciCountRow.count,
+      buYilDegerlendirmeCount: buYilDegerlendirmeRow.count,
     };
   }
 
