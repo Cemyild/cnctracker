@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, decimal, date, integer, uniqueIndex, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, decimal, date, integer, uniqueIndex, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -466,3 +466,32 @@ export const tetkikBulgular = pgTable("tetkik_bulgular", {
 export const insertTetkikBulguSchema = createInsertSchema(tetkikBulgular).omit({ id: true, olusturmaTarihi: true });
 export type InsertTetkikBulgu = z.infer<typeof insertTetkikBulguSchema>;
 export type TetkikBulgu = typeof tetkikBulgular.$inferSelect;
+
+// Belge Arşivi tablosu
+export const belgeler = pgTable("belgeler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  baslik: text("baslik").notNull(),
+  anaKategori: text("ana_kategori").notNull(), // Prosedür | Talimat | Form | Diğer
+  altKategori: text("alt_kategori").notNull(),
+  aciklama: text("aciklama"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertBelgeSchema = createInsertSchema(belgeler).omit({ id: true, olusturmaTarihi: true });
+export type InsertBelge = z.infer<typeof insertBelgeSchema>;
+export type Belge = typeof belgeler.$inferSelect;
+
+// Belge Versiyonları tablosu
+export const belgeVersiyonlar = pgTable("belge_versiyonlar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  belgeId: varchar("belge_id").references(() => belgeler.id, { onDelete: "cascade" }).notNull(),
+  versiyonNo: text("versiyon_no").notNull(),
+  degisiklikNotu: text("degisiklik_notu"),
+  dosyaYolu: text("dosya_yolu").notNull(),
+  isAktif: boolean("is_aktif").default(false).notNull(),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertBelgeVersiyonSchema = createInsertSchema(belgeVersiyonlar).omit({ id: true, olusturmaTarihi: true });
+export type InsertBelgeVersiyon = z.infer<typeof insertBelgeVersiyonSchema>;
+export type BelgeVersiyon = typeof belgeVersiyonlar.$inferSelect;
