@@ -27,6 +27,7 @@ import ISO9001Duf from "@/pages/ISO9001Duf";
 import ISO9001Tetkik from "@/pages/ISO9001Tetkik";
 import ISO9001KaliteHedefleri from "@/pages/ISO9001KaliteHedefleri";
 import ISO9001Egitimler from "@/pages/ISO9001Egitimler";
+import ISO9001TedarikciDegerlendirme from "@/pages/ISO9001TedarikciDegerlendirme";
 import PublicEgitimDegerlendirme from "@/pages/PublicEgitimDegerlendirme";
 import PublicSurvey from "@/pages/PublicSurvey";
 import SurveyAnalysis from "@/pages/SurveyAnalysis";
@@ -48,6 +49,7 @@ const pageTitles: Record<string, string> = {
   "/iso9001/belgeler": "ISO9001-2015 — Belge Arşivi",
   "/iso9001/hedefler": "ISO9001-2015 — Kalite Hedefleri",
   "/iso9001/egitimler": "ISO9001-2015 — Eğitim Kayıtları",
+  "/iso9001/tedarikci": "ISO9001-2015 — Tedarikçi Değerlendirme",
   "/iso9001/duf": "ISO9001-2015 — Düzeltici Faaliyet",
   "/iso9001/tetkik": "ISO9001-2015 — İç Tetkik",
 };
@@ -74,6 +76,7 @@ function Router() {
       <Route path="/iso9001/duf" component={ISO9001Duf} />
       <Route path="/iso9001/tetkik" component={ISO9001Tetkik} />
       <Route path="/iso9001/egitimler" component={ISO9001Egitimler} />
+      <Route path="/iso9001/tedarikci" component={ISO9001TedarikciDegerlendirme} />
       <Route path="/egitim-degerlendirme/:id" component={PublicEgitimDegerlendirme} />
       <Route path="/anket-sonuclari/:id" component={SurveyAnalysis} />
       <Route path="/survey/:id" component={PublicSurvey} />
