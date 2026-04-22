@@ -6,6 +6,8 @@ type Iso9001Stats = {
   belgeCount: number;
   hedefCount: number;
   hedefYesilCount: number;
+  egitimCount: number;
+  toplamKatilimciCount: number;
   surveyCountMusteri: number;
   surveyCountCalisanlar: number;
   dufAcik: number;
@@ -84,7 +86,10 @@ export default function ISO9001() {
           <p>Hedef: <span className="font-medium text-foreground">{stats?.hedefCount ?? "—"}</span></p>
           <p>Yeşil: <span className="font-medium text-green-600">{stats?.hedefYesilCount ?? "—"}</span></p>
         </ActiveCard>
-        <ComingSoonCard icon={GraduationCap} title="Eğitim Kayıtları" />
+        <ActiveCard href="/iso9001/egitimler" icon={GraduationCap} title="Eğitim Kayıtları">
+          <p>Eğitim: <span className="font-medium text-foreground">{stats?.egitimCount ?? "—"}</span></p>
+          <p>Katılımcı: <span className="font-medium text-foreground">{stats?.toplamKatilimciCount ?? "—"}</span></p>
+        </ActiveCard>
         <ComingSoonCard icon={Truck} title="Tedarikçi Değerlendirme" />
         <ComingSoonCard icon={BarChart3} title="Yönetim Gözden Geçirme" />
       </div>

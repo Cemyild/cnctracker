@@ -26,6 +26,8 @@ import ISO9001Belgeler from "@/pages/ISO9001Belgeler";
 import ISO9001Duf from "@/pages/ISO9001Duf";
 import ISO9001Tetkik from "@/pages/ISO9001Tetkik";
 import ISO9001KaliteHedefleri from "@/pages/ISO9001KaliteHedefleri";
+import ISO9001Egitimler from "@/pages/ISO9001Egitimler";
+import PublicEgitimDegerlendirme from "@/pages/PublicEgitimDegerlendirme";
 import PublicSurvey from "@/pages/PublicSurvey";
 import SurveyAnalysis from "@/pages/SurveyAnalysis";
 import NotFound from "@/pages/not-found";
@@ -45,6 +47,7 @@ const pageTitles: Record<string, string> = {
   "/iso9001/anketler": "ISO9001-2015 — Anketler",
   "/iso9001/belgeler": "ISO9001-2015 — Belge Arşivi",
   "/iso9001/hedefler": "ISO9001-2015 — Kalite Hedefleri",
+  "/iso9001/egitimler": "ISO9001-2015 — Eğitim Kayıtları",
   "/iso9001/duf": "ISO9001-2015 — Düzeltici Faaliyet",
   "/iso9001/tetkik": "ISO9001-2015 — İç Tetkik",
 };
@@ -70,6 +73,8 @@ function Router() {
       <Route path="/iso9001/hedefler" component={ISO9001KaliteHedefleri} />
       <Route path="/iso9001/duf" component={ISO9001Duf} />
       <Route path="/iso9001/tetkik" component={ISO9001Tetkik} />
+      <Route path="/iso9001/egitimler" component={ISO9001Egitimler} />
+      <Route path="/egitim-degerlendirme/:id" component={PublicEgitimDegerlendirme} />
       <Route path="/anket-sonuclari/:id" component={SurveyAnalysis} />
       <Route path="/survey/:id" component={PublicSurvey} />
       <Route component={NotFound} />
@@ -89,7 +94,7 @@ function AppContent() {
     }
   }, []);
   
-  if (location.startsWith("/survey/")) {
+  if (location.startsWith("/survey/") || location.startsWith("/egitim-degerlendirme/")) {
     return <Router />;
   }
 
