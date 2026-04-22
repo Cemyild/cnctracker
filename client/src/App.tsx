@@ -19,8 +19,8 @@ import Tools from "@/pages/Tools";
 import Calisanlar from "@/pages/Calisanlar";
 import Hesaplamalar from "@/pages/Hesaplamalar";
 import Tahsilat from "@/pages/Tahsilat";
-import Anketler from "@/pages/Anketler";
 import { Redirect } from "wouter";
+import ISO9001 from "@/pages/ISO9001";
 import ISO9001Anketler from "@/pages/ISO9001Anketler";
 import ISO9001Duf from "@/pages/ISO9001Duf";
 import ISO9001Tetkik from "@/pages/ISO9001Tetkik";
@@ -39,6 +39,7 @@ const pageTitles: Record<string, string> = {
   "/hesaplamalar": "Hesaplamalar",
   "/tahsilat": "Müşteri Tahsilat",
   "/anketler": "Anketler",
+  "/iso9001": "ISO9001-2015",
   "/iso9001/anketler": "ISO9001-2015 — Anketler",
   "/iso9001/duf": "ISO9001-2015 — Düzeltici Faaliyet",
   "/iso9001/tetkik": "ISO9001-2015 — İç Tetkik",
@@ -59,6 +60,7 @@ function Router() {
       <Route path="/anketler">
         <Redirect to="/iso9001/anketler" />
       </Route>
+      <Route path="/iso9001" component={ISO9001} />
       <Route path="/iso9001/anketler" component={ISO9001Anketler} />
       <Route path="/iso9001/duf" component={ISO9001Duf} />
       <Route path="/iso9001/tetkik" component={ISO9001Tetkik} />

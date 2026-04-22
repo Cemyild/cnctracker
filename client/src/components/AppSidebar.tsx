@@ -23,7 +23,7 @@ import {
   Users,
   Calculator,
   HandCoins,
-  ClipboardList,
+  Award,
 } from "lucide-react";
 
 const navItems = [
@@ -36,7 +36,7 @@ const navItems = [
   { title: "Çalışanlar", icon: Users, href: "/calisanlar" },
   { title: "Hesaplamalar", icon: Calculator, href: "/hesaplamalar" },
   { title: "Müşteri Tahsilat", icon: HandCoins, href: "/tahsilat" },
-  { title: "Anketler", icon: ClipboardList, href: "/anketler" },
+  { title: "ISO9001-2015", icon: Award, href: "/iso9001" },
 ];
 
 export function AppSidebar() {
@@ -62,7 +62,9 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
-                const isActive = location === item.href;
+                const isActive = item.href === "/iso9001"
+                  ? location.startsWith("/iso9001")
+                  : location === item.href;
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
