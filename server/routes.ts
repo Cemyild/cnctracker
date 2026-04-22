@@ -2416,6 +2416,68 @@ export async function registerRoutes(
     }
   });
 
+  // Kalite Hedefleri
+  app.get("/api/kalite-hedefleri", async (_req, res) => {
+    try {
+      res.json(await storage.getKaliteHedefleri());
+    } catch (e) {
+      res.status(500).json({ error: "Kalite hedefleri alınamadı" });
+    }
+  });
+
+  app.post("/api/kalite-hedefleri", async (req, res) => {
+    try {
+      const row = await storage.createKaliteHedef(req.body);
+      res.status(201).json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Hedef oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/kalite-hedefleri/:id", async (req, res) => {
+    try {
+      const row = await storage.updateKaliteHedef(req.params.id, req.body);
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Hedef güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/kalite-hedefleri/:id", async (req, res) => {
+    try {
+      await storage.deleteKaliteHedef(req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Hedef silinemedi" });
+    }
+  });
+
+  app.get("/api/kalite-olcumler", async (_req, res) => {
+    try {
+      res.json(await storage.getKaliteOlcumler());
+    } catch (e) {
+      res.status(500).json({ error: "Ölçümler alınamadı" });
+    }
+  });
+
+  app.post("/api/kalite-olcumler", async (req, res) => {
+    try {
+      const row = await storage.createKaliteOlcum(req.body);
+      res.status(201).json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Ölçüm eklenemedi" });
+    }
+  });
+
+  app.delete("/api/kalite-olcumler/:id", async (req, res) => {
+    try {
+      await storage.deleteKaliteOlcum(req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Ölçüm silinemedi" });
+    }
+  });
+
   // Belge Arşivi
   app.get("/api/belgeler", async (req, res) => {
     try {
