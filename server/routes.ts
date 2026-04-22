@@ -59,6 +59,18 @@ const belgeStorage = multer.diskStorage({
 });
 const uploadBelge = multer({ storage: belgeStorage });
 
+const egitimStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = "uploads/egitimler";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  },
+});
+const uploadEgitim = multer({ storage: egitimStorage });
+
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar } from "@shared/schema";
 import { createHash } from "crypto";
 import { z } from "zod";
@@ -2736,6 +2748,175 @@ export async function registerRoutes(
       res.status(201).json(survey);
     } catch (error) {
       res.status(500).json({ error: "Seed işlemi başarısız" });
+    }
+  });
+
+  // ISO Personeller
+  app.get("/api/iso-personeller", async (_req, res) => {
+    try {
+      res.json(await storage.getIsoPersoneller());
+    } catch {
+      res.status(500).json({ error: "Personel listesi alınamadı" });
+    }
+  });
+
+  app.get("/api/iso-personeller/:id/kart", async (req, res) => {
+    try {
+      res.json(await storage.getIsoPersonelKart(req.params.id));
+    } catch {
+      res.status(404).json({ error: "Personel bulunamadı" });
+    }
+  });
+
+  app.post("/api/iso-personeller", async (req, res) => {
+    try {
+      res.status(201).json(await storage.createIsoPersonel(req.body));
+    } catch {
+      res.status(400).json({ error: "Personel oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/iso-personeller/:id", async (req, res) => {
+    try {
+      res.json(await storage.updateIsoPersonel(req.params.id, req.body));
+    } catch {
+      res.status(400).json({ error: "Personel güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/iso-personeller/:id", async (req, res) => {
+    try {
+      await storage.deleteIsoPersonel(req.params.id);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Personel silinemedi" });
+    }
+  });
+
+  // Eğitimler
+  app.get("/api/egitimler", async (_req, res) => {
+    try {
+      res.json(await storage.getEgitimler());
+    } catch {
+      res.status(500).json({ error: "Eğitimler alınamadı" });
+    }
+  });
+
+  app.post("/api/egitimler", uploadEgitim.single("sertifika"), async (req, res) => {
+    try {
+      const data = JSON.parse(req.body.data ?? "{}");
+      if (req.file) data.sertifikaDosyaYolu = `/uploads/egitimler/${req.file.filename}`;
+      res.status(201).json(await storage.createEgitim(data));
+    } catch {
+      res.status(400).json({ error: "Eğitim oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/egitimler/:id", uploadEgitim.single("sertifika"), async (req, res) => {
+    try {
+      const data = JSON.parse(req.body.data ?? "{}");
+      if (req.file) data.sertifikaDosyaYolu = `/uploads/egitimler/${req.file.filename}`;
+      res.json(await storage.updateEgitim(req.params.id, data));
+    } catch {
+      res.status(400).json({ error: "Eğitim güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/egitimler/:id", async (req, res) => {
+    try {
+      await storage.deleteEgitim(req.params.id);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Eğitim silinemedi" });
+    }
+  });
+
+  app.get("/api/egitimler/:id/katilimcilar", async (req, res) => {
+    try {
+      res.json(await storage.getEgitimKatilimcilar(req.params.id));
+    } catch {
+      res.status(500).json({ error: "Katılımcılar alınamadı" });
+    }
+  });
+
+  app.post("/api/egitimler/:id/katilimcilar", async (req, res) => {
+    try {
+      const { personelIds } = req.body as { personelIds: string[] };
+      await storage.addEgitimKatilimcilar(req.params.id, personelIds);
+      res.status(201).json({ ok: true });
+    } catch {
+      res.status(400).json({ error: "Katılımcı eklenemedi" });
+    }
+  });
+
+  app.delete("/api/egitimler/:id/katilimcilar/:personelId", async (req, res) => {
+    try {
+      await storage.removeEgitimKatilimci(req.params.id, req.params.personelId);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Katılımcı çıkarılamadı" });
+    }
+  });
+
+  app.get("/api/egitimler/:id/degerlendirmeler", async (req, res) => {
+    try {
+      res.json(await storage.getEgitimDegerlendirmeleri(req.params.id));
+    } catch {
+      res.status(500).json({ error: "Değerlendirmeler alınamadı" });
+    }
+  });
+
+  // Değerlendirme Şablonu
+  app.get("/api/degerlendirme-sorulari", async (_req, res) => {
+    try {
+      res.json(await storage.getDegerlendirmeSorulari());
+    } catch {
+      res.status(500).json({ error: "Sorular alınamadı" });
+    }
+  });
+
+  app.post("/api/degerlendirme-sorulari", async (req, res) => {
+    try {
+      res.status(201).json(await storage.createDegerlendirmeSoru(req.body));
+    } catch {
+      res.status(400).json({ error: "Soru oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/degerlendirme-sorulari/:id", async (req, res) => {
+    try {
+      res.json(await storage.updateDegerlendirmeSoru(req.params.id, req.body));
+    } catch {
+      res.status(400).json({ error: "Soru güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/degerlendirme-sorulari/:id", async (req, res) => {
+    try {
+      await storage.deleteDegerlendirmeSoru(req.params.id);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Soru silinemedi" });
+    }
+  });
+
+  // Public: Eğitim Değerlendirme (no auth required - already public by default in Express)
+  app.get("/api/egitim-degerlendirme/:id", async (req, res) => {
+    try {
+      const result = await storage.getEgitimForDegerlendirme(req.params.id);
+      if (!result) return res.status(404).json({ error: "Eğitim bulunamadı" });
+      res.json(result);
+    } catch {
+      res.status(500).json({ error: "Eğitim bilgisi alınamadı" });
+    }
+  });
+
+  app.post("/api/egitim-degerlendirme", async (req, res) => {
+    try {
+      await storage.createEgitimDegerlendirme(req.body);
+      res.status(201).json({ ok: true });
+    } catch {
+      res.status(400).json({ error: "Değerlendirme kaydedilemedi" });
     }
   });
 
