@@ -429,6 +429,11 @@ export const duf = pgTable("duf", {
   kokNedenAnalizi: text("kok_neden_analizi"),
   alinanAksiyon: text("alinan_aksiyon"),
   dosyaEki: text("dosya_eki"),
+  talepTarihi: text("talep_tarihi"),
+  talepEden: text("talep_eden"),
+  kapamaTarihi: text("kapama_tarihi"),
+  kapamaSonucu: text("kapama_sonucu"),
+  sonucDogrulamaFaaliyetleri: text("sonuc_dogrulama_faaliyetleri"),
   olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
 });
 
