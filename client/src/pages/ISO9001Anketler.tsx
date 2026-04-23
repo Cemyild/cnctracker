@@ -16,7 +16,7 @@ import { Copy, ExternalLink, Leaf, Plus, Edit, BarChart, Trash2 } from "lucide-r
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useState, useEffect } from "react";
-import { useLocation, useSearch } from "wouter";
+import { useLocation } from "wouter";
 
 function ScoreHeatmap({ score }: { score: number }) {
   let color = "bg-green-500";
@@ -428,10 +428,7 @@ function SurveyFormModal({ defaultSurvey, defaultQuestions, open, onOpenChange, 
 
 export default function ISO9001Anketler() {
   const { toast } = useToast();
-  const search = useSearch();
-  const params = new URLSearchParams(search);
-  const initialTab = params.get("tab") === "calisanlar" ? "calisanlar" : "musteri";
-  const [activeTab, setActiveTab] = useState<"musteri" | "calisanlar">(initialTab);
+  const [activeTab, setActiveTab] = useState<"musteri" | "calisanlar">("musteri");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editSurvey, setEditSurvey] = useState<Survey | undefined>(undefined);
   const [editQuestions, setEditQuestions] = useState<string>("");

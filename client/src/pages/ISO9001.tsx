@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Award, ClipboardList, AlertTriangle, Search, FileText, Target, GraduationCap, Truck, BarChart3, Users } from "lucide-react";
+import { Award, ClipboardList, AlertTriangle, Search, FileText, Target, GraduationCap, Truck, BarChart3 } from "lucide-react";
 
 type Iso9001Stats = {
   belgeCount: number;
@@ -65,12 +65,9 @@ export default function ISO9001() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <ActiveCard href="/iso9001/anketler" icon={ClipboardList} title="Müşteri Memnuniyet Anketi">
-          <p>Anket sayısı: <span className="font-medium text-foreground">{stats?.surveyCountMusteri ?? "—"}</span></p>
-        </ActiveCard>
-
-        <ActiveCard href="/iso9001/anketler?tab=calisanlar" icon={Users} title="Çalışan Memnuniyet Anketi">
-          <p>Anket sayısı: <span className="font-medium text-foreground">{stats?.surveyCountCalisanlar ?? "—"}</span></p>
+        <ActiveCard href="/iso9001/anketler" icon={ClipboardList} title="Anketler">
+          <p>Müşteri: <span className="font-medium text-foreground">{stats?.surveyCountMusteri ?? "—"}</span></p>
+          <p>Çalışan: <span className="font-medium text-foreground">{stats?.surveyCountCalisanlar ?? "—"}</span></p>
         </ActiveCard>
 
         <ActiveCard href="/iso9001/duf" icon={AlertTriangle} title="Düzeltici Faaliyet">
