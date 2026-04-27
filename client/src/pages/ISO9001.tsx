@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Award, ClipboardList, AlertTriangle, Search, FileText, Target, GraduationCap, Truck, BarChart3 } from "lucide-react";
+import { Award, ClipboardList, AlertTriangle, Search, FileText, Target, GraduationCap, Truck, BarChart3, Wrench } from "lucide-react";
 
 type Iso9001Stats = {
   belgeCount: number;
@@ -19,6 +19,7 @@ type Iso9001Stats = {
   dufKapali: number;
   tetkikSonTarih: string | null;
   tetkikPlanlanan: number;
+  bakimVarlikCount: number;
 };
 
 function ActiveCard({ href, icon: Icon, title, children }: { href: string; icon: React.ElementType; title: string; children: React.ReactNode }) {
@@ -101,6 +102,9 @@ export default function ISO9001() {
         <ActiveCard href="/iso9001/yonetim" icon={BarChart3} title="Yönetim Gözden Geçirme">
           <p>Son Toplantı: <span className="font-medium text-foreground">{stats?.sonToplantıTarihi ?? "—"}</span></p>
           <p>Açık Aksiyon: <span className="font-medium text-foreground">{stats?.acikAksiyon ?? "—"}</span></p>
+        </ActiveCard>
+        <ActiveCard href="/iso9001/bakim-onarim" icon={Wrench} title="Bakım & Onarım">
+          <p>Toplam Varlık: <span className="font-medium text-foreground">{stats?.bakimVarlikCount ?? "—"}</span></p>
         </ActiveCard>
       </div>
     </div>

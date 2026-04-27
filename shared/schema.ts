@@ -441,6 +441,36 @@ export const insertDufSchema = createInsertSchema(duf).omit({ id: true, olusturm
 export type InsertDuf = z.infer<typeof insertDufSchema>;
 export type Duf = typeof duf.$inferSelect;
 
+// Bakım & Onarım — Varlıklar (araç, cihaz, donanım)
+export const bakimVarliklar = pgTable("bakim_varliklar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kategori: text("kategori").notNull(), // "arac" | "cihaz" | "donanim"
+  marka: text("marka").notNull(),
+  model: text("model"),
+  plaka: text("plaka"),
+  kod: text("kod"),
+  aciklama: text("aciklama"),
+  bakimPeriyodu: text("bakim_periyodu"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+export const insertBakimVarlikSchema = createInsertSchema(bakimVarliklar).omit({ id: true, olusturmaTarihi: true });
+export type InsertBakimVarlik = z.infer<typeof insertBakimVarlikSchema>;
+export type BakimVarlik = typeof bakimVarliklar.$inferSelect;
+
+// Bakım & Onarım — Kayıtlar
+export const bakimKayitlari = pgTable("bakim_kayitlari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  varlikId: varchar("varlik_id").references(() => bakimVarliklar.id, { onDelete: "cascade" }).notNull(),
+  bakimTarihi: text("bakim_tarihi").notNull(),
+  km: text("km"),
+  yapilanIslemler: text("yapilan_islemler").notNull(),
+  faturaNu: text("fatura_nu"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+export const insertBakimKayitSchema = createInsertSchema(bakimKayitlari).omit({ id: true, olusturmaTarihi: true });
+export type InsertBakimKayit = z.infer<typeof insertBakimKayitSchema>;
+export type BakimKayit = typeof bakimKayitlari.$inferSelect;
+
 // İç Tetkik Planları tablosu
 export const tetkikPlanlar = pgTable("tetkik_planlar", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

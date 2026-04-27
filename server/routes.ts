@@ -2583,6 +2583,82 @@ export async function registerRoutes(
     }
   });
 
+  // Bakım & Onarım
+  app.get("/api/bakim/varliklar", async (req, res) => {
+    try {
+      const kategori = req.query.kategori as string | undefined;
+      res.json(await storage.getBakimVarliklar(kategori));
+    } catch (e) {
+      res.status(500).json({ error: "Varlıklar alınamadı" });
+    }
+  });
+
+  app.get("/api/bakim/varliklar/:id", async (req, res) => {
+    try {
+      const row = await storage.getBakimVarlik(req.params.id);
+      if (!row) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(row);
+    } catch (e) {
+      res.status(500).json({ error: "Varlık alınamadı" });
+    }
+  });
+
+  app.post("/api/bakim/varliklar", async (req, res) => {
+    try {
+      const row = await storage.createBakimVarlik(req.body);
+      res.status(201).json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Varlık oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/bakim/varliklar/:id", async (req, res) => {
+    try {
+      const row = await storage.updateBakimVarlik(req.params.id, req.body);
+      if (!row) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Varlık güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/bakim/varliklar/:id", async (req, res) => {
+    try {
+      await storage.deleteBakimVarlik(req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Varlık silinemedi" });
+    }
+  });
+
+  app.post("/api/bakim/varliklar/:id/kayitlar", async (req, res) => {
+    try {
+      const row = await storage.createBakimKayit({ ...req.body, varlikId: req.params.id });
+      res.status(201).json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Bakım kaydı oluşturulamadı" });
+    }
+  });
+
+  app.put("/api/bakim/kayitlar/:id", async (req, res) => {
+    try {
+      const row = await storage.updateBakimKayit(req.params.id, req.body);
+      if (!row) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: "Bakım kaydı güncellenemedi" });
+    }
+  });
+
+  app.delete("/api/bakim/kayitlar/:id", async (req, res) => {
+    try {
+      await storage.deleteBakimKayit(req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Bakım kaydı silinemedi" });
+    }
+  });
+
   // Tetkik Planlar
   app.get("/api/tetkik/planlar", async (_req, res) => {
     try {

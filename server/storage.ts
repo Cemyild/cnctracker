@@ -10,7 +10,9 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   tedarikciDegerlendirmeler, type TedarikciDegerlendirme, type InsertTedarikciDegerlendirme,
   tedarikciDegerlendirmeCevaplari, type TedarikciDegerlendirmeCevap,
   yonetimGozdenGecirmeler, type YonetimGozdenGecirme, type InsertYonetimGozdenGecirme,
-  yonetimAksiyonlar, type YonetimAksiyon, type InsertYonetimAksiyon } from "@shared/schema";
+  yonetimAksiyonlar, type YonetimAksiyon, type InsertYonetimAksiyon,
+  bakimVarliklar, type BakimVarlik, type InsertBakimVarlik,
+  bakimKayitlari, type BakimKayit, type InsertBakimKayit } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne } from "drizzle-orm";
@@ -150,6 +152,7 @@ export interface IStorage {
     buYilDegerlendirmeCount: number;
     sonToplantıTarihi: string | null;
     acikAksiyon: number;
+    bakimVarlikCount: number;
   }>;
 
   // Tedarikçiler
@@ -187,6 +190,16 @@ export interface IStorage {
   createDuf(data: InsertDuf): Promise<Duf>;
   updateDuf(id: string, data: Partial<InsertDuf>): Promise<Duf>;
   deleteDuf(id: string): Promise<void>;
+
+  // Bakım & Onarım
+  getBakimVarliklar(kategori?: string): Promise<(BakimVarlik & { sonBakimTarihi: string | null; kayitSayisi: number })[]>;
+  getBakimVarlik(id: string): Promise<(BakimVarlik & { kayitlar: BakimKayit[] }) | undefined>;
+  createBakimVarlik(data: InsertBakimVarlik): Promise<BakimVarlik>;
+  updateBakimVarlik(id: string, data: Partial<InsertBakimVarlik>): Promise<BakimVarlik>;
+  deleteBakimVarlik(id: string): Promise<void>;
+  createBakimKayit(data: InsertBakimKayit): Promise<BakimKayit>;
+  updateBakimKayit(id: string, data: Partial<InsertBakimKayit>): Promise<BakimKayit>;
+  deleteBakimKayit(id: string): Promise<void>;
 
   // Tetkik Planlar
   getTetkikPlanlar(): Promise<TetkikPlan[]>;
@@ -1850,6 +1863,7 @@ export class DatabaseStorage implements IStorage {
       buYilDegerlendirmeCount: buYilDegerlendirmeRow.count,
       sonToplantıTarihi: sonToplantıRows[0]?.tarih ?? null,
       acikAksiyon: acikAksiyon.count,
+      bakimVarlikCount: (await db.select({ count: sql<number>`count(*)::int` }).from(bakimVarliklar))[0].count,
     };
   }
 
@@ -1875,6 +1889,64 @@ export class DatabaseStorage implements IStorage {
 
   async deleteDuf(id: string): Promise<void> {
     await db.delete(duf).where(eq(duf.id, id));
+  }
+
+  async getBakimVarliklar(kategori?: string): Promise<(BakimVarlik & { sonBakimTarihi: string | null; kayitSayisi: number })[]> {
+    const varliklar = await db.select().from(bakimVarliklar)
+      .where(kategori ? eq(bakimVarliklar.kategori, kategori) : undefined)
+      .orderBy(bakimVarliklar.marka, bakimVarliklar.model);
+    if (varliklar.length === 0) return [];
+    const ids = varliklar.map(v => v.id);
+    const istatistikler = await db.select({
+      varlikId: bakimKayitlari.varlikId,
+      sonBakimTarihi: sql<string>`max(${bakimKayitlari.bakimTarihi})`,
+      kayitSayisi: sql<number>`count(*)::int`,
+    }).from(bakimKayitlari).where(inArray(bakimKayitlari.varlikId, ids)).groupBy(bakimKayitlari.varlikId);
+    const map = new Map(istatistikler.map(k => [k.varlikId, k]));
+    return varliklar.map(v => ({
+      ...v,
+      sonBakimTarihi: map.get(v.id)?.sonBakimTarihi ?? null,
+      kayitSayisi: map.get(v.id)?.kayitSayisi ?? 0,
+    }));
+  }
+
+  async getBakimVarlik(id: string): Promise<(BakimVarlik & { kayitlar: BakimKayit[] }) | undefined> {
+    const [varlik] = await db.select().from(bakimVarliklar).where(eq(bakimVarliklar.id, id));
+    if (!varlik) return undefined;
+    const kayitlar = await db.select().from(bakimKayitlari)
+      .where(eq(bakimKayitlari.varlikId, id))
+      .orderBy(bakimKayitlari.bakimTarihi);
+    return { ...varlik, kayitlar };
+  }
+
+  async createBakimVarlik(data: InsertBakimVarlik): Promise<BakimVarlik> {
+    const [row] = await db.insert(bakimVarliklar).values(data).returning();
+    return row;
+  }
+
+  async updateBakimVarlik(id: string, data: Partial<InsertBakimVarlik>): Promise<BakimVarlik> {
+    const [row] = await db.update(bakimVarliklar).set(data).where(eq(bakimVarliklar.id, id)).returning();
+    if (!row) throw new Error("Varlık bulunamadı");
+    return row;
+  }
+
+  async deleteBakimVarlik(id: string): Promise<void> {
+    await db.delete(bakimVarliklar).where(eq(bakimVarliklar.id, id));
+  }
+
+  async createBakimKayit(data: InsertBakimKayit): Promise<BakimKayit> {
+    const [row] = await db.insert(bakimKayitlari).values(data).returning();
+    return row;
+  }
+
+  async updateBakimKayit(id: string, data: Partial<InsertBakimKayit>): Promise<BakimKayit> {
+    const [row] = await db.update(bakimKayitlari).set(data).where(eq(bakimKayitlari.id, id)).returning();
+    if (!row) throw new Error("Bakım kaydı bulunamadı");
+    return row;
+  }
+
+  async deleteBakimKayit(id: string): Promise<void> {
+    await db.delete(bakimKayitlari).where(eq(bakimKayitlari.id, id));
   }
 
   async getTetkikPlanlar(): Promise<TetkikPlan[]> {
