@@ -13,6 +13,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Plus, Edit, Trash2, Paperclip, AlertTriangle } from "lucide-react";
 
+function formatTarih(s: string | null | undefined): string {
+  if (!s) return "—";
+  const p = s.split("-");
+  if (p.length !== 3) return s;
+  return `${p[2]}/${p[1]}/${p[0]}`;
+}
+
 const KAYNAK_OPTIONS = [
   { value: "ic_tetkik", label: "İç Tetkik" },
   { value: "musteri_sikayeti", label: "Müşteri Şikayeti" },
@@ -295,12 +302,12 @@ export default function ISO9001Duf() {
                   <TableCell className="max-w-xs">
                     <span className="text-sm line-clamp-2">{row.aciklama}</span>
                   </TableCell>
-                  <TableCell className="text-sm whitespace-nowrap">{row.talepTarihi ?? "—"}</TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">{formatTarih(row.talepTarihi)}</TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{row.sorumluKisi}</TableCell>
                   <TableCell className={`text-sm whitespace-nowrap ${gecikmiş ? "text-orange-600 font-medium" : ""}`}>
-                    {row.hedefKapanisTarihi}
+                    {formatTarih(row.hedefKapanisTarihi)}
                   </TableCell>
-                  <TableCell className="text-sm whitespace-nowrap">{row.kapamaTarihi ?? "—"}</TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">{formatTarih(row.kapamaTarihi)}</TableCell>
                   <TableCell>{durumBadge(row, gecikmiş)}</TableCell>
                   <TableCell>
                     {row.dosyaEki && (

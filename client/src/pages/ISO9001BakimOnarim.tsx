@@ -17,6 +17,13 @@ import { Wrench, Plus, Edit, Trash2, Car, Monitor, Settings, ChevronLeft } from 
 type VarlikWithStats = BakimVarlik & { sonBakimTarihi: string | null; kayitSayisi: number };
 type VarlikWithKayitlar = BakimVarlik & { kayitlar: BakimKayit[] };
 
+function formatTarih(s: string | null | undefined): string {
+  if (!s) return "—";
+  const p = s.split("-");
+  if (p.length !== 3) return s;
+  return `${p[2]}/${p[1]}/${p[0]}`;
+}
+
 const KATEGORI_TABS = [
   { value: "arac", label: "Araçlar", icon: Car },
   { value: "donanim", label: "Donanım", icon: Monitor },
@@ -255,7 +262,7 @@ export default function ISO9001BakimOnarim() {
               )}
               {kayitlar.map(k => (
                 <TableRow key={k.id}>
-                  <TableCell className="whitespace-nowrap font-medium">{k.bakimTarihi}</TableCell>
+                  <TableCell className="whitespace-nowrap font-medium">{formatTarih(k.bakimTarihi)}</TableCell>
                   <TableCell className="text-sm">{k.km ?? "—"}</TableCell>
                   <TableCell className="text-sm">{k.yapilanIslemler}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{k.faturaNu ?? "—"}</TableCell>
@@ -323,7 +330,7 @@ export default function ISO9001BakimOnarim() {
                         }
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{v.bakimPeriyodu ?? "—"}</TableCell>
-                      <TableCell className="text-sm whitespace-nowrap">{v.sonBakimTarihi ?? "—"}</TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">{formatTarih(v.sonBakimTarihi)}</TableCell>
                       <TableCell className="text-center">
                         <Badge variant="secondary">{v.kayitSayisi}</Badge>
                       </TableCell>
