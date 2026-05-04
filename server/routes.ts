@@ -2026,6 +2026,23 @@ export async function registerRoutes(
     }
   });
 
+  // Belirli bir ay/yıl için tüm gider kayıtlarını topluca sil (toplu cleanup için).
+  // Yanlış yüklenen ay'ı yeniden yüklemek için kullanılır.
+  app.delete("/api/giderler", async (req, res) => {
+    try {
+      const ay = String(req.query.ay ?? "").trim();
+      const yilParam = req.query.yil ? Number(req.query.yil) : NaN;
+      if (!ay || !Number.isFinite(yilParam) || yilParam < 2000 || yilParam > 2100) {
+        return res.status(400).json({ error: "Geçersiz ay veya yıl" });
+      }
+      await storage.deleteGiderler(ay, yilParam);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Giderler toplu silme hatası:", err);
+      res.status(500).json({ error: "Silinemedi" });
+    }
+  });
+
 
   // Yükleme geçmişi (Upload history)
   app.get("/api/gumruk/dosyalar", async (req, res) => {

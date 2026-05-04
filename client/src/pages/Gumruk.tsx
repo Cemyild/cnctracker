@@ -1360,6 +1360,35 @@ type Arac = {
                                   </Select>
                                 </div>
 
+                                {selectedGiderAy !== "toplam" && (
+                                  <Button
+                                    variant="destructive"
+                                    onClick={async () => {
+                                      const ayLabel = aylar.find(a => a.value === selectedGiderAy)?.label || selectedGiderAy;
+                                      if (!window.confirm(`${ayLabel} ${selectedGiderYil} ayına ait TÜM gider kayıtları silinecek. Emin misiniz?`)) return;
+                                      try {
+                                        const r = await fetch(`/api/giderler?ay=${selectedGiderAy}&yil=${selectedGiderYil}`, {
+                                          method: "DELETE",
+                                          credentials: "include",
+                                        });
+                                        if (!r.ok) {
+                                          toast({ title: "Hata", description: "Silinemedi", variant: "destructive" });
+                                          return;
+                                        }
+                                        toast({ title: "Başarılı", description: `${ayLabel} ${selectedGiderYil} kayıtları silindi` });
+                                        refetchGiderler();
+                                        refetchGiderStats();
+                                      } catch {
+                                        toast({ title: "Hata", description: "Bağlantı hatası", variant: "destructive" });
+                                      }
+                                    }}
+                                    data-testid="button-gider-temizle"
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Bu Ay'ı Temizle
+                                  </Button>
+                                )}
+
                                 <Button onClick={() => setIsGiderUploadModalOpen(true)} variant="secondary" data-testid="button-gider-upload">
                                   <Upload className="w-4 h-4 mr-2" />
                                   Gider Excel Yükle
