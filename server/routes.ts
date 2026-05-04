@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { buildDedupKey } from "./dedup";
 import multer from "multer";
 import { type IStorage } from "./storage";
 import * as XLSX from "xlsx";
@@ -2312,38 +2313,39 @@ export async function registerRoutes(
         v.dosyaId = dosyaKaydi.id;
       }
 
-      // 9. Pre-insert dedup: (ay, yıl, faturaNo, siraNo) üzerinden kalem bazlı kontrol.
-      // Aynı fatura birden fazla kaleme yayılıyorsa (gümrük raporlarında sık olan
-      // multi-line invoice) her kalem ayrı saklanır. Aynı kalem (aynı sıra no ile)
-      // aynı ay+yıl'da DB'de zaten varsa veya batch içinde tekrarlıyorsa atlanır.
+      // 9. Pre-insert dedup: kompozit anahtar üzerinden iş kuralı.
+      // Bir satır mükerrer sayılır ANCAK faturaNo, dosyaNo, tescilNo, malBedeli,
+      // topFaturaTutar ve siraNo'nun TÜMÜ aynı satırla eşleşirse. Herhangi bir
+      // seviyede fark varsa (örn. aynı faturaNo'lu farklı dosyaNo'lu toplu
+      // fatura kalemleri) satır benzersiz kabul edilir ve eklenir.
+      // Detay: server/dedup.ts.
       const ayYilPairs = veriler
         .map(v => ({ ay: v.ay, yil: v.yil }))
         .filter((p): p is { ay: string; yil: number } => !!p.ay && typeof p.yil === "number");
-      const existingKalemSet = await storage.getExistingFaturaKalemleriByAyYillar(ayYilPairs);
+      const existingKeys = await storage.getExistingKompozitKeysByAyYillar(ayYilPairs);
 
       const yeniVeriler: typeof veriler = [];
-      const seenInBatch = new Set<string>(); // "yil-ay:faturaNo:siraNo" — aynı upload içinde tekrar koruması
+      const seenInBatch = new Set<string>();
 
       for (const v of veriler) {
-        const faturaNo = v.faturaNo ? String(v.faturaNo).trim() : "";
-        if (faturaNo && v.ay && typeof v.yil === "number") {
-          const sira = v.siraNo ? String(v.siraNo).trim() : "";
-          const key = `${v.yil}-${v.ay}:${faturaNo}:${sira}`;
+        const key = buildDedupKey(v);
+        if (key) {
+          const faturaNo = v.faturaNo ? String(v.faturaNo).trim() : "";
           if (seenInBatch.has(key)) {
             skippedRows.push({
               ay: v.ay,
               yil: v.yil,
               row: JSON.parse(v.rawData ?? "{}"),
-              reason: `Aynı dosyada mükerrer kalem (fatura ${faturaNo}${sira ? `, sıra ${sira}` : ""})`,
+              reason: `Aynı dosyada bire bir aynı satır${faturaNo ? ` (fatura ${faturaNo})` : ""}`,
             });
             continue;
           }
-          if (existingKalemSet.has(key)) {
+          if (existingKeys.has(key)) {
             skippedRows.push({
               ay: v.ay,
               yil: v.yil,
               row: JSON.parse(v.rawData ?? "{}"),
-              reason: `Bu kalem (fatura ${faturaNo}${sira ? `, sıra ${sira}` : ""}) ${v.ay} ${v.yil} dönemine daha önce yüklenmiş`,
+              reason: `Bu satır ${v.ay} ${v.yil} dönemine daha önce yüklenmiş${faturaNo ? ` (fatura ${faturaNo})` : ""}`,
             });
             continue;
           }

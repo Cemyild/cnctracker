@@ -17,6 +17,7 @@ import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count } from "drizzle-orm";
+import { buildDedupKey } from "./dedup";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -33,7 +34,7 @@ export interface IStorage {
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
-  getExistingFaturaKalemleriByAyYillar(pairs: { ay: string; yil: number }[]): Promise<Set<string>>;
+  getExistingKompozitKeysByAyYillar(pairs: { ay: string; yil: number }[]): Promise<Set<string>>;
   getAylikOzet(yil: number): Promise<{ ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
   getFirmalar(yil: number): Promise<string[]>;
   getAllUniqueFirmalar(): Promise<string[]>;
@@ -359,10 +360,9 @@ export class DatabaseStorage implements IStorage {
     return new Set(result.map(r => r.rowHash).filter((h): h is string => h !== null));
   }
 
-  async getExistingFaturaKalemleriByAyYillar(pairs: { ay: string; yil: number }[]): Promise<Set<string>> {
-    // Anahtar formatı: "yil-ay:faturaNo:siraNo"
-    // siraNo null ise "yil-ay:faturaNo:" formunda saklanır.
-    // Bu sayede aynı fatura numarasının farklı kalemleri ayrı ayrı tekilleştirilir.
+  async getExistingKompozitKeysByAyYillar(pairs: { ay: string; yil: number }[]): Promise<Set<string>> {
+    // Kompozit dedup anahtarı: faturaNo + dosyaNo + tescilNo + malBedeli +
+    // topFaturaTutar + siraNo birlikte değerlendirilir. Detay: server/dedup.ts.
     const set = new Set<string>();
     if (pairs.length === 0) return set;
 
@@ -374,21 +374,21 @@ export class DatabaseStorage implements IStorage {
         ay: gumrukVerileri.ay,
         yil: gumrukVerileri.yil,
         faturaNo: gumrukVerileri.faturaNo,
+        dosyaNo: gumrukVerileri.dosyaNo,
+        tescilNo: gumrukVerileri.tescilNo,
+        malBedeli: gumrukVerileri.malBedeli,
+        topFaturaTutar: gumrukVerileri.topFaturaTutar,
         siraNo: gumrukVerileri.siraNo,
       })
       .from(gumrukVerileri)
       .where(and(
         inArray(gumrukVerileri.yil, distinctYillar),
         inArray(gumrukVerileri.ay, distinctAylar),
-        isNotNull(gumrukVerileri.faturaNo),
       ));
 
     for (const r of rows) {
-      if (!r.faturaNo) continue;
-      const fatura = String(r.faturaNo).trim();
-      if (!fatura) continue;
-      const sira = r.siraNo ? String(r.siraNo).trim() : "";
-      set.add(`${r.yil}-${r.ay}:${fatura}:${sira}`);
+      const key = buildDedupKey(r);
+      if (key) set.add(key);
     }
     return set;
   }
