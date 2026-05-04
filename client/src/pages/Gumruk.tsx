@@ -1565,6 +1565,24 @@ type Arac = {
                               uploadUrl="/api/giderler/upload"
                               title="Gider Excel Yükle"
                               description="Muhasebe gider kayıtlarını içeren Excel dosyasını yükleyin."
+                              hideDateSelectors={true}
+                              expectedHeaders={[
+                                "Tarih",
+                                "Firma Ünvan",
+                                "Fatura No",
+                                "Fatura Tutarı",
+                                "Fatura KDV",
+                                "Fatura Toplamı",
+                                "Doviz",
+                              ]}
+                              previewColumns={[
+                                { key: "Firma Ünvan", label: "Firma" },
+                                { key: "Fatura No", label: "Fatura No" },
+                                { key: "Fatura Tutarı", label: "Tutar", isNumeric: true },
+                                { key: "Fatura KDV", label: "KDV", isNumeric: true },
+                              ]}
+                              templateFilename="gider-sablon.xlsx"
+                              templateSheetName="Giderler"
                             />
 
                             <GiderEditModal

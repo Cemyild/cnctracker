@@ -83,6 +83,19 @@ const EXPECTED_HEADERS = [
   "GİRİŞ ELEMANI",
 ];
 
+export type PreviewColumn = {
+  key: string;       // Excel header name to read from
+  label: string;     // shown in the preview table column header
+  isNumeric?: boolean; // formatNumberCell vs raw string
+};
+
+const DEFAULT_GUMRUK_PREVIEW_COLUMNS: PreviewColumn[] = [
+  { key: "FİRMA ÜNVAN", label: "Firma" },
+  { key: "FATURA NO", label: "Fatura No" },
+  { key: "MAL BEDELİ", label: "Mal Bedeli", isNumeric: true },
+  { key: "TOP KDV TUTAR", label: "KDV", isNumeric: true },
+];
+
 type TipKey =
   | "İthalat"
   | "İhracat"
@@ -147,13 +160,8 @@ interface PreviewData {
   datelessRows: number;
   missingHeaders: string[];
   allHeaders: string[];
-  tipCounts: Record<TipKey, number>;
-  sampleRows: Array<{
-    firma: string;
-    faturaNo: string;
-    malBedeli: unknown;
-    kdv: unknown;
-  }>;
+  tipCounts?: Record<TipKey, number>;
+  sampleRows: Array<Record<string, unknown>>;
 }
 
 function suggestHeader(target: string, candidates: string[]): string | null {
@@ -173,7 +181,11 @@ function suggestHeader(target: string, candidates: string[]): string | null {
   return null;
 }
 
-async function parseExcelPreview(file: File): Promise<PreviewData> {
+async function parseExcelPreview(
+  file: File,
+  expectedHeaders: string[],
+  previewColumns: PreviewColumn[]
+): Promise<PreviewData> {
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: "array" });
   const sheetName = workbook.SheetNames[0];
@@ -192,7 +204,7 @@ async function parseExcelPreview(file: File): Promise<PreviewData> {
     h === null || h === undefined ? "" : String(h)
   );
 
-  const missingHeaders = EXPECTED_HEADERS.filter(
+  const missingHeaders = expectedHeaders.filter(
     (h) => !headers.includes(h)
   );
 
@@ -200,49 +212,53 @@ async function parseExcelPreview(file: File): Promise<PreviewData> {
     new Set(headers.filter((h) => h && h.trim().length > 0))
   );
 
-  const tipCounts: Record<TipKey, number> = {
-    "İthalat": 0,
-    "İhracat": 0,
-    "Transit": 0,
-    "Serbest B. Giriş": 0,
-    "Serbest B. Çıkış": 0,
-    "Diğer": 0,
-  };
+  const includeTip = expectedHeaders.includes("TİP");
+  const includeFaturaTarihi = expectedHeaders.includes("FATURA TARİHİ");
+
+  const tipCounts: Record<TipKey, number> | undefined = includeTip
+    ? {
+        "İthalat": 0,
+        "İhracat": 0,
+        "Transit": 0,
+        "Serbest B. Giriş": 0,
+        "Serbest B. Çıkış": 0,
+        "Diğer": 0,
+      }
+    : undefined;
 
   let validRows = 0;
   let skippedRows = 0;
   let datelessRows = 0;
   const sampleRows: PreviewData["sampleRows"] = [];
 
-  for (const r of rows) {
-    const firma = r["FİRMA ÜNVAN"];
-    const faturaNo = r["FATURA NO"];
-    const hasFirma =
-      firma !== null && firma !== undefined && String(firma).trim() !== "";
-    const hasFaturaNo =
-      faturaNo !== null &&
-      faturaNo !== undefined &&
-      String(faturaNo).trim() !== "";
+  const isEmptyValue = (v: unknown): boolean =>
+    v === null || v === undefined || (typeof v === "string" && v.trim() === "") || v === "";
 
-    if (!hasFirma && !hasFaturaNo) {
+  for (const r of rows) {
+    const values = Object.values(r);
+    const allEmpty =
+      values.length === 0 || values.every((v) => isEmptyValue(v));
+
+    if (allEmpty) {
       skippedRows += 1;
       continue;
     }
 
     validRows += 1;
-    tipCounts[mapTip(r["TİP"])] += 1;
+    if (tipCounts) {
+      tipCounts[mapTip(r["TİP"])] += 1;
+    }
 
-    if (!isDateParseable(r["FATURA TARİHİ"])) {
+    if (includeFaturaTarihi && !isDateParseable(r["FATURA TARİHİ"])) {
       datelessRows += 1;
     }
 
     if (sampleRows.length < 5) {
-      sampleRows.push({
-        firma: hasFirma ? String(firma) : "",
-        faturaNo: hasFaturaNo ? String(faturaNo) : "",
-        malBedeli: r["MAL BEDELİ"],
-        kdv: r["TOP KDV TUTAR"],
-      });
+      const projected: Record<string, unknown> = {};
+      for (const col of previewColumns) {
+        projected[col.label] = r[col.key];
+      }
+      sampleRows.push(projected);
     }
   }
 
@@ -333,6 +349,10 @@ export interface ExcelUploadModalProps {
   title?: string;
   description?: string;
   hideDateSelectors?: boolean;
+  expectedHeaders?: string[];
+  previewColumns?: PreviewColumn[];
+  templateFilename?: string;
+  templateSheetName?: string;
 }
 
 type MultiFileEntry =
@@ -364,7 +384,7 @@ type MultiPreviewData = {
   datelessRows: number;
   missingHeaders: string[];
   allHeaders: string[];
-  tipCounts: Record<TipKey, number>;
+  tipCounts?: Record<TipKey, number>;
   perFile: Array<{
     filename: string;
     totalRows: number;
@@ -380,7 +400,11 @@ export function ExcelUploadModal({
   uploadUrl = "/api/gumruk/yukle",
   title = "Excel Yükle",
   description = "Gümrük verilerini içeren Excel dosyasını yükleyin",
-  hideDateSelectors = false
+  hideDateSelectors = false,
+  expectedHeaders = EXPECTED_HEADERS,
+  previewColumns = DEFAULT_GUMRUK_PREVIEW_COLUMNS,
+  templateFilename = "gumruk-sablon.xlsx",
+  templateSheetName = "Gümrük",
 }: ExcelUploadModalProps) {
   const [step, setStep] = useState<"select" | "preview" | "result">("select");
   const [selectedAy, setSelectedAy] = useState<string>("");
@@ -520,12 +544,14 @@ export function ExcelUploadModal({
     setIsParsing(true);
     try {
       if (files.length === 1) {
-        const result = await parseExcelPreview(files[0]);
+        const result = await parseExcelPreview(files[0], expectedHeaders, previewColumns);
         setPreview(result);
         setMultiPreview(null);
         setStep("preview");
       } else {
-        const results = await Promise.all(files.map((f) => parseExcelPreview(f)));
+        const results = await Promise.all(
+          files.map((f) => parseExcelPreview(f, expectedHeaders, previewColumns))
+        );
         const totalRows = results.reduce((s, r) => s + r.totalRows, 0);
         const validRows = results.reduce((s, r) => s + r.validRows, 0);
         const skippedRows = results.reduce((s, r) => s + r.skippedRows, 0);
@@ -534,16 +560,21 @@ export function ExcelUploadModal({
         for (const r of results) for (const h of r.missingHeaders) missingSet.add(h);
         const allHeadersSet = new Set<string>();
         for (const r of results) for (const h of r.allHeaders) allHeadersSet.add(h);
-        const tipCounts: Record<TipKey, number> = {
-          "İthalat": 0,
-          "İhracat": 0,
-          "Transit": 0,
-          "Serbest B. Giriş": 0,
-          "Serbest B. Çıkış": 0,
-          "Diğer": 0,
-        };
-        for (const r of results) {
-          for (const k of TIP_ORDER) tipCounts[k] += r.tipCounts[k];
+        const anyTipCounts = results.some((r) => r.tipCounts !== undefined);
+        let tipCounts: Record<TipKey, number> | undefined;
+        if (anyTipCounts) {
+          tipCounts = {
+            "İthalat": 0,
+            "İhracat": 0,
+            "Transit": 0,
+            "Serbest B. Giriş": 0,
+            "Serbest B. Çıkış": 0,
+            "Diğer": 0,
+          };
+          for (const r of results) {
+            if (!r.tipCounts) continue;
+            for (const k of TIP_ORDER) tipCounts[k] += r.tipCounts[k];
+          }
         }
         const perFile = results.map((r, idx) => ({
           filename: files[idx].name,
@@ -743,11 +774,11 @@ export function ExcelUploadModal({
 
   const handleDownloadTemplate = () => {
     try {
-      const ws = XLSX.utils.aoa_to_sheet([EXPECTED_HEADERS]);
-      ws["!cols"] = EXPECTED_HEADERS.map(() => ({ wch: 18 }));
+      const ws = XLSX.utils.aoa_to_sheet([expectedHeaders]);
+      ws["!cols"] = expectedHeaders.map(() => ({ wch: 18 }));
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Gümrük");
-      XLSX.writeFile(wb, "gumruk-sablon.xlsx");
+      XLSX.utils.book_append_sheet(wb, ws, templateSheetName);
+      XLSX.writeFile(wb, templateFilename);
     } catch (e) {
       toast({
         title: "Hata",
@@ -895,22 +926,20 @@ export function ExcelUploadModal({
         {step === "select" && (
           <>
             <div className="space-y-4 py-4">
-              {uploadUrl === "/api/gumruk/yukle" && (
-                <div className="flex items-center justify-between gap-2 pb-1">
-                  <div className="text-xs text-muted-foreground">
-                    Doğru kolon başlıklarını içeren boş şablonu indirip doldurabilirsiniz.
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDownloadTemplate}
-                  >
-                    <FileDown className="w-4 h-4 mr-2" />
-                    Şablon İndir
-                  </Button>
+              <div className="flex items-center justify-between gap-2 pb-1">
+                <div className="text-xs text-muted-foreground">
+                  Doğru kolon başlıklarını içeren boş şablonu indirip doldurabilirsiniz.
                 </div>
-              )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadTemplate}
+                >
+                  <FileDown className="w-4 h-4 mr-2" />
+                  Şablon İndir
+                </Button>
+              </div>
               {!hideDateSelectors && (
                 <div className="space-y-4">
                   <div className="flex items-center space-x-2">
@@ -1140,7 +1169,7 @@ export function ExcelUploadModal({
                     <Badge variant="outline">
                       Atlanacak satır: {preview.skippedRows}
                     </Badge>
-                    {isBulk && (
+                    {isBulk && expectedHeaders.includes("FATURA TARİHİ") && (
                       <Badge variant="destructive">
                         Tarihsiz satır: {preview.datelessRows}
                       </Badge>
@@ -1215,16 +1244,16 @@ export function ExcelUploadModal({
                     </div>
                   )}
 
-                  {preview.validRows > 0 && (
+                  {preview.validRows > 0 && preview.tipCounts && (
                     <div className="text-sm">
                       <span className="font-medium mr-2">TİP dağılımı:</span>
-                      {TIP_ORDER.filter((k) => preview.tipCounts[k] > 0)
-                        .map((k) => `${k}: ${preview.tipCounts[k]}`)
+                      {TIP_ORDER.filter((k) => preview.tipCounts![k] > 0)
+                        .map((k) => `${k}: ${preview.tipCounts![k]}`)
                         .join(" · ") || "—"}
                     </div>
                   )}
 
-                  {preview.sampleRows.length > 0 && (
+                  {previewColumns.length > 0 && preview.sampleRows.length > 0 && (
                     <div className="space-y-2">
                       <div className="text-sm font-medium">
                         İlk {preview.sampleRows.length} satır önizlemesi
@@ -1233,31 +1262,36 @@ export function ExcelUploadModal({
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              <TableHead>Firma</TableHead>
-                              <TableHead>Fatura No</TableHead>
-                              <TableHead className="text-right">
-                                Mal Bedeli
-                              </TableHead>
-                              <TableHead className="text-right">
-                                KDV
-                              </TableHead>
+                              {previewColumns.map((c) => (
+                                <TableHead
+                                  key={c.label}
+                                  className={c.isNumeric ? "text-right" : undefined}
+                                >
+                                  {c.label}
+                                </TableHead>
+                              ))}
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {preview.sampleRows.map((row, idx) => (
                               <TableRow key={idx}>
-                                <TableCell>
-                                  {row.firma ? truncate(row.firma, 30) : "—"}
-                                </TableCell>
-                                <TableCell>
-                                  {row.faturaNo || "—"}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {formatNumberCell(row.malBedeli)}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {formatNumberCell(row.kdv)}
-                                </TableCell>
+                                {previewColumns.map((c) => {
+                                  const v = row[c.label];
+                                  if (c.isNumeric) {
+                                    return (
+                                      <TableCell key={c.label} className="text-right">
+                                        {formatNumberCell(v)}
+                                      </TableCell>
+                                    );
+                                  }
+                                  const s =
+                                    v === null || v === undefined ? "" : String(v);
+                                  return (
+                                    <TableCell key={c.label}>
+                                      {s ? truncate(s, 30) : "—"}
+                                    </TableCell>
+                                  );
+                                })}
                               </TableRow>
                             ))}
                           </TableBody>
@@ -1285,7 +1319,7 @@ export function ExcelUploadModal({
                     <Badge variant="outline">
                       Atlanacak satır: {multiPreview.skippedRows}
                     </Badge>
-                    {isBulk && (
+                    {isBulk && expectedHeaders.includes("FATURA TARİHİ") && (
                       <Badge variant="destructive">
                         Tarihsiz satır: {multiPreview.datelessRows}
                       </Badge>
@@ -1360,11 +1394,11 @@ export function ExcelUploadModal({
                     </div>
                   )}
 
-                  {multiPreview.validRows > 0 && (
+                  {multiPreview.validRows > 0 && multiPreview.tipCounts && (
                     <div className="text-sm">
                       <span className="font-medium mr-2">TİP dağılımı:</span>
-                      {TIP_ORDER.filter((k) => multiPreview.tipCounts[k] > 0)
-                        .map((k) => `${k}: ${multiPreview.tipCounts[k]}`)
+                      {TIP_ORDER.filter((k) => multiPreview.tipCounts![k] > 0)
+                        .map((k) => `${k}: ${multiPreview.tipCounts![k]}`)
                         .join(" · ") || "—"}
                     </div>
                   )}
