@@ -33,7 +33,7 @@ export interface IStorage {
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
-  getExistingFaturasByYillar(yillar: number[]): Promise<Map<number, Set<string>>>;
+  getExistingFaturasByAyYillar(pairs: { ay: string; yil: number }[]): Promise<Map<string, Set<string>>>;
   getAylikOzet(yil: number): Promise<{ ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
   getFirmalar(yil: number): Promise<string[]>;
   getAllUniqueFirmalar(): Promise<string[]>;
@@ -359,21 +359,33 @@ export class DatabaseStorage implements IStorage {
     return new Set(result.map(r => r.rowHash).filter((h): h is string => h !== null));
   }
 
-  async getExistingFaturasByYillar(yillar: number[]): Promise<Map<number, Set<string>>> {
-    const map = new Map<number, Set<string>>();
-    if (yillar.length === 0) return map;
+  async getExistingFaturasByAyYillar(pairs: { ay: string; yil: number }[]): Promise<Map<string, Set<string>>> {
+    const map = new Map<string, Set<string>>();
+    if (pairs.length === 0) return map;
+
+    const distinctYillar = Array.from(new Set(pairs.map(p => p.yil)));
+    const distinctAylar = Array.from(new Set(pairs.map(p => p.ay)));
 
     const rows = await db
-      .select({ yil: gumrukVerileri.yil, faturaNo: gumrukVerileri.faturaNo })
+      .select({
+        ay: gumrukVerileri.ay,
+        yil: gumrukVerileri.yil,
+        faturaNo: gumrukVerileri.faturaNo,
+      })
       .from(gumrukVerileri)
-      .where(and(inArray(gumrukVerileri.yil, yillar), isNotNull(gumrukVerileri.faturaNo)));
+      .where(and(
+        inArray(gumrukVerileri.yil, distinctYillar),
+        inArray(gumrukVerileri.ay, distinctAylar),
+        isNotNull(gumrukVerileri.faturaNo),
+      ));
 
     for (const r of rows) {
       if (!r.faturaNo) continue;
-      const key = String(r.faturaNo).trim();
-      if (!key) continue;
-      if (!map.has(r.yil)) map.set(r.yil, new Set());
-      map.get(r.yil)!.add(key);
+      const key = `${r.yil}-${r.ay}`;
+      const fatura = String(r.faturaNo).trim();
+      if (!fatura) continue;
+      if (!map.has(key)) map.set(key, new Set());
+      map.get(key)!.add(fatura);
     }
     return map;
   }

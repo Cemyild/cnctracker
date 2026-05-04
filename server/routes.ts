@@ -2312,22 +2312,24 @@ export async function registerRoutes(
         v.dosyaId = dosyaKaydi.id;
       }
 
-      // 9. Pre-insert dedup: fatura numarasına göre yıl bazlı kontrol (asıl iş kuralı)
-      // Aynı yıl içinde aynı fatura no daha önce DB'ye girmişse veya aynı dosya
-      // içinde tekrarlıyorsa o satır atlanır ve sebebi raporlanır.
-      const distinctYillar = Array.from(new Set(
-        veriler.map(v => v.yil).filter((y): y is number => typeof y === "number")
-      ));
-      const existingFaturasMap = await storage.getExistingFaturasByYillar(distinctYillar);
+      // 9. Pre-insert dedup: (ay, yıl, faturaNo) üzerinden kontrol (asıl iş kuralı).
+      // Aynı ay+yıl içinde aynı fatura no DB'de varsa veya aynı dosya içinde
+      // tekrarlıyorsa o satır atlanır ve sebebi raporlanır. Farklı ay'da aynı
+      // fatura no varsa müdahale edilmez — kullanıcı seçtiği ay'a yazılır.
+      const ayYilPairs = veriler
+        .map(v => ({ ay: v.ay, yil: v.yil }))
+        .filter((p): p is { ay: string; yil: number } => !!p.ay && typeof p.yil === "number");
+      const existingFaturasMap = await storage.getExistingFaturasByAyYillar(ayYilPairs);
 
       const yeniVeriler: typeof veriler = [];
-      const seenInBatch = new Set<string>(); // "yil:faturaNo" — aynı upload içinde tekrar koruması
+      const seenInBatch = new Set<string>(); // "yil-ay:faturaNo" — aynı upload içinde tekrar koruması
 
       for (const v of veriler) {
         const faturaNo = v.faturaNo ? String(v.faturaNo).trim() : "";
-        if (faturaNo) {
-          const key = `${v.yil}:${faturaNo}`;
-          if (seenInBatch.has(key)) {
+        if (faturaNo && v.ay && typeof v.yil === "number") {
+          const mapKey = `${v.yil}-${v.ay}`;
+          const batchKey = `${mapKey}:${faturaNo}`;
+          if (seenInBatch.has(batchKey)) {
             skippedRows.push({
               ay: v.ay,
               yil: v.yil,
@@ -2336,16 +2338,16 @@ export async function registerRoutes(
             });
             continue;
           }
-          if (existingFaturasMap.get(v.yil)?.has(faturaNo)) {
+          if (existingFaturasMap.get(mapKey)?.has(faturaNo)) {
             skippedRows.push({
               ay: v.ay,
               yil: v.yil,
               row: JSON.parse(v.rawData ?? "{}"),
-              reason: `Fatura no ${faturaNo} ${v.yil} yılında daha önce yüklenmiş`,
+              reason: `Fatura no ${faturaNo} ${v.ay} ${v.yil} dönemine daha önce yüklenmiş`,
             });
             continue;
           }
-          seenInBatch.add(key);
+          seenInBatch.add(batchKey);
         }
         yeniVeriler.push(v);
       }
