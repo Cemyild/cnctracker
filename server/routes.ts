@@ -2312,42 +2312,42 @@ export async function registerRoutes(
         v.dosyaId = dosyaKaydi.id;
       }
 
-      // 9. Pre-insert dedup: (ay, yıl, faturaNo) üzerinden kontrol (asıl iş kuralı).
-      // Aynı ay+yıl içinde aynı fatura no DB'de varsa veya aynı dosya içinde
-      // tekrarlıyorsa o satır atlanır ve sebebi raporlanır. Farklı ay'da aynı
-      // fatura no varsa müdahale edilmez — kullanıcı seçtiği ay'a yazılır.
+      // 9. Pre-insert dedup: (ay, yıl, faturaNo, siraNo) üzerinden kalem bazlı kontrol.
+      // Aynı fatura birden fazla kaleme yayılıyorsa (gümrük raporlarında sık olan
+      // multi-line invoice) her kalem ayrı saklanır. Aynı kalem (aynı sıra no ile)
+      // aynı ay+yıl'da DB'de zaten varsa veya batch içinde tekrarlıyorsa atlanır.
       const ayYilPairs = veriler
         .map(v => ({ ay: v.ay, yil: v.yil }))
         .filter((p): p is { ay: string; yil: number } => !!p.ay && typeof p.yil === "number");
-      const existingFaturasMap = await storage.getExistingFaturasByAyYillar(ayYilPairs);
+      const existingKalemSet = await storage.getExistingFaturaKalemleriByAyYillar(ayYilPairs);
 
       const yeniVeriler: typeof veriler = [];
-      const seenInBatch = new Set<string>(); // "yil-ay:faturaNo" — aynı upload içinde tekrar koruması
+      const seenInBatch = new Set<string>(); // "yil-ay:faturaNo:siraNo" — aynı upload içinde tekrar koruması
 
       for (const v of veriler) {
         const faturaNo = v.faturaNo ? String(v.faturaNo).trim() : "";
         if (faturaNo && v.ay && typeof v.yil === "number") {
-          const mapKey = `${v.yil}-${v.ay}`;
-          const batchKey = `${mapKey}:${faturaNo}`;
-          if (seenInBatch.has(batchKey)) {
+          const sira = v.siraNo ? String(v.siraNo).trim() : "";
+          const key = `${v.yil}-${v.ay}:${faturaNo}:${sira}`;
+          if (seenInBatch.has(key)) {
             skippedRows.push({
               ay: v.ay,
               yil: v.yil,
               row: JSON.parse(v.rawData ?? "{}"),
-              reason: `Aynı dosyada mükerrer fatura no (${faturaNo})`,
+              reason: `Aynı dosyada mükerrer kalem (fatura ${faturaNo}${sira ? `, sıra ${sira}` : ""})`,
             });
             continue;
           }
-          if (existingFaturasMap.get(mapKey)?.has(faturaNo)) {
+          if (existingKalemSet.has(key)) {
             skippedRows.push({
               ay: v.ay,
               yil: v.yil,
               row: JSON.parse(v.rawData ?? "{}"),
-              reason: `Fatura no ${faturaNo} ${v.ay} ${v.yil} dönemine daha önce yüklenmiş`,
+              reason: `Bu kalem (fatura ${faturaNo}${sira ? `, sıra ${sira}` : ""}) ${v.ay} ${v.yil} dönemine daha önce yüklenmiş`,
             });
             continue;
           }
-          seenInBatch.add(batchKey);
+          seenInBatch.add(key);
         }
         yeniVeriler.push(v);
       }
