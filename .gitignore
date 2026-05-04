@@ -6,3 +6,8 @@ vite.config.ts.*
 *.tar.gz
 .env
 .worktrees/
+
+# Local-only ofis evrakları (repo ile alakasız ISO 9001 Word/Excel/PDF dosyaları)
+ISO 9001/
+# Word/Excel açık dosya lock'ları
+~$*
