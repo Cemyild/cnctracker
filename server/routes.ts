@@ -101,10 +101,40 @@ function createRowHash(row: any[]): string {
 // Geçerli ay değerleri
 const gecerliAylar = ["ocak", "subat", "mart", "nisan", "mayis", "haziran", "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"] as const;
 
+// FATURA TARİHİ alanından ay/yıl çıkar — Excel serial, YYYY-MM-DD veya dd.mm.yyyy / dd/mm/yyyy
+function tarihiAyYilCikar(raw: any): { ay: string; yil: number } | null {
+  if (raw == null || raw === "") return null;
+  // Excel serial number
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    const parsed = (XLSX as any).SSF?.parse_date_code?.(raw);
+    if (parsed && parsed.y && parsed.m) return { ay: gecerliAylar[parsed.m - 1], yil: parsed.y };
+    return null;
+  }
+  const s = String(raw).trim();
+  // YYYY-MM-DD
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    const yy = Number(m[1]), mm = Number(m[2]);
+    if (mm >= 1 && mm <= 12) return { ay: gecerliAylar[mm - 1], yil: yy };
+  }
+  // dd.mm.yyyy or dd/mm/yyyy
+  m = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+  if (m) {
+    const mm = Number(m[2]), yy = Number(m[3]);
+    if (mm >= 1 && mm <= 12) return { ay: gecerliAylar[mm - 1], yil: yy };
+  }
+  return null;
+}
+
 // Upload parametreleri için validation schema
 const uploadParamsSchema = z.object({
-  ay: z.enum(gecerliAylar),
-  yil: z.string().regex(/^\d{4}$/).transform(Number),
+  ay: z.enum(gecerliAylar).optional(),
+  yil: z.string().regex(/^\d{4}$/).transform(Number).optional(),
+  bulk: z.union([z.literal("true"), z.literal("false"), z.boolean()]).optional(),
+  force: z.union([z.literal("true"), z.literal("false"), z.boolean()]).optional(),
+  headerMapping: z.string().optional(),
+}).refine(d => (d.bulk === true || d.bulk === "true") || (d.ay && d.yil !== undefined), {
+  message: "Bulk modunda değilse ay ve yıl zorunlu",
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -1996,6 +2026,32 @@ export async function registerRoutes(
   });
 
 
+  // Yükleme geçmişi (Upload history)
+  app.get("/api/gumruk/dosyalar", async (req, res) => {
+    try {
+      const yilParam = req.query.yil ? Number(req.query.yil) : undefined;
+      if (yilParam !== undefined && (!Number.isFinite(yilParam) || yilParam < 2000 || yilParam > 2100)) {
+        return res.status(400).json({ error: "Geçersiz yıl" });
+      }
+      const rows = await storage.listGumrukDosyalar(yilParam);
+      res.json(rows);
+    } catch (err) {
+      console.error("Dosya listesi hatası:", err);
+      res.status(500).json({ error: "Liste alınamadı" });
+    }
+  });
+
+  app.delete("/api/gumruk/dosyalar/:id", async (req, res) => {
+    try {
+      const result = await storage.deleteGumrukDosyaWithVerileri(req.params.id);
+      if (!result) return res.status(404).json({ error: "Bulunamadı" });
+      res.json({ success: true, ...result });
+    } catch (err) {
+      console.error("Dosya silme hatası:", err);
+      res.status(500).json({ error: "Silinemedi" });
+    }
+  });
+
   // Enhanced Excel Upload (Gümrük Sayfası İçin)
   app.post("/api/gumruk/yukle", upload.single("excel"), async (req, res) => {
     try {
@@ -2003,55 +2059,79 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Dosya yüklenmedi" });
       }
 
-      // Parametreleri doğrula
+      // 1. Parametreleri doğrula
       const parseResult = uploadParamsSchema.safeParse(req.body);
       if (!parseResult.success) {
         return res.status(400).json({ error: "Geçersiz ay veya yıl değeri" });
       }
-      const { ay, yil } = parseResult.data;
+      const { ay, yil, bulk, force, headerMapping: headerMappingRaw } = parseResult.data;
+      const isBulk = bulk === true || bulk === "true";
+      const isForce = force === true || force === "true";
 
-      // 1. FILE ARCHIVING
-      // Klasör yapısını oluştur: uploads/gumruk/YIL/AY/
-      const fs = await import("fs");
-      const path = await import("path");
-      
-      const uploadDir = path.join(process.cwd(), "uploads", "gumruk", String(yil), ay);
-      await fs.promises.mkdir(uploadDir, { recursive: true });
+      // 1a. Header mapping (canonical_target -> source_header_in_excel)
+      let mapping: Record<string, string> = {};
+      if (headerMappingRaw) {
+        try {
+          const parsed = JSON.parse(headerMappingRaw);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            for (const [k, v] of Object.entries(parsed)) {
+              if (typeof k === "string" && typeof v === "string" && v) {
+                mapping[k] = v;
+              }
+            }
+          }
+        } catch {
+          return res.status(400).json({ error: "headerMapping JSON çözümlenemedi" });
+        }
+      }
+      const hasMapping = Object.keys(mapping).length > 0;
 
-      const timestamp = new Date().getTime();
-      const safeFilename = req.file.originalname.replace(/[^a-z0-9.]/gi, '_');
-      const filename = `${timestamp}_${safeFilename}`;
-      const filepath = path.join(uploadDir, filename);
+      const remapRow = (row: any, mapping: Record<string, string>): any => {
+        if (!mapping || Object.keys(mapping).length === 0) return row;
+        const out: any = { ...row };
+        for (const [target, source] of Object.entries(mapping)) {
+          if (source && row[source] !== undefined) {
+            out[target] = row[source];
+          }
+        }
+        return out;
+      };
 
-      // Dosyayı diske yaz
-      await fs.promises.writeFile(filepath, req.file.buffer);
-
-      // Dosyayı veritabanına kaydet
-      const md5Hash = createHash("md5").update(req.file.buffer).digest("hex");
-      
-      const dosyaKaydi = await storage.createGumrukDosya({
-        filename: req.file.originalname,
-        filepath: filepath,
-        sizeBytes: req.file.size,
-        recordCount: 0, // Güncellenecek
-        md5Hash: md5Hash
-      });
-
-      // 2. DATA PARSING
+      // 2. Excel'i parse et (henüz diske yazma yok)
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(sheet) as any[]; // Row objects
+      const allSheetNames = workbook.SheetNames.filter(
+        (name) => !name.startsWith("~$") && !name.startsWith("_xlnm")
+      );
+      if (allSheetNames.length === 0) {
+        return res.status(400).json({ error: "Excel dosyasında okunabilir sayfa bulunamadı" });
+      }
+
+      type RowWithSheet = { row: any; sheetName: string };
+      const data: RowWithSheet[] = [];
+      for (const name of allSheetNames) {
+        const sheet = workbook.Sheets[name];
+        if (!sheet) continue;
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: null }) as any[];
+        for (const row of rows) data.push({ row, sheetName: name });
+      }
 
       if (data.length === 0) {
         return res.status(400).json({ error: "Excel dosyası boş veya geçersiz" });
       }
 
+      // 3. Satırları işle ve veriler[] dizisini oluştur
       const veriler: InsertGumrukVerisi[] = [];
+      const skippedRows: { ay: string | null; yil: number | null; row: any; reason: string }[] = [];
+      let tarihsiz = 0;
 
-      for (const row of data) {
+      for (const { row, sheetName } of data) {
+         const resolvedRow = hasMapping ? remapRow(row, mapping) : row;
+
          // Skip empty-ish rows (must have basics)
-         if (!row["FİRMA ÜNVAN"] && !row["FATURA NO"]) continue;
+         if (!resolvedRow["FİRMA ÜNVAN"] && !resolvedRow["FATURA NO"]) {
+           skippedRows.push({ ay: isBulk ? null : (ay as string), yil: isBulk ? null : (yil as number), row: { ...resolvedRow, _sheet: sheetName }, reason: "Boş satır" });
+           continue;
+         }
 
          const parseNumber = (val: any): string | null => {
            if (val === undefined || val === null || val === "") return null;
@@ -2068,12 +2148,29 @@ export async function registerRoutes(
            return isNaN(num) ? null : num.toFixed(2);
          };
 
-         // Row hash - using object values
-         const rowHash = createRowHash(Object.values(row));
-         
+         // Row hash - using object values (resolved so identical logical records hash the same)
+         const rowHash = createRowHash(Object.values(resolvedRow));
+
+         // Bulk modunda ay/yıl satırın FATURA TARİHİ alanından çıkarılır
+         let satirAy: string;
+         let satirYil: number;
+         if (isBulk) {
+           const parsed = tarihiAyYilCikar(resolvedRow["FATURA TARİHİ"]);
+           if (!parsed) {
+             skippedRows.push({ ay: null, yil: null, row: { ...resolvedRow, _sheet: sheetName }, reason: "Tarihsiz" });
+             tarihsiz++;
+             continue;
+           }
+           satirAy = parsed.ay;
+           satirYil = parsed.yil;
+         } else {
+           // Non-bulk mode: ay/yıl body'den gelir (refine garantili)
+           satirAy = ay as string;
+           satirYil = yil as number;
+         }
 
          // Tip Mapping
-         let tipRaw = row["TİP"] ? String(row["TİP"]).trim() : "Diğer";
+         let tipRaw = resolvedRow["TİP"] ? String(resolvedRow["TİP"]).trim() : "Diğer";
          let tip = "Diğer";
          const tr = tipRaw.toUpperCase();
          if (tr === "T" || tr === "İTHALAT") tip = "İthalat";
@@ -2083,21 +2180,21 @@ export async function registerRoutes(
          else if (tr === "B") tip = "Serbest B. Çıkış";
          else tip = "Diğer";
 
-         const g = (key: string) => row[key] ? String(row[key]).trim() : null;
+         const g = (key: string) => resolvedRow[key] ? String(resolvedRow[key]).trim() : null;
 
          // Serialize FULL row data for archival
-         const rawData = JSON.stringify(row);
+         const rawData = JSON.stringify({ ...resolvedRow, _sheet: sheetName });
 
          const veri: InsertGumrukVerisi = {
-           ay,
-           yil,
-           firmaUnvan: row["FİRMA ÜNVAN"],
-           faturaNo: row["FATURA NO"],
-           malBedeli: parseNumber(row["MAL BEDELİ"]),
-           topKdvTutar: parseNumber(row["TOP KDV TUTAR"]),
-           topFaturaTutar: parseNumber(row["TOP FATURA TUTAR"]),
-           topIskonto: parseNumber(row["TOP İSKONTO"]),
-           
+           ay: satirAy,
+           yil: satirYil,
+           firmaUnvan: resolvedRow["FİRMA ÜNVAN"],
+           faturaNo: resolvedRow["FATURA NO"],
+           malBedeli: parseNumber(resolvedRow["MAL BEDELİ"]),
+           topKdvTutar: parseNumber(resolvedRow["TOP KDV TUTAR"]),
+           topFaturaTutar: parseNumber(resolvedRow["TOP FATURA TUTAR"]),
+           topIskonto: parseNumber(resolvedRow["TOP İSKONTO"]),
+
            // Mapped fields
            tip,
            dosyaNo: g("DOSYA NO"),
@@ -2110,7 +2207,7 @@ export async function registerRoutes(
            dovizKiymeti: g("DOVİZ KIYMETİ"),
            doviz: g("DOVİZ"),
            girisElemani: g("GİRİŞ ELEMANI"),
-           
+
            // New Enhanced Fields
            firmaNo: g("FİRMA NO"),
            firmaOzellik: g("FİRMA ÖZELLİK"),
@@ -2123,7 +2220,7 @@ export async function registerRoutes(
            faturaKesimTarihi: g("FATURA KESİM TARİHİ"),
            valorTarihi: g("VALÖR TARİHİ"),
            mensei: g("MENŞEİ"),
-           mm: g("M.M"), 
+           mm: g("M.M"),
            ydFirma: g("Y.D FİRMA"),
            kullanici: g("KULLANICI"),
            araKonsNo: g("ARA KONS. NO"),
@@ -2146,16 +2243,16 @@ export async function registerRoutes(
            kalemSayisi: g("KALEM SAYISI"),
 
            // Numeric Fields (Enhanced)
-           cifKiymet: parseNumber(row["CİF KIYMET"]),
-           istKiymet: parseNumber(row["İST. KIYMET"]),
-           kur: parseNumber(row["KUR"]),
-           
+           cifKiymet: parseNumber(resolvedRow["CİF KIYMET"]),
+           istKiymet: parseNumber(resolvedRow["İST. KIYMET"]),
+           kur: parseNumber(resolvedRow["KUR"]),
+
            // Raw Data Vault
            rawData: rawData,
-           dosyaId: dosyaKaydi.id, // Link to file
+           dosyaId: undefined, // Aşağıda dosya kaydı oluşturulduktan sonra set edilecek
            rowHash
          };
-         
+
          veriler.push(veri);
       }
 
@@ -2163,33 +2260,94 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Geçerli veri bulunamadı" });
       }
 
-      // Mevcut Fatura Numaralarını al (Daha güvenilir duplicate kontrolü için)
-      const existingFaturas = await storage.getExistingFaturas(ay, yil);
+      // 4. Dosya hash'ini hesapla
+      const md5Hash = createHash("md5").update(req.file.buffer).digest("hex");
 
-      // Sadece yeni satırları filtrele (Fatura numarası eşleşmeyenleri al)
-      const yeniVeriler = veriler.filter(v => {
-        if (!v.faturaNo) return true; // Fatura numarası yoksa ekle (güvenli taraf)
-        return !existingFaturas.has(v.faturaNo);
-      });
-
-      if (yeniVeriler.length === 0) {
-        return res.json({
-          success: true,
-          message: "Tüm veriler zaten mevcut, yeni kayıt eklenmedi",
-          eklenen: 0,
-          atlanan: veriler.length,
-          toplam: veriler.length
-        });
+      // 4a. Mükerrer dosya kontrolü (force=true ise atla)
+      if (!isForce) {
+        const existing = await storage.findGumrukDosyaByMd5(md5Hash);
+        if (existing) {
+          return res.status(409).json({
+            duplicate: true,
+            existing: {
+              id: existing.id,
+              filename: existing.filename,
+              uploadDate: existing.uploadDate,
+              recordCount: existing.recordCount,
+            },
+          });
+        }
       }
 
-      const eklenenVeriler = await storage.insertGumrukVerileri(yeniVeriler);
+      // 5. Arşiv klasörünü belirle
+      // - non-bulk: uploads/gumruk/{yil}/{ay}/
+      // - bulk: uploads/gumruk/{ilk_geçerli_satırın_yılı}/all/
+      const fs = await import("fs");
+      const path = await import("path");
+
+      const archiveYil = isBulk ? veriler[0].yil : (yil as number);
+      const archiveAy = isBulk ? "all" : (ay as string);
+      const archiveDir = path.join(process.cwd(), "uploads", "gumruk", String(archiveYil), archiveAy);
+      await fs.promises.mkdir(archiveDir, { recursive: true });
+
+      const timestamp = new Date().getTime();
+      const safeFilename = req.file.originalname.replace(/[^a-z0-9.]/gi, '_');
+      const filename = `${timestamp}_${safeFilename}`;
+      const filepath = path.join(archiveDir, filename);
+
+      // 6. Dosyayı diske yaz
+      await fs.promises.writeFile(filepath, req.file.buffer);
+
+      // 7. Dosya kaydını oluştur (recordCount sonra güncellenecek)
+      const dosyaKaydi = await storage.createGumrukDosya({
+        filename: req.file.originalname,
+        filepath: filepath,
+        sizeBytes: req.file.size,
+        recordCount: 0,
+        md5Hash: md5Hash
+      });
+
+      // 8. dosyaId'yi tüm satırlara ata
+      for (const v of veriler) {
+        v.dosyaId = dosyaKaydi.id;
+      }
+
+      // 9. Insert (ON CONFLICT DO NOTHING — (ay, yil, rowHash) çakışanları sessizce atlar)
+      const inserted = await storage.insertGumrukVerileri(veriler);
+      const eklenen = inserted.length;
+      const atlanan = veriler.length - eklenen;
+
+      // 9a. Mükerrer (DB'de zaten olan) satırları skippedRows'a ekle
+      const insertedHashes = new Set(inserted.map(r => r.rowHash));
+      for (const v of veriler) {
+        if (!insertedHashes.has(v.rowHash)) {
+          skippedRows.push({
+            ay: v.ay,
+            yil: v.yil,
+            row: JSON.parse(v.rawData ?? "{}"),
+            reason: "Daha önce eklenmiş (mükerrer)",
+          });
+        }
+      }
+
+      // 10. Dosya kaydının recordCount'unu güncelle
+      await storage.updateGumrukDosyaRecordCount(dosyaKaydi.id, eklenen);
+
+      // 11. Yanıtı oluştur (atlanan satırları en fazla 500 ile sınırla)
+      const skippedRowsSample = skippedRows.slice(0, 500);
 
       res.json({
         success: true,
-        message: `${eklenenVeriler.length} yeni kayıt eklendi${veriler.length - yeniVeriler.length > 0 ? ` (${veriler.length - yeniVeriler.length} mevcut kayıt atlandı)` : ""} `,
-        eklenen: eklenenVeriler.length,
-        atlanan: veriler.length - yeniVeriler.length,
-        toplam: veriler.length
+        message: `${eklenen} yeni kayıt eklendi${atlanan > 0 ? ` (${atlanan} mevcut kayıt atlandı)` : ""}${tarihsiz > 0 ? ` (${tarihsiz} tarihsiz satır atlandı)` : ""}`,
+        eklenen,
+        atlanan,
+        tarihsiz,
+        toplam: data.length,
+        skippedCount: skippedRows.length,
+        skippedRows: skippedRowsSample,
+        sheetCount: allSheetNames.length,
+        sheetNames: allSheetNames,
+        headerMapping: hasMapping ? mapping : undefined,
       });
     } catch (error) {
       console.error("Excel yükleme hatası:", error);

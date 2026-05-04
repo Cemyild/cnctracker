@@ -1,24 +1,27 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { type Calisan, type Gider, type GumrukVerisi, subeler } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  TrendingUp, 
-  FileSpreadsheet, 
-  Users, 
-  Upload, 
-  Loader2, 
-  BarChart3, 
-  Building2, 
-  ArrowUpDown, 
-  ArrowUp, 
+import {
+  TrendingUp,
+  FileSpreadsheet,
+  Users,
+  Upload,
+  Loader2,
+  BarChart3,
+  Building2,
+  ArrowUpDown,
+  ArrowUp,
   ArrowDown,
   Bot,
   AlertTriangle,
   Lightbulb,
   TrendingDown,
   Pencil,
-  Target
+  Target,
+  History,
+  Trash2
 } from "lucide-react";
 import { GiderEditModal } from "@/components/GiderEditModal";
 import { Badge } from "@/components/ui/badge";
@@ -282,12 +285,32 @@ type Arac = {
                       queryKey: [`/api/gumruk/ozet-summary/${selectedYil}`],
   });
 
+                    // Yükleme geçmişi (Upload history)
+                    const { data: dosyalar, refetch: refetchDosyalar } = useQuery<{
+                      id: string;
+                      filename: string;
+                      uploadDate: string | null;
+                      sizeBytes: number | null;
+                      md5Hash: string | null;
+                      kayitSayisi: number;
+                      yillar: number[];
+                      aylar: string[];
+                    }[]>({
+                      queryKey: ["/api/gumruk/dosyalar", selectedYil],
+                      queryFn: async () => {
+                        const r = await fetch(`/api/gumruk/dosyalar?yil=${selectedYil}`, { credentials: "include" });
+                        if (!r.ok) throw new Error(`${r.status}`);
+                        return r.json();
+                      },
+                    });
+
   const handleUploadSuccess = () => {
                       refetchAylar();
                     refetchOzet();
                     if (selectedAy && selectedYil) {
                       refetchVeriler();
     }
+                    refetchDosyalar();
   };
 
   const handleGiderUploadSuccess = () => {
@@ -1202,6 +1225,103 @@ type Arac = {
                                     <FileSpreadsheet className="w-12 h-12 mb-2" />
                                     <p>{getAyLabel(selectedAy)} {selectedYil} için kayıtlı veri bulunmuyor</p>
                                   </div>
+                                )}
+                              </CardContent>
+                            </Card>
+
+                            {/* Yükleme Geçmişi */}
+                            <Card>
+                              <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                  <History className="w-5 h-5" />
+                                  Yükleme Geçmişi
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                {dosyalar?.length === 0 ? (
+                                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                                    <History className="w-12 h-12 mb-2" />
+                                    <p>Henüz yükleme yok</p>
+                                  </div>
+                                ) : (
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Tarih</TableHead>
+                                        <TableHead>Dosya Adı</TableHead>
+                                        <TableHead>Dönem</TableHead>
+                                        <TableHead className="text-right">Boyut</TableHead>
+                                        <TableHead className="text-right">Kayıt</TableHead>
+                                        <TableHead className="text-right">İşlem</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {dosyalar?.map((d) => {
+                                        const tarih = d.uploadDate
+                                          ? (() => {
+                                              const dt = new Date(d.uploadDate);
+                                              const dd = String(dt.getDate()).padStart(2, "0");
+                                              const mm = String(dt.getMonth() + 1).padStart(2, "0");
+                                              const yyyy = dt.getFullYear();
+                                              const hh = String(dt.getHours()).padStart(2, "0");
+                                              const mi = String(dt.getMinutes()).padStart(2, "0");
+                                              return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+                                            })()
+                                          : "-";
+                                        const fname = d.filename.length > 50
+                                          ? d.filename.slice(0, 50) + "..."
+                                          : d.filename;
+                                        const tekYil = d.yillar.length === 1 ? d.yillar[0] : null;
+                                        const ayLabels = d.aylar.map((a) => getAyLabel(a)).join(", ");
+                                        const donem = d.aylar.length === 0
+                                          ? "-"
+                                          : tekYil
+                                            ? `${ayLabels} ${tekYil}`
+                                            : "Çoklu";
+                                        const boyut = d.sizeBytes == null
+                                          ? "-"
+                                          : d.sizeBytes < 1024 * 1024
+                                            ? `${(d.sizeBytes / 1024).toFixed(0)} KB`
+                                            : `${(d.sizeBytes / 1024 / 1024).toFixed(2)} MB`;
+                                        const onGeriAl = async () => {
+                                          if (!window.confirm(`Bu yükleme silindiğinde ${d.kayitSayisi} satır gümrük kaydı da silinecek. Emin misiniz?`)) {
+                                            return;
+                                          }
+                                          const r = await fetch(`/api/gumruk/dosyalar/${d.id}`, { method: "DELETE", credentials: "include" });
+                                          if (!r.ok) {
+                                            toast({ title: "Hata", description: "Silinemedi", variant: "destructive" });
+                                            return;
+                                          }
+                                          toast({ title: "Başarılı", description: "Yükleme geri alındı" });
+                                          refetchDosyalar();
+                                          refetchOzet();
+                                          refetchAylar();
+                                          queryClient.invalidateQueries({ queryKey: [`/api/gumruk/ozet-summary/${selectedYil}`] });
+                                        };
+                                        return (
+                                          <TableRow key={d.id} data-testid={`row-dosya-${d.id}`}>
+                                            <TableCell>{tarih}</TableCell>
+                                            <TableCell title={d.filename}>{fname}</TableCell>
+                                            <TableCell>{donem}</TableCell>
+                                            <TableCell className="text-right">{boyut}</TableCell>
+                                            <TableCell className="text-right">{d.kayitSayisi}</TableCell>
+                                            <TableCell className="text-right">
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="text-destructive hover:text-destructive"
+                                                onClick={onGeriAl}
+                                                data-testid={`button-geri-al-${d.id}`}
+                                              >
+                                                <Trash2 className="w-4 h-4 mr-1" />
+                                                Geri Al
+                                              </Button>
+                                            </TableCell>
+                                          </TableRow>
+                                        );
+                                      })}
+                                    </TableBody>
+                                  </Table>
                                 )}
                               </CardContent>
                             </Card>

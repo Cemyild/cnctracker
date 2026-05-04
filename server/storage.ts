@@ -14,8 +14,9 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   bakimVarliklar, type BakimVarlik, type InsertBakimVarlik,
   bakimKayitlari, type BakimKayit, type InsertBakimKayit } from "@shared/schema";
 import { randomUUID } from "crypto";
+import * as fs from "fs/promises";
 import { db } from "./db";
-import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -26,7 +27,9 @@ export interface IStorage {
   getGumrukVerileri(ay: string, yil: number): Promise<GumrukVerisi[]>
   getAllGumrukVerileri(): Promise<GumrukVerisi[]>;
   insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]>;
+  updateGumrukDosyaRecordCount(id: string, count: number): Promise<void>;
   createGumrukDosya(dosya: InsertGumrukDosya): Promise<GumrukDosya>;
+  findGumrukDosyaByMd5(hash: string): Promise<GumrukDosya | null>;
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
@@ -259,6 +262,19 @@ export interface IStorage {
   getEgitimForDegerlendirme(egitimId: string): Promise<{ egitim: Egitim; sorular: EgitimDegerlendirmeSoru[] } | null>;
   createEgitimDegerlendirme(data: { egitimId: string; katilimciAdi: string; cevaplar: { soruId: string; puan?: number; cevap?: string }[] }): Promise<void>;
   getEgitimDegerlendirmeleri(egitimId: string): Promise<(EgitimDegerlendirme & { cevaplar: EgitimDegerlendirmeCevap[] })[]>;
+
+  // Yükleme geçmişi (Upload history)
+  listGumrukDosyalar(yil?: number): Promise<{
+    id: string;
+    filename: string;
+    uploadDate: Date | null;
+    sizeBytes: number | null;
+    md5Hash: string | null;
+    kayitSayisi: number;
+    yillar: number[];
+    aylar: string[];
+  }[]>;
+  deleteGumrukDosyaWithVerileri(id: string): Promise<{ deletedRows: number; filename: string } | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -291,20 +307,41 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
+  async findGumrukDosyaByMd5(hash: string): Promise<GumrukDosya | null> {
+    const rows = await db
+      .select()
+      .from(gumrukDosyalar)
+      .where(eq(gumrukDosyalar.md5Hash, hash))
+      .orderBy(desc(gumrukDosyalar.uploadDate))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
   async insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]> {
     if (veriler.length === 0) return [];
 
     // Verileri 100'lük parçalar halinde ekle (PostgreSQL parametre limiti nedeniyle)
+    // ON CONFLICT DO NOTHING ile (ay, yil, rowHash) çakışmalarını sessizce atla
     const BATCH_SIZE = 100;
     const results: GumrukVerisi[] = [];
 
     for (let i = 0; i < veriler.length; i += BATCH_SIZE) {
       const batch = veriler.slice(i, i + BATCH_SIZE);
-      const inserted = await db.insert(gumrukVerileri).values(batch).returning();
+      const inserted = await db
+        .insert(gumrukVerileri)
+        .values(batch)
+        .onConflictDoNothing({
+          target: [gumrukVerileri.ay, gumrukVerileri.yil, gumrukVerileri.rowHash],
+        })
+        .returning();
       results.push(...inserted);
     }
 
     return results;
+  }
+
+  async updateGumrukDosyaRecordCount(id: string, count: number): Promise<void> {
+    await db.update(gumrukDosyalar).set({ recordCount: count }).where(eq(gumrukDosyalar.id, id));
   }
 
   async deleteGumrukVerileri(ay: string, yil: number): Promise<void> {
@@ -2274,6 +2311,74 @@ export class DatabaseStorage implements IStorage {
       ...d,
       cevaplar: cevaplar.filter(c => c.degerlendirmeId === d.id),
     }));
+  }
+
+  // Yükleme geçmişi (Upload history)
+  async listGumrukDosyalar(yil?: number): Promise<{
+    id: string;
+    filename: string;
+    uploadDate: Date | null;
+    sizeBytes: number | null;
+    md5Hash: string | null;
+    kayitSayisi: number;
+    yillar: number[];
+    aylar: string[];
+  }[]> {
+    const rows = await db
+      .select({
+        id: gumrukDosyalar.id,
+        filename: gumrukDosyalar.filename,
+        uploadDate: gumrukDosyalar.uploadDate,
+        sizeBytes: gumrukDosyalar.sizeBytes,
+        md5Hash: gumrukDosyalar.md5Hash,
+        kayitSayisi: sql<number>`count(${gumrukVerileri.id})`,
+        yillar: sql<number[]>`coalesce(array_agg(DISTINCT ${gumrukVerileri.yil}) FILTER (WHERE ${gumrukVerileri.yil} IS NOT NULL), ARRAY[]::integer[])`,
+        aylar: sql<string[]>`coalesce(array_agg(DISTINCT ${gumrukVerileri.ay}) FILTER (WHERE ${gumrukVerileri.ay} IS NOT NULL), ARRAY[]::text[])`,
+      })
+      .from(gumrukDosyalar)
+      .leftJoin(gumrukVerileri, eq(gumrukVerileri.dosyaId, gumrukDosyalar.id))
+      .groupBy(gumrukDosyalar.id)
+      .orderBy(desc(gumrukDosyalar.uploadDate));
+
+    const normalized = rows.map(r => ({
+      id: r.id,
+      filename: r.filename,
+      uploadDate: r.uploadDate,
+      sizeBytes: r.sizeBytes,
+      md5Hash: r.md5Hash,
+      kayitSayisi: Number(r.kayitSayisi ?? 0),
+      yillar: (r.yillar ?? []).map((y: any) => Number(y)),
+      aylar: (r.aylar ?? []) as string[],
+    }));
+
+    if (yil !== undefined) {
+      return normalized.filter(r => r.yillar.includes(yil));
+    }
+
+    return normalized;
+  }
+
+  async deleteGumrukDosyaWithVerileri(id: string): Promise<{ deletedRows: number; filename: string } | null> {
+    const [dosya] = await db.select().from(gumrukDosyalar).where(eq(gumrukDosyalar.id, id));
+    if (!dosya) return null;
+
+    const deleted = await db.delete(gumrukVerileri)
+      .where(eq(gumrukVerileri.dosyaId, id))
+      .returning({ id: gumrukVerileri.id });
+
+    await db.delete(gumrukDosyalar).where(eq(gumrukDosyalar.id, id));
+
+    if (dosya.filepath) {
+      try {
+        await fs.unlink(dosya.filepath);
+      } catch (err: any) {
+        if (err && err.code !== "ENOENT") {
+          console.error("Dosya silme hatası (filesystem):", err);
+        }
+      }
+    }
+
+    return { deletedRows: deleted.length, filename: dosya.filename };
   }
 }
 
