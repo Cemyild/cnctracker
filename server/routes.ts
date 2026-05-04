@@ -2312,21 +2312,62 @@ export async function registerRoutes(
         v.dosyaId = dosyaKaydi.id;
       }
 
-      // 9. Insert (ON CONFLICT DO NOTHING — (ay, yil, rowHash) çakışanları sessizce atlar)
-      const inserted = await storage.insertGumrukVerileri(veriler);
+      // 9. Pre-insert dedup: fatura numarasına göre yıl bazlı kontrol (asıl iş kuralı)
+      // Aynı yıl içinde aynı fatura no daha önce DB'ye girmişse veya aynı dosya
+      // içinde tekrarlıyorsa o satır atlanır ve sebebi raporlanır.
+      const distinctYillar = Array.from(new Set(
+        veriler.map(v => v.yil).filter((y): y is number => typeof y === "number")
+      ));
+      const existingFaturasMap = await storage.getExistingFaturasByYillar(distinctYillar);
+
+      const yeniVeriler: typeof veriler = [];
+      const seenInBatch = new Set<string>(); // "yil:faturaNo" — aynı upload içinde tekrar koruması
+
+      for (const v of veriler) {
+        const faturaNo = v.faturaNo ? String(v.faturaNo).trim() : "";
+        if (faturaNo) {
+          const key = `${v.yil}:${faturaNo}`;
+          if (seenInBatch.has(key)) {
+            skippedRows.push({
+              ay: v.ay,
+              yil: v.yil,
+              row: JSON.parse(v.rawData ?? "{}"),
+              reason: `Aynı dosyada mükerrer fatura no (${faturaNo})`,
+            });
+            continue;
+          }
+          if (existingFaturasMap.get(v.yil)?.has(faturaNo)) {
+            skippedRows.push({
+              ay: v.ay,
+              yil: v.yil,
+              row: JSON.parse(v.rawData ?? "{}"),
+              reason: `Fatura no ${faturaNo} ${v.yil} yılında daha önce yüklenmiş`,
+            });
+            continue;
+          }
+          seenInBatch.add(key);
+        }
+        yeniVeriler.push(v);
+      }
+
+      // 10. Insert (ON CONFLICT DO NOTHING — (ay, yil, rowHash) ikincil savunma)
+      const inserted = await storage.insertGumrukVerileri(yeniVeriler);
       const eklenen = inserted.length;
       const atlanan = veriler.length - eklenen;
 
-      // 9a. Mükerrer (DB'de zaten olan) satırları skippedRows'a ekle
-      const insertedHashes = new Set(inserted.map(r => r.rowHash));
-      for (const v of veriler) {
-        if (!insertedHashes.has(v.rowHash)) {
-          skippedRows.push({
-            ay: v.ay,
-            yil: v.yil,
-            row: JSON.parse(v.rawData ?? "{}"),
-            reason: "Daha önce eklenmiş (mükerrer)",
-          });
+      // 10a. ON CONFLICT ile sessizce atlananları (rowHash çakışması) da raporla —
+      // genelde faturaNo'su olmayan satırlar için ikinci savunma devreye girer.
+      if (yeniVeriler.length > inserted.length) {
+        const insertedHashes = new Set(inserted.map(r => r.rowHash));
+        for (const v of yeniVeriler) {
+          if (!insertedHashes.has(v.rowHash)) {
+            skippedRows.push({
+              ay: v.ay,
+              yil: v.yil,
+              row: JSON.parse(v.rawData ?? "{}"),
+              reason: "Aynı içerikli satır daha önce yüklenmiş (rowHash)",
+            });
+          }
         }
       }
 

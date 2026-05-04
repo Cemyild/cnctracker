@@ -33,6 +33,7 @@ export interface IStorage {
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
+  getExistingFaturasByYillar(yillar: number[]): Promise<Map<number, Set<string>>>;
   getAylikOzet(yil: number): Promise<{ ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
   getFirmalar(yil: number): Promise<string[]>;
   getAllUniqueFirmalar(): Promise<string[]>;
@@ -356,6 +357,25 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(gumrukVerileri.ay, ay), eq(gumrukVerileri.yil, yil)));
 
     return new Set(result.map(r => r.rowHash).filter((h): h is string => h !== null));
+  }
+
+  async getExistingFaturasByYillar(yillar: number[]): Promise<Map<number, Set<string>>> {
+    const map = new Map<number, Set<string>>();
+    if (yillar.length === 0) return map;
+
+    const rows = await db
+      .select({ yil: gumrukVerileri.yil, faturaNo: gumrukVerileri.faturaNo })
+      .from(gumrukVerileri)
+      .where(and(inArray(gumrukVerileri.yil, yillar), isNotNull(gumrukVerileri.faturaNo)));
+
+    for (const r of rows) {
+      if (!r.faturaNo) continue;
+      const key = String(r.faturaNo).trim();
+      if (!key) continue;
+      if (!map.has(r.yil)) map.set(r.yil, new Set());
+      map.get(r.yil)!.add(key);
+    }
+    return map;
   }
 
   async getExistingFaturas(ay: string, yil: number): Promise<Set<string>> {
