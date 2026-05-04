@@ -89,7 +89,7 @@ import {
 
 
 import { PDFParse } from "pdf-parse";
-import { getTCMBExchangeRate } from "./currency"; // Helper added
+import { getTCMBExchangeRate, normalizeCurrencyCode } from "./currency"; // Helper added
 import { processUserQuery, generateNaturalLanguageResponse } from "./lib/openai";
 
 
@@ -1945,7 +1945,7 @@ export async function registerRoutes(
         const malBedeli = safeParseFloat(row[3]);
         const kdvTutari = safeParseFloat(row[4]);
         const toplamTutar = safeParseFloat(row[5]);
-        const paraBirimi = String(row[6] || "TRY").trim().toUpperCase();
+        const paraBirimi = normalizeCurrencyCode(row[6]);
         let sube = row[7] ? String(row[7]).trim() : null;
         let kategori = row[8] ? String(row[8]).trim() : null;
 
