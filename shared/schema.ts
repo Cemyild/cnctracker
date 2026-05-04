@@ -26,6 +26,7 @@ export const gumrukDosyalar = pgTable("gumruk_dosyalar", {
   sizeBytes: integer("size_bytes"),
   recordCount: integer("record_count"), // Kaç satır import edildi
   md5Hash: text("md5_hash"), // Dosya değişimi kontrolü için
+  tip: text("tip").default("gumruk"), // Yüklemenin tipi: 'gumruk' (satışlar) | 'gider'
 });
 
 export const insertGumrukDosyaSchema = createInsertSchema(gumrukDosyalar).omit({
@@ -278,6 +279,8 @@ export const giderler = pgTable("giderler", {
   ay: text("ay").notNull(),
   yil: integer("yil").notNull(),
   olusturmaTarihi: date("olusturma_tarihi").default(sql`CURRENT_DATE`),
+  // Yükleme geçmişi için kaynak dosya bağlantısı (geriye dönük rollback)
+  dosyaId: varchar("dosya_id").references(() => gumrukDosyalar.id),
 }, (table) => [
   uniqueIndex("giderler_fatura_no_idx").on(table.faturaNo, table.firma),
 ]);

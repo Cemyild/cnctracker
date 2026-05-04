@@ -304,6 +304,26 @@ type Arac = {
                       },
                     });
 
+                    // Gider yükleme geçmişi (Upload history)
+                    const { data: giderDosyalar, refetch: refetchGiderDosyalar } = useQuery<{
+                      id: string;
+                      filename: string;
+                      uploadDate: string | null;
+                      sizeBytes: number | null;
+                      md5Hash: string | null;
+                      kayitSayisi: number;
+                      yillar: number[];
+                      aylar: string[];
+                    }[]>({
+                      queryKey: ["/api/giderler/dosyalar", selectedGiderYil],
+                      queryFn: async () => {
+                        const r = await fetch(`/api/giderler/dosyalar?yil=${selectedGiderYil}`, { credentials: "include" });
+                        if (!r.ok) throw new Error(`${r.status}`);
+                        return r.json();
+                      },
+                      enabled: !!selectedGiderYil,
+                    });
+
   const handleUploadSuccess = () => {
                       refetchAylar();
                     refetchOzet();
@@ -316,6 +336,7 @@ type Arac = {
   const handleGiderUploadSuccess = () => {
                       refetchGiderler();
                     refetchGiderStats();
+                    refetchGiderDosyalar();
   };
 
 
@@ -1581,6 +1602,102 @@ type Arac = {
                                       )}
                                     </TableBody>
                                   </Table>
+                                </CardContent>
+                              </Card>
+
+                              {/* Gider Yükleme Geçmişi */}
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle className="flex items-center gap-2">
+                                    <History className="w-5 h-5" />
+                                    Yükleme Geçmişi
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  {giderDosyalar?.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                                      <History className="w-12 h-12 mb-2" />
+                                      <p>Henüz gider yüklemesi yok</p>
+                                    </div>
+                                  ) : (
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>Tarih</TableHead>
+                                          <TableHead>Dosya Adı</TableHead>
+                                          <TableHead>Dönem</TableHead>
+                                          <TableHead className="text-right">Boyut</TableHead>
+                                          <TableHead className="text-right">Kayıt</TableHead>
+                                          <TableHead className="text-right">İşlem</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {giderDosyalar?.map((d) => {
+                                          const tarih = d.uploadDate
+                                            ? (() => {
+                                                const dt = new Date(d.uploadDate);
+                                                const dd = String(dt.getDate()).padStart(2, "0");
+                                                const mm = String(dt.getMonth() + 1).padStart(2, "0");
+                                                const yyyy = dt.getFullYear();
+                                                const hh = String(dt.getHours()).padStart(2, "0");
+                                                const mi = String(dt.getMinutes()).padStart(2, "0");
+                                                return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+                                              })()
+                                            : "-";
+                                          const fname = d.filename.length > 50
+                                            ? d.filename.slice(0, 50) + "..."
+                                            : d.filename;
+                                          const tekYil = d.yillar.length === 1 ? d.yillar[0] : null;
+                                          const ayLabels = d.aylar.map((a) => getAyLabel(a)).join(", ");
+                                          const donem = d.aylar.length === 0
+                                            ? "-"
+                                            : tekYil
+                                              ? `${ayLabels} ${tekYil}`
+                                              : "Çoklu";
+                                          const boyut = d.sizeBytes == null
+                                            ? "-"
+                                            : d.sizeBytes < 1024 * 1024
+                                              ? `${(d.sizeBytes / 1024).toFixed(0)} KB`
+                                              : `${(d.sizeBytes / 1024 / 1024).toFixed(2)} MB`;
+                                          const onGeriAl = async () => {
+                                            if (!window.confirm(`Bu yükleme silindiğinde ${d.kayitSayisi} satır gider kaydı da silinecek. Emin misiniz?`)) {
+                                              return;
+                                            }
+                                            const r = await fetch(`/api/giderler/dosyalar/${d.id}`, { method: "DELETE", credentials: "include" });
+                                            if (!r.ok) {
+                                              toast({ title: "Hata", description: "Silinemedi", variant: "destructive" });
+                                              return;
+                                            }
+                                            toast({ title: "Başarılı", description: "Yükleme geri alındı" });
+                                            refetchGiderDosyalar();
+                                            refetchGiderler();
+                                            refetchGiderStats();
+                                          };
+                                          return (
+                                            <TableRow key={d.id} data-testid={`row-gider-dosya-${d.id}`}>
+                                              <TableCell>{tarih}</TableCell>
+                                              <TableCell title={d.filename}>{fname}</TableCell>
+                                              <TableCell>{donem}</TableCell>
+                                              <TableCell className="text-right">{boyut}</TableCell>
+                                              <TableCell className="text-right">{d.kayitSayisi}</TableCell>
+                                              <TableCell className="text-right">
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="text-destructive hover:text-destructive"
+                                                  onClick={onGeriAl}
+                                                  data-testid={`button-gider-geri-al-${d.id}`}
+                                                >
+                                                  <Trash2 className="w-4 h-4 mr-1" />
+                                                  Geri Al
+                                                </Button>
+                                              </TableCell>
+                                            </TableRow>
+                                          );
+                                        })}
+                                      </TableBody>
+                                    </Table>
+                                  )}
                                 </CardContent>
                               </Card>
 

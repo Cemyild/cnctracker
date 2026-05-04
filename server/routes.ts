@@ -1907,7 +1907,9 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Dosya yüklenmedi" });
       }
 
-      // Read Excel
+      const isForce = req.body?.force === true || req.body?.force === "true";
+
+      // 1. Read Excel
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
@@ -2015,9 +2017,68 @@ export async function registerRoutes(
         });
       }
 
+      if (parsedVeriler.length === 0) {
+        return res.status(400).json({ error: "Geçerli veri bulunamadı" });
+      }
+
       console.log(`Parsed ${parsedVeriler.length} rows. First row example:`, parsedVeriler[0]);
 
+      // 2. MD5 fast-path: aynı dosya daha önce yüklendiyse 409 dön (force yoksa)
+      const md5Hash = createHash("md5").update(req.file.buffer).digest("hex");
+
+      if (!isForce) {
+        const existing = await storage.findGumrukDosyaByMd5(md5Hash, "gider");
+        if (existing) {
+          return res.status(409).json({
+            duplicate: true,
+            existing: {
+              id: existing.id,
+              filename: existing.filename,
+              uploadDate: existing.uploadDate,
+              recordCount: existing.recordCount,
+            },
+          });
+        }
+      }
+
+      // 3. Arşiv klasörünü belirle: uploads/giderler/{yil}/{ay}/
+      const fsLib = await import("fs");
+      const pathLib = await import("path");
+
+      const archiveYil = parsedVeriler[0]?.yil || currentYear;
+      const archiveAy = parsedVeriler[0]?.ay || "ocak";
+      const archiveDir = pathLib.join(process.cwd(), "uploads", "giderler", String(archiveYil), archiveAy);
+      await fsLib.promises.mkdir(archiveDir, { recursive: true });
+
+      const timestamp = new Date().getTime();
+      const safeFilename = req.file.originalname.replace(/[^a-z0-9.]/gi, '_');
+      const filename = `${timestamp}_${safeFilename}`;
+      const filepath = pathLib.join(archiveDir, filename);
+
+      // 4. Dosyayı diske yaz
+      await fsLib.promises.writeFile(filepath, req.file.buffer);
+
+      // 5. Dosya kaydını oluştur (recordCount sonra güncellenecek)
+      const dosyaKaydi = await storage.createGumrukDosya({
+        filename: req.file.originalname,
+        filepath: filepath,
+        sizeBytes: req.file.size,
+        recordCount: 0,
+        md5Hash: md5Hash,
+        tip: "gider",
+      });
+
+      // 6. dosyaId'yi tüm satırlara ata
+      for (const v of parsedVeriler) {
+        v.dosyaId = dosyaKaydi.id;
+      }
+
+      // 7. Insert
       const inserted = await storage.insertGiderler(parsedVeriler);
+
+      // 8. Dosya kaydının recordCount'unu güncelle
+      await storage.updateGumrukDosyaRecordCount(dosyaKaydi.id, inserted.length);
+
       res.json({ success: true, count: inserted.length });
 
     } catch (error) {
@@ -2043,6 +2104,32 @@ export async function registerRoutes(
     }
   });
 
+  // Giderler — Yükleme Geçmişi (Upload history)
+  app.get("/api/giderler/dosyalar", async (req, res) => {
+    try {
+      const yilParam = req.query.yil ? Number(req.query.yil) : undefined;
+      if (yilParam !== undefined && (!Number.isFinite(yilParam) || yilParam < 2000 || yilParam > 2100)) {
+        return res.status(400).json({ error: "Geçersiz yıl" });
+      }
+      const rows = await storage.listGumrukDosyalar(yilParam, "gider");
+      res.json(rows);
+    } catch (err) {
+      console.error("Gider dosya listesi hatası:", err);
+      res.status(500).json({ error: "Liste alınamadı" });
+    }
+  });
+
+  app.delete("/api/giderler/dosyalar/:id", async (req, res) => {
+    try {
+      const result = await storage.deleteGumrukDosyaWithVerileri(req.params.id);
+      if (!result) return res.status(404).json({ error: "Bulunamadı" });
+      res.json({ success: true, ...result });
+    } catch (err) {
+      console.error("Gider dosya silme hatası:", err);
+      res.status(500).json({ error: "Silinemedi" });
+    }
+  });
+
 
   // Yükleme geçmişi (Upload history)
   app.get("/api/gumruk/dosyalar", async (req, res) => {
@@ -2051,7 +2138,7 @@ export async function registerRoutes(
       if (yilParam !== undefined && (!Number.isFinite(yilParam) || yilParam < 2000 || yilParam > 2100)) {
         return res.status(400).json({ error: "Geçersiz yıl" });
       }
-      const rows = await storage.listGumrukDosyalar(yilParam);
+      const rows = await storage.listGumrukDosyalar(yilParam, "gumruk");
       res.json(rows);
     } catch (err) {
       console.error("Dosya listesi hatası:", err);

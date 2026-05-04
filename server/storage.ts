@@ -30,7 +30,7 @@ export interface IStorage {
   insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]>;
   updateGumrukDosyaRecordCount(id: string, count: number): Promise<void>;
   createGumrukDosya(dosya: InsertGumrukDosya): Promise<GumrukDosya>;
-  findGumrukDosyaByMd5(hash: string): Promise<GumrukDosya | null>;
+  findGumrukDosyaByMd5(hash: string, tip?: string): Promise<GumrukDosya | null>;
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
@@ -266,7 +266,7 @@ export interface IStorage {
   getEgitimDegerlendirmeleri(egitimId: string): Promise<(EgitimDegerlendirme & { cevaplar: EgitimDegerlendirmeCevap[] })[]>;
 
   // Yükleme geçmişi (Upload history)
-  listGumrukDosyalar(yil?: number): Promise<{
+  listGumrukDosyalar(yil?: number, tip?: string): Promise<{
     id: string;
     filename: string;
     uploadDate: Date | null;
@@ -309,11 +309,13 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async findGumrukDosyaByMd5(hash: string): Promise<GumrukDosya | null> {
+  async findGumrukDosyaByMd5(hash: string, tip?: string): Promise<GumrukDosya | null> {
+    const conditions = [eq(gumrukDosyalar.md5Hash, hash)];
+    if (tip !== undefined) conditions.push(eq(gumrukDosyalar.tip, tip));
     const rows = await db
       .select()
       .from(gumrukDosyalar)
-      .where(eq(gumrukDosyalar.md5Hash, hash))
+      .where(and(...conditions))
       .orderBy(desc(gumrukDosyalar.uploadDate))
       .limit(1);
     return rows[0] ?? null;
@@ -2349,7 +2351,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Yükleme geçmişi (Upload history)
-  async listGumrukDosyalar(yil?: number): Promise<{
+  async listGumrukDosyalar(yil?: number, tip?: string): Promise<{
     id: string;
     filename: string;
     uploadDate: Date | null;
@@ -2359,6 +2361,44 @@ export class DatabaseStorage implements IStorage {
     yillar: number[];
     aylar: string[];
   }[]> {
+    if (tip === "gider") {
+      // Gider kayıtları için giderler tablosuna join atılır
+      const rows = await db
+        .select({
+          id: gumrukDosyalar.id,
+          filename: gumrukDosyalar.filename,
+          uploadDate: gumrukDosyalar.uploadDate,
+          sizeBytes: gumrukDosyalar.sizeBytes,
+          md5Hash: gumrukDosyalar.md5Hash,
+          kayitSayisi: sql<number>`count(${giderler.id})`,
+          yillar: sql<number[]>`coalesce(array_agg(DISTINCT ${giderler.yil}) FILTER (WHERE ${giderler.yil} IS NOT NULL), ARRAY[]::integer[])`,
+          aylar: sql<string[]>`coalesce(array_agg(DISTINCT ${giderler.ay}) FILTER (WHERE ${giderler.ay} IS NOT NULL), ARRAY[]::text[])`,
+        })
+        .from(gumrukDosyalar)
+        .leftJoin(giderler, eq(giderler.dosyaId, gumrukDosyalar.id))
+        .where(eq(gumrukDosyalar.tip, "gider"))
+        .groupBy(gumrukDosyalar.id)
+        .orderBy(desc(gumrukDosyalar.uploadDate));
+
+      const normalized = rows.map(r => ({
+        id: r.id,
+        filename: r.filename,
+        uploadDate: r.uploadDate,
+        sizeBytes: r.sizeBytes,
+        md5Hash: r.md5Hash,
+        kayitSayisi: Number(r.kayitSayisi ?? 0),
+        yillar: (r.yillar ?? []).map((y: any) => Number(y)),
+        aylar: (r.aylar ?? []) as string[],
+      }));
+
+      if (yil !== undefined) {
+        return normalized.filter(r => r.yillar.includes(yil));
+      }
+
+      return normalized;
+    }
+
+    // Default: gümrük (satışlar) — gumrukVerileri'ne join
     const rows = await db
       .select({
         id: gumrukDosyalar.id,
@@ -2372,6 +2412,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(gumrukDosyalar)
       .leftJoin(gumrukVerileri, eq(gumrukVerileri.dosyaId, gumrukDosyalar.id))
+      .where(tip === undefined ? sql`TRUE` : eq(gumrukDosyalar.tip, tip))
       .groupBy(gumrukDosyalar.id)
       .orderBy(desc(gumrukDosyalar.uploadDate));
 
@@ -2397,9 +2438,18 @@ export class DatabaseStorage implements IStorage {
     const [dosya] = await db.select().from(gumrukDosyalar).where(eq(gumrukDosyalar.id, id));
     if (!dosya) return null;
 
-    const deleted = await db.delete(gumrukVerileri)
-      .where(eq(gumrukVerileri.dosyaId, id))
-      .returning({ id: gumrukVerileri.id });
+    let deletedCount = 0;
+    if (dosya.tip === "gider") {
+      const deleted = await db.delete(giderler)
+        .where(eq(giderler.dosyaId, id))
+        .returning({ id: giderler.id });
+      deletedCount = deleted.length;
+    } else {
+      const deleted = await db.delete(gumrukVerileri)
+        .where(eq(gumrukVerileri.dosyaId, id))
+        .returning({ id: gumrukVerileri.id });
+      deletedCount = deleted.length;
+    }
 
     await db.delete(gumrukDosyalar).where(eq(gumrukDosyalar.id, id));
 
@@ -2413,7 +2463,7 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    return { deletedRows: deleted.length, filename: dosya.filename };
+    return { deletedRows: deletedCount, filename: dosya.filename };
   }
 }
 
