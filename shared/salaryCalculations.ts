@@ -831,3 +831,42 @@ export function bruttenHesapla2026(
         toplamIsverenMaliyeti
     };
 }
+
+// ============================================================================
+// 2026 NET'TEN BRÜT'E DÖNÜŞÜM (İTERATİF)
+// ============================================================================
+
+/**
+ * 2026 için Net'ten Brüt'e iteratif hesaplama (Newton-Raphson benzeri).
+ * Her iterasyonda brüt'ü tahmin et, ondan net'i hesapla, fark kadar düzelt.
+ * Asgari geçim yardımı, ek mesai, ikramiye gibi ek ödemeler hesaba katılmaz —
+ * sadece "tek başına bu net'i veren brüt" döner.
+ */
+export function nettenBruteHesapla2026(
+    netMaas: number,
+    statu: CalisanStatu,
+    ay: number,
+    kumulatifMatrah: number = 0,
+    hazineTesvikiVar: boolean = true,
+): number {
+    if (netMaas <= 0) return 0;
+
+    // Yönetici için başlangıç tahmini daha düşük (SGK kesintisi yok, sadece GV+DV)
+    let brutTahmin = statu === "YÖNETİCİ" ? netMaas * 1.20 : netMaas * 1.35;
+    const MAX_ITERASYON = 100;
+    const TOLERANS = 0.01;
+
+    for (let i = 0; i < MAX_ITERASYON; i++) {
+        const sonuc = bruttenHesapla2026(brutTahmin, statu, ay, kumulatifMatrah, hazineTesvikiVar);
+        const fark = netMaas - sonuc.netMaas;
+        if (Math.abs(fark) < TOLERANS) {
+            return Number(brutTahmin.toFixed(2));
+        }
+        // Düzeltme: tek-değişkenli sabit nokta yöntemi
+        brutTahmin = brutTahmin + fark;
+        // Negatife düşmemesi için minimum koruma
+        if (brutTahmin < netMaas) brutTahmin = netMaas;
+    }
+
+    return Number(brutTahmin.toFixed(2));
+}

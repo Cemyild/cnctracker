@@ -12,7 +12,8 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   yonetimGozdenGecirmeler, type YonetimGozdenGecirme, type InsertYonetimGozdenGecirme,
   yonetimAksiyonlar, type YonetimAksiyon, type InsertYonetimAksiyon,
   bakimVarliklar, type BakimVarlik, type InsertBakimVarlik,
-  bakimKayitlari, type BakimKayit, type InsertBakimKayit } from "@shared/schema";
+  bakimKayitlari, type BakimKayit, type InsertBakimKayit,
+  bordroDosyalar, type BordroDosya, type InsertBordroDosya } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import { db } from "./db";
@@ -277,6 +278,16 @@ export interface IStorage {
     aylar: string[];
   }[]>;
   deleteGumrukDosyaWithVerileri(id: string): Promise<{ deletedRows: number; filename: string } | null>;
+
+  // Bordro arşiv dosyaları
+  insertBordroDosya(data: InsertBordroDosya): Promise<BordroDosya>;
+  getBordroDosyalar(yil?: number, tip?: string): Promise<BordroDosya[]>;
+  getBordroDosya(id: string): Promise<BordroDosya | null>;
+  deleteBordroDosya(id: string): Promise<{ filename: string } | null>;
+
+  // Toplu upsert: maaş listesinden gelen aylık çalışan kayıtlarını
+  // (tcNo + ay + yıl unique) varsa günceller, yoksa ekler
+  upsertCalisanlarToplu(kayitlar: InsertCalisan[]): Promise<{ inserted: number; updated: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -924,10 +935,12 @@ export class DatabaseStorage implements IStorage {
     if (ay && ay !== "toplam") filters.push(eq(giderler.ay, ay));
     if (yil) filters.push(eq(giderler.yil, yil));
 
+    const tarihOrder = sql`to_date(${giderler.tarih}, 'DD.MM.YYYY') DESC NULLS LAST`;
+
     if (filters.length > 0) {
-      return await db.select().from(giderler).where(and(...filters)).orderBy(giderler.tarih);
+      return await db.select().from(giderler).where(and(...filters)).orderBy(tarihOrder);
     }
-    return await db.select().from(giderler).orderBy(giderler.tarih);
+    return await db.select().from(giderler).orderBy(tarihOrder);
   }
 
   async getGiderlerByPlaka(plaka: string): Promise<Gider[]> {
@@ -2464,6 +2477,87 @@ export class DatabaseStorage implements IStorage {
     }
 
     return { deletedRows: deletedCount, filename: dosya.filename };
+  }
+
+  // ============================================================================
+  // BORDRO ARŞİV DOSYALARI
+  // ============================================================================
+
+  async insertBordroDosya(data: InsertBordroDosya): Promise<BordroDosya> {
+    const [row] = await db.insert(bordroDosyalar).values(data).returning();
+    return row;
+  }
+
+  async getBordroDosyalar(yil?: number, tip?: string): Promise<BordroDosya[]> {
+    const filters = [];
+    if (yil) filters.push(eq(bordroDosyalar.yil, yil));
+    if (tip) filters.push(eq(bordroDosyalar.tip, tip));
+
+    if (filters.length > 0) {
+      return await db.select().from(bordroDosyalar).where(and(...filters)).orderBy(desc(bordroDosyalar.uploadDate));
+    }
+    return await db.select().from(bordroDosyalar).orderBy(desc(bordroDosyalar.uploadDate));
+  }
+
+  async getBordroDosya(id: string): Promise<BordroDosya | null> {
+    const [row] = await db.select().from(bordroDosyalar).where(eq(bordroDosyalar.id, id));
+    return row ?? null;
+  }
+
+  async deleteBordroDosya(id: string): Promise<{ filename: string } | null> {
+    const [dosya] = await db.select().from(bordroDosyalar).where(eq(bordroDosyalar.id, id));
+    if (!dosya) return null;
+
+    await db.delete(bordroDosyalar).where(eq(bordroDosyalar.id, id));
+
+    if (dosya.filepath) {
+      try {
+        await fs.unlink(dosya.filepath);
+      } catch (err: any) {
+        if (err && err.code !== "ENOENT") {
+          console.error("Bordro dosyası silinemedi (filesystem):", err);
+        }
+      }
+    }
+
+    return { filename: dosya.filename };
+  }
+
+  // Toplu upsert — Maaş Listesi parse edildikten sonra her satır için.
+  // (tcNo + ay + yıl) unique index'i sayesinde onConflictDoUpdate kullanılabilir.
+  async upsertCalisanlarToplu(kayitlar: InsertCalisan[]): Promise<{ inserted: number; updated: number }> {
+    if (kayitlar.length === 0) return { inserted: 0, updated: 0 };
+
+    let inserted = 0;
+    let updated = 0;
+
+    // Drizzle PostgreSQL onConflictDoUpdate ile tek seferde upsert
+    for (const k of kayitlar) {
+      const existing = await db
+        .select({ id: calisanlar.id })
+        .from(calisanlar)
+        .where(
+          and(
+            eq(calisanlar.tcNo, k.tcNo),
+            eq(calisanlar.ay, k.ay),
+            eq(calisanlar.yil, k.yil),
+          ),
+        )
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db
+          .update(calisanlar)
+          .set(k)
+          .where(eq(calisanlar.id, existing[0].id));
+        updated++;
+      } else {
+        await db.insert(calisanlar).values(k);
+        inserted++;
+      }
+    }
+
+    return { inserted, updated };
   }
 }
 

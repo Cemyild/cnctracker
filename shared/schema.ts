@@ -37,6 +37,32 @@ export const insertGumrukDosyaSchema = createInsertSchema(gumrukDosyalar).omit({
 export type InsertGumrukDosya = z.infer<typeof insertGumrukDosyaSchema>;
 export type GumrukDosya = typeof gumrukDosyalar.$inferSelect;
 
+// Bordro arşiv dosyaları (PDF'ler — Maaş Listesi + Detaylı Bordro)
+// Parse edilen Maaş Listesi'nin kaynak dosyası ve denetim için saklanan
+// Detaylı Bordro PDF'leri burada arşivlenir.
+export const bordroDosyalar = pgTable("bordro_dosyalar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  filename: text("filename").notNull(),
+  filepath: text("filepath").notNull(),
+  uploadDate: timestamp("upload_date").defaultNow(),
+  sizeBytes: integer("size_bytes"),
+  md5Hash: text("md5_hash"),
+  // 'maas-listesi' (parse edilip calisanlar'a yazıldı) | 'bordro' (sadece arşiv, denetim için)
+  tip: text("tip").notNull().default("bordro"),
+  ay: integer("ay"), // 1-12 (parse edildiyse PDF'ten otomatik, arşiv için kullanıcı seçer)
+  yil: integer("yil"),
+  // Maaş listesinden parse edildiyse kaç çalışana yazıldı
+  kayitSayisi: integer("kayit_sayisi"),
+});
+
+export const insertBordroDosyaSchema = createInsertSchema(bordroDosyalar).omit({
+  id: true,
+  uploadDate: true,
+});
+
+export type InsertBordroDosya = z.infer<typeof insertBordroDosyaSchema>;
+export type BordroDosya = typeof bordroDosyalar.$inferSelect;
+
 // Gümrük verileri tablosu
 export const gumrukVerileri = pgTable("gumruk_verileri", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

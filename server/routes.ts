@@ -72,6 +72,22 @@ const egitimStorage = multer.diskStorage({
 });
 const uploadEgitim = multer({ storage: egitimStorage });
 
+// Bordro arşiv: uploads/bordro/{yil}/{ay-sayi}/{filename}
+// ay/yıl req.body'den geldiği için route handler'ında okunuyor; multer'a
+// diskStorage yerine memoryStorage verip dosyayı kendimiz taşıyoruz.
+const uploadBordroMemory = multer({ storage: multer.memoryStorage() });
+
+// Multer Latin-1 default'undan kaynaklanan UTF-8 mojibake'i düzeltir.
+// Türkçe dosya isimlerinde "ŞUBAT" → "ÅUBAT" gibi bozulmaları çözer.
+function fixUploadFilename(name: string): string {
+  if (!name) return name;
+  try {
+    return Buffer.from(name, "latin1").toString("utf8");
+  } catch {
+    return name;
+  }
+}
+
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar } from "@shared/schema";
 import { createHash } from "crypto";
 import { z } from "zod";
@@ -81,11 +97,13 @@ import {
   belirliAyHesapla,
   PARAMETRELER_2025,
   bruttenHesapla2026,
+  nettenBruteHesapla2026,
   PARAMETRELER_2026,
   type CalisanStatu,
   type MonthlyCalculation,
   type MonthlyCalculation2026
 } from "@shared/salaryCalculations";
+import { parseMaasListesiPdf, ayNumaraToKey, type MaasSatiri } from "./bordroParser";
 
 
 import { PDFParse } from "pdf-parse";
@@ -1387,6 +1405,276 @@ export async function registerRoutes(
       },
       gelirVergisiDilimleri: PARAMETRELER_2025.GELIR_VERGISI_DILIMLERI
     });
+  });
+
+  // ============================================================================
+  // BORDRO MAAŞ LİSTESİ (PDF parse → calisanlar upsert)
+  // ============================================================================
+
+  // PDF'i yükle, parse et, önizleme döner. Henüz DB'ye yazma yapmaz.
+  // İstemci sonuçları gözden geçirip /api/bordro/maas-listesi/save'e gönderir.
+  app.post("/api/bordro/maas-listesi/upload", uploadBordroMemory.single("pdf"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "PDF dosyası gönderilmedi." });
+      if (!req.file.mimetype.includes("pdf")) {
+        return res.status(400).json({ error: "Sadece PDF kabul edilir." });
+      }
+
+      const parsed = await parseMaasListesiPdf(req.file.buffer);
+
+      // Her satır için brüt + işveren payını arkada hesapla.
+      // Kümülatif matrah: önceki ayların DB'deki gelirVergisiMatrahi toplamı.
+      const ayKey = ayNumaraToKey(parsed.ay);
+      const ayNum = parsed.ay;
+      const yilNum = parsed.yil;
+
+      // Aynı yılın tüm önceki ay verilerini tek seferde çek (N+1 önleme)
+      const tumOnceki = await storage.getCalisanlar(undefined, yilNum);
+      const kumulatifMap: Record<string, number> = {};
+      for (const k of tumOnceki) {
+        const ay = parseInt(k.ay, 10);
+        if (Number.isFinite(ay) && ay < ayNum) {
+          kumulatifMap[k.tcNo] = (kumulatifMap[k.tcNo] || 0) + Number(k.gelirVergisiMatrahi || 0);
+        }
+      }
+
+      const onizleme = parsed.tumSatirlar.map((s) => {
+        const kumulatif = kumulatifMap[s.tcNo] || 0;
+        const brut = nettenBruteHesapla2026(s.netTutar, s.statu, ayNum, kumulatif, true);
+        const detay = bruttenHesapla2026(brut, s.statu, ayNum, kumulatif, true);
+
+        return {
+          tcNo: s.tcNo,
+          adSoyad: s.adSoyad,
+          sube: s.sube,
+          statu: s.statu,
+          iban: s.iban,
+          telefon: s.telefon,
+
+          netUcret: s.netTutar, // PDF'ten gelen kesin net
+          brutUcret: brut,
+          hesaplananNet: detay.netMaas, // doğrulama için
+          fark: Math.abs(detay.netMaas - s.netTutar),
+
+          sgkMatrahi: detay.sgkPrimMatrahi,
+          gelirVergisiMatrahi: detay.gelirVergisiMatrahi,
+          kumulatifVergiMatrahi: kumulatif,
+          gelirVergisi: detay.netGelirVergisi,
+          damgaVergisi: detay.netDamgaVergisi,
+          sigortaKesintisi: detay.sgkIsciPrimi,
+          issizlikSigortasiKesintisi: detay.issizlikIsciPrimi,
+          isverenSgkPayi: detay.sgkIsverenPrimi,
+          isverenIssizlikPayi: detay.issizlikIsverenPrimi,
+          toplamIsverenMaliyeti: detay.toplamIsverenMaliyeti,
+        };
+      });
+
+      // Şube bazlı özet
+      const subeOzet: Record<string, {
+        kisi: number; net: number; brut: number; isverenMaliyeti: number;
+      }> = {};
+      for (const o of onizleme) {
+        const k = o.sube || "Bilinmiyor";
+        if (!subeOzet[k]) subeOzet[k] = { kisi: 0, net: 0, brut: 0, isverenMaliyeti: 0 };
+        subeOzet[k].kisi++;
+        subeOzet[k].net += o.netUcret;
+        subeOzet[k].brut += o.brutUcret;
+        subeOzet[k].isverenMaliyeti += o.toplamIsverenMaliyeti;
+      }
+
+      res.json({
+        ay: ayNum,
+        ayKey,
+        yil: yilNum,
+        toplamKisi: parsed.toplamKisi,
+        pdfToplamNet: parsed.toplamNet,
+        sayfalar: parsed.sayfalar.map((s) => ({
+          sayfaNo: s.sayfaNo,
+          sube: s.sube,
+          statu: s.statu,
+          firmaUnvani: s.firmaUnvani,
+          sgkIsyeriNo: s.sgkIsyeriNo,
+          adres: s.adres,
+          kisi: s.satirlar.length,
+          toplam: s.toplam,
+        })),
+        subeOzet,
+        onizleme,
+      });
+    } catch (error) {
+      console.error("Maaş Listesi parse hatası:", error);
+      res.status(400).json({ error: (error as Error).message || "PDF işlenirken hata oluştu." });
+    }
+  });
+
+  // Onaylanmış önizleme verisini calisanlar tablosuna upsert eder.
+  // Aynı PDF'i ayrıca arşive de kaydeder (opsiyonel: ham PDF base64).
+  app.post("/api/bordro/maas-listesi/save", uploadBordroMemory.single("pdf"), async (req, res) => {
+    try {
+      const payload = JSON.parse(req.body.payload || "{}");
+      const { ay, yil, kayitlar } = payload as {
+        ay: number; yil: number; kayitlar: any[];
+      };
+
+      if (!ay || !yil || !Array.isArray(kayitlar) || kayitlar.length === 0) {
+        return res.status(400).json({ error: "Geçersiz payload." });
+      }
+
+      const ayKey = ayNumaraToKey(ay);
+
+      // Çalışan kayıtlarını upsert et
+      const insertVerileri = kayitlar.map((k) => ({
+        tcNo: String(k.tcNo),
+        adSoyad: String(k.adSoyad),
+        isGirisTarihi: k.isGirisTarihi || null,
+        brutUcret: String(k.brutUcret ?? 0),
+        netUcret: String(k.netUcret ?? 0),
+        sgkMatrahi: String(k.sgkMatrahi ?? 0),
+        gelirVergisiMatrahi: String(k.gelirVergisiMatrahi ?? 0),
+        kumulatifVergiMatrahi: String(k.kumulatifVergiMatrahi ?? 0),
+        gelirVergisi: String(k.gelirVergisi ?? 0),
+        damgaVergisi: String(k.damgaVergisi ?? 0),
+        sigortaKesintisi: String(k.sigortaKesintisi ?? 0),
+        issizlikSigortasiKesintisi: String(k.issizlikSigortasiKesintisi ?? 0),
+        isverenSgkPayi: String(k.isverenSgkPayi ?? 0),
+        isverenIssizlikPayi: String(k.isverenIssizlikPayi ?? 0),
+        toplamIsverenMaliyeti: String(k.toplamIsverenMaliyeti ?? 0),
+        sube: k.sube || null,
+        statu: k.statu || "NORMAL",
+        ay: String(ay),
+        yil: yil,
+      }));
+
+      const sonuc = await storage.upsertCalisanlarToplu(insertVerileri);
+
+      // PDF'i de arşive yaz (varsa)
+      let bordroDosyaId: string | null = null;
+      if (req.file) {
+        const fixedName = fixUploadFilename(req.file.originalname);
+        const archiveDir = path.join(process.cwd(), "uploads", "bordro", String(yil), ayKey);
+        if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+        // Filesystem güvenliği için sanitize et (UTF-8 saklı, sadece path-tehlikeli karakterler kaldırılır)
+        const safeForFs = fixedName.replace(/[\\/:*?"<>|]/g, "_");
+        const filename = `maas-listesi-${Date.now()}-${safeForFs}`;
+        const filepath = path.join(archiveDir, filename);
+        await fs.promises.writeFile(filepath, req.file.buffer);
+
+        const md5 = createHash("md5").update(req.file.buffer).digest("hex");
+        const dosya = await storage.insertBordroDosya({
+          filename: fixedName,
+          filepath,
+          sizeBytes: req.file.size,
+          md5Hash: md5,
+          tip: "maas-listesi",
+          ay,
+          yil,
+          kayitSayisi: kayitlar.length,
+        });
+        bordroDosyaId = dosya.id;
+      }
+
+      res.json({
+        success: true,
+        inserted: sonuc.inserted,
+        updated: sonuc.updated,
+        toplam: sonuc.inserted + sonuc.updated,
+        bordroDosyaId,
+      });
+    } catch (error) {
+      console.error("Maaş Listesi kaydetme hatası:", error);
+      res.status(500).json({ error: (error as Error).message || "Kaydedilirken hata oluştu." });
+    }
+  });
+
+  // ============================================================================
+  // BORDRO ARŞİVİ (sadece dosya saklama, parse yok — denetim/yasal amaç)
+  // ============================================================================
+
+  app.post("/api/bordro/arsiv/upload", uploadBordroMemory.single("pdf"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "PDF dosyası gönderilmedi." });
+      if (!req.file.mimetype.includes("pdf")) {
+        return res.status(400).json({ error: "Sadece PDF kabul edilir." });
+      }
+
+      const ay = parseInt(req.body.ay, 10);
+      const yil = parseInt(req.body.yil, 10);
+      if (!Number.isFinite(ay) || ay < 1 || ay > 12) {
+        return res.status(400).json({ error: "Geçersiz ay." });
+      }
+      if (!Number.isFinite(yil) || yil < 2020 || yil > 2100) {
+        return res.status(400).json({ error: "Geçersiz yıl." });
+      }
+
+      const ayKey = ayNumaraToKey(ay);
+      const archiveDir = path.join(process.cwd(), "uploads", "bordro", String(yil), ayKey);
+      if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+
+      const fixedName = fixUploadFilename(req.file.originalname);
+      const safeForFs = fixedName.replace(/[\\/:*?"<>|]/g, "_");
+      const filename = `bordro-${Date.now()}-${safeForFs}`;
+      const filepath = path.join(archiveDir, filename);
+      await fs.promises.writeFile(filepath, req.file.buffer);
+
+      const md5 = createHash("md5").update(req.file.buffer).digest("hex");
+      const dosya = await storage.insertBordroDosya({
+        filename: fixedName,
+        filepath,
+        sizeBytes: req.file.size,
+        md5Hash: md5,
+        tip: "bordro",
+        ay,
+        yil,
+      });
+
+      res.json({ success: true, dosya });
+    } catch (error) {
+      console.error("Bordro arşiv hatası:", error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  app.get("/api/bordro/arsiv", async (req, res) => {
+    try {
+      const yil = req.query.yil ? parseInt(String(req.query.yil), 10) : undefined;
+      const tip = req.query.tip ? String(req.query.tip) : undefined;
+      const list = await storage.getBordroDosyalar(yil, tip);
+      res.json(list);
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  app.get("/api/bordro/arsiv/:id/download", async (req, res) => {
+    try {
+      const dosya = await storage.getBordroDosya(req.params.id);
+      if (!dosya) return res.status(404).json({ error: "Dosya bulunamadı." });
+      if (!fs.existsSync(dosya.filepath)) {
+        return res.status(404).json({ error: "Dosya filesystem'de yok." });
+      }
+      // RFC 5987: Türkçe karakterli filename'i doğru göndermek için
+      // hem ASCII fallback (filename=) hem UTF-8 (filename*=) ver.
+      const asciiFallback = dosya.filename.replace(/[^\x20-\x7E]/g, "_");
+      const utf8Encoded = encodeURIComponent(dosya.filename);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`,
+      );
+      res.setHeader("Content-Type", "application/pdf");
+      res.sendFile(path.resolve(dosya.filepath));
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  app.delete("/api/bordro/arsiv/:id", async (req, res) => {
+    try {
+      const result = await storage.deleteBordroDosya(req.params.id);
+      if (!result) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
   });
 
   // Yüklü ayları getir (spesifik route - önce tanımlanmalı)
