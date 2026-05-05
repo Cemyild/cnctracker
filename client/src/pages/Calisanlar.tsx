@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IzinBakiye } from "@/components/IzinBakiye";
 import { IzinListesi } from "@/components/IzinListesi";
 import { IzinEkleModal } from "@/components/IzinEkleModal";
+import { IzinTakvimi } from "@/components/IzinTakvimi";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -926,7 +927,10 @@ export default function Calisanlar() {
                       <TabsTrigger value="bakiye">Bakiye Yönetimi</TabsTrigger>
                     </TabsList>
                     <TabsContent value="takvim" className="mt-6">
-                      <div className="text-muted-foreground text-center py-12">Takvim — Task 11'de gelecek</div>
+                      <IzinTakvimi
+                        onYeniIzin={(tcNo, tarih) => { setIzinModalTcNo(tcNo); setIzinModalDefaultDate(tarih); setIzinModalEdit(null); setIzinModalOpen(true); }}
+                        onDuzenle={(izin) => { setIzinModalEdit(izin); setIzinModalTcNo(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
+                      />
                     </TabsContent>
                     <TabsContent value="liste" className="mt-6">
                       <IzinListesi
