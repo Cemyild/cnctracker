@@ -16,7 +16,13 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   bordroDosyalar, type BordroDosya, type InsertBordroDosya,
   calisanIzinler, type CalisanIzin, type InsertCalisanIzin,
   calisanIzinAcilisBakiyesi, type AcilisBakiye, type InsertAcilisBakiye,
-  resmiTatiller, type ResmiTatil, type InsertResmiTatil } from "@shared/schema";
+  resmiTatiller, type ResmiTatil, type InsertResmiTatil,
+  musteriler, type Musteri, type InsertMusteri,
+  mizanYuklemeleri, type MizanYukleme, type InsertMizanYukleme,
+  mizanBakiye, type MizanBakiye, type InsertMizanBakiye,
+  mizanEslestirmeLog, type EslestirmeLog, type InsertEslestirmeLog,
+  mizanEslestirmeOnerileri, type EslestirmeOneri, type InsertEslestirmeOneri,
+  tahsilatAyarlari, type TahsilatAyarlari, type InsertTahsilatAyarlari } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import { db } from "./db";
@@ -307,6 +313,38 @@ export interface IStorage {
   // İzin sistemi — resmi tatiller
   seedResmiTatiller(): Promise<{ inserted: number }>;
   getResmiTatiller(yil?: number): Promise<ResmiTatil[]>;
+
+  // Tahsilat — müşteri
+  getMusteriler(filter?: { gorulmePencereGun?: number; sektor?: string; search?: string }): Promise<Musteri[]>;
+  getMusteri(id: string): Promise<Musteri | null>;
+  getMusteriByHesapKodu(hesapKodu: string): Promise<Musteri | null>;
+  insertMusteri(data: InsertMusteri): Promise<Musteri>;
+  updateMusteri(id: string, data: Partial<InsertMusteri>): Promise<Musteri | null>;
+
+  // Tahsilat — mizan yüklemeleri
+  getMizanYuklemeleri(): Promise<MizanYukleme[]>;
+  getMizanYukleme(id: string): Promise<MizanYukleme | null>;
+  getMizanByMd5(md5: string): Promise<MizanYukleme | null>;
+  insertMizanYukleme(data: InsertMizanYukleme): Promise<MizanYukleme>;
+  deleteMizanYukleme(id: string): Promise<{ filename: string } | null>;
+
+  // Tahsilat — bakiye
+  insertMizanBakiyeBatch(rows: InsertMizanBakiye[]): Promise<number>;
+  getMusteriBakiyeTimeline(musteriId: string): Promise<(MizanBakiye & { mizanTarihi: string })[]>;
+  getEnSonBakiyelerByMizan(mizanId: string): Promise<MizanBakiye[]>;
+
+  // Tahsilat — eşleştirme
+  getEslestirmeOnerileri(): Promise<(EslestirmeOneri & { musteriAd: string })[]>;
+  insertEslestirmeOneri(data: InsertEslestirmeOneri): Promise<EslestirmeOneri>;
+  onaylaOneri(oneriId: string): Promise<EslestirmeOneri | null>;
+  reddetOneri(oneriId: string): Promise<EslestirmeOneri | null>;
+  insertEslestirmeLog(data: InsertEslestirmeLog): Promise<EslestirmeLog>;
+  addGumrukUnvan(musteriId: string, gumrukUnvan: string): Promise<Musteri | null>;
+  removeGumrukUnvan(musteriId: string, gumrukUnvan: string): Promise<Musteri | null>;
+
+  // Tahsilat — ayarlar
+  getTahsilatAyarlari(): Promise<TahsilatAyarlari>;
+  updateTahsilatAyarlari(data: Partial<InsertTahsilatAyarlari>): Promise<TahsilatAyarlari>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2740,6 +2778,232 @@ export class DatabaseStorage implements IStorage {
       return row;
     }
     const [row] = await db.insert(calisanIzinAcilisBakiyesi).values(data).returning();
+    return row;
+  }
+
+  // ============================================================================
+  // TAHSİLAT — MÜŞTERİ
+  // ============================================================================
+
+  async getMusteriler(filter?: { gorulmePencereGun?: number; sektor?: string; search?: string }): Promise<Musteri[]> {
+    const filters = [];
+    if (filter?.sektor) filters.push(eq(musteriler.sektor, filter.sektor));
+    if (filter?.gorulmePencereGun != null) {
+      const cutoff = new Date(Date.now() - filter.gorulmePencereGun * 86400000);
+      filters.push(sql`${musteriler.sonGoruldugu} >= ${cutoff}`);
+    }
+    if (filter?.search) {
+      const s = `%${filter.search}%`;
+      filters.push(sql`(${musteriler.ad} ILIKE ${s} OR ${musteriler.hesapKodu} ILIKE ${s})`);
+    }
+    if (filters.length > 0) {
+      return await db.select().from(musteriler).where(and(...filters)).orderBy(musteriler.ad);
+    }
+    return await db.select().from(musteriler).orderBy(musteriler.ad);
+  }
+
+  async getMusteri(id: string): Promise<Musteri | null> {
+    const [row] = await db.select().from(musteriler).where(eq(musteriler.id, id));
+    return row ?? null;
+  }
+
+  async getMusteriByHesapKodu(hesapKodu: string): Promise<Musteri | null> {
+    const [row] = await db.select().from(musteriler).where(eq(musteriler.hesapKodu, hesapKodu));
+    return row ?? null;
+  }
+
+  async insertMusteri(data: InsertMusteri): Promise<Musteri> {
+    const [row] = await db.insert(musteriler).values(data).returning();
+    return row;
+  }
+
+  async updateMusteri(id: string, data: Partial<InsertMusteri>): Promise<Musteri | null> {
+    const [row] = await db.update(musteriler).set(data).where(eq(musteriler.id, id)).returning();
+    return row ?? null;
+  }
+
+  // ============================================================================
+  // TAHSİLAT — MİZAN
+  // ============================================================================
+
+  async getMizanYuklemeleri(): Promise<MizanYukleme[]> {
+    return await db.select().from(mizanYuklemeleri).orderBy(desc(mizanYuklemeleri.mizanTarihi));
+  }
+
+  async getMizanYukleme(id: string): Promise<MizanYukleme | null> {
+    const [row] = await db.select().from(mizanYuklemeleri).where(eq(mizanYuklemeleri.id, id));
+    return row ?? null;
+  }
+
+  async getMizanByMd5(md5: string): Promise<MizanYukleme | null> {
+    const [row] = await db.select().from(mizanYuklemeleri).where(eq(mizanYuklemeleri.md5Hash, md5));
+    return row ?? null;
+  }
+
+  async insertMizanYukleme(data: InsertMizanYukleme): Promise<MizanYukleme> {
+    const [row] = await db.insert(mizanYuklemeleri).values(data).returning();
+    return row;
+  }
+
+  async deleteMizanYukleme(id: string): Promise<{ filename: string } | null> {
+    const [m] = await db.select().from(mizanYuklemeleri).where(eq(mizanYuklemeleri.id, id));
+    if (!m) return null;
+    // mizan_bakiye CASCADE ile silinir
+    await db.delete(mizanYuklemeleri).where(eq(mizanYuklemeleri.id, id));
+    if (m.filepath) {
+      try { await fs.unlink(m.filepath); } catch (e: any) {
+        if (e.code !== "ENOENT") console.error("Mizan dosyası silinemedi:", e);
+      }
+    }
+    return { filename: m.filename };
+  }
+
+  // ============================================================================
+  // TAHSİLAT — BAKİYE
+  // ============================================================================
+
+  async insertMizanBakiyeBatch(rows: InsertMizanBakiye[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    const BATCH = 500;
+    let inserted = 0;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const chunk = rows.slice(i, i + BATCH);
+      const r = await db.insert(mizanBakiye).values(chunk).returning({ id: mizanBakiye.id });
+      inserted += r.length;
+    }
+    return inserted;
+  }
+
+  async getMusteriBakiyeTimeline(musteriId: string): Promise<(MizanBakiye & { mizanTarihi: string })[]> {
+    const rows = await db
+      .select({
+        id: mizanBakiye.id,
+        mizanId: mizanBakiye.mizanId,
+        musteriId: mizanBakiye.musteriId,
+        borc: mizanBakiye.borc,
+        alacak: mizanBakiye.alacak,
+        bakiyeBorc: mizanBakiye.bakiyeBorc,
+        bakiyeAlacak: mizanBakiye.bakiyeAlacak,
+        sonBakiye: mizanBakiye.sonBakiye,
+        sonBakiyeBA: mizanBakiye.sonBakiyeBA,
+        sonBorcTarihi: mizanBakiye.sonBorcTarihi,
+        sonAlacakTarihi: mizanBakiye.sonAlacakTarihi,
+        mizanTarihi: mizanYuklemeleri.mizanTarihi,
+      })
+      .from(mizanBakiye)
+      .innerJoin(mizanYuklemeleri, eq(mizanBakiye.mizanId, mizanYuklemeleri.id))
+      .where(eq(mizanBakiye.musteriId, musteriId))
+      .orderBy(mizanYuklemeleri.mizanTarihi);
+    return rows as any;
+  }
+
+  async getEnSonBakiyelerByMizan(mizanId: string): Promise<MizanBakiye[]> {
+    return await db.select().from(mizanBakiye).where(eq(mizanBakiye.mizanId, mizanId));
+  }
+
+  // ============================================================================
+  // TAHSİLAT — EŞLEŞTİRME
+  // ============================================================================
+
+  async getEslestirmeOnerileri(): Promise<(EslestirmeOneri & { musteriAd: string })[]> {
+    const rows = await db
+      .select({
+        id: mizanEslestirmeOnerileri.id,
+        musteriId: mizanEslestirmeOnerileri.musteriId,
+        gumrukUnvan: mizanEslestirmeOnerileri.gumrukUnvan,
+        benzerlikSkoru: mizanEslestirmeOnerileri.benzerlikSkoru,
+        olusturmaTarihi: mizanEslestirmeOnerileri.olusturmaTarihi,
+        reddedildi: mizanEslestirmeOnerileri.reddedildi,
+        musteriAd: musteriler.ad,
+      })
+      .from(mizanEslestirmeOnerileri)
+      .innerJoin(musteriler, eq(mizanEslestirmeOnerileri.musteriId, musteriler.id))
+      .where(eq(mizanEslestirmeOnerileri.reddedildi, false))
+      .orderBy(desc(mizanEslestirmeOnerileri.benzerlikSkoru));
+    return rows as any;
+  }
+
+  async insertEslestirmeOneri(data: InsertEslestirmeOneri): Promise<EslestirmeOneri> {
+    // Aynı musteriId+gumrukUnvan varsa skip (UNIQUE constraint)
+    try {
+      const [row] = await db.insert(mizanEslestirmeOnerileri).values(data).returning();
+      return row;
+    } catch (e: any) {
+      // Mevcut öneri var, döndür
+      const [existing] = await db.select().from(mizanEslestirmeOnerileri).where(
+        and(eq(mizanEslestirmeOnerileri.musteriId, data.musteriId), eq(mizanEslestirmeOnerileri.gumrukUnvan, data.gumrukUnvan))
+      );
+      return existing;
+    }
+  }
+
+  async onaylaOneri(oneriId: string): Promise<EslestirmeOneri | null> {
+    const [oneri] = await db.select().from(mizanEslestirmeOnerileri).where(eq(mizanEslestirmeOnerileri.id, oneriId));
+    if (!oneri) return null;
+    await this.addGumrukUnvan(oneri.musteriId, oneri.gumrukUnvan);
+    await this.insertEslestirmeLog({
+      musteriId: oneri.musteriId,
+      gumrukUnvan: oneri.gumrukUnvan,
+      eklemeTipi: "manual",
+      benzerlikSkoru: oneri.benzerlikSkoru,
+    });
+    await db.delete(mizanEslestirmeOnerileri).where(eq(mizanEslestirmeOnerileri.id, oneriId));
+    return oneri;
+  }
+
+  async reddetOneri(oneriId: string): Promise<EslestirmeOneri | null> {
+    const [row] = await db.update(mizanEslestirmeOnerileri).set({ reddedildi: true }).where(eq(mizanEslestirmeOnerileri.id, oneriId)).returning();
+    return row ?? null;
+  }
+
+  async insertEslestirmeLog(data: InsertEslestirmeLog): Promise<EslestirmeLog> {
+    const [row] = await db.insert(mizanEslestirmeLog).values(data).returning();
+    return row;
+  }
+
+  async addGumrukUnvan(musteriId: string, gumrukUnvan: string): Promise<Musteri | null> {
+    const m = await this.getMusteri(musteriId);
+    if (!m) return null;
+    const yeni = Array.from(new Set([...(m.gumrukFirmaUnvanlari || []), gumrukUnvan]));
+    return await this.updateMusteri(musteriId, { gumrukFirmaUnvanlari: yeni } as any);
+  }
+
+  async removeGumrukUnvan(musteriId: string, gumrukUnvan: string): Promise<Musteri | null> {
+    const m = await this.getMusteri(musteriId);
+    if (!m) return null;
+    const yeni = (m.gumrukFirmaUnvanlari || []).filter((u) => u !== gumrukUnvan);
+    return await this.updateMusteri(musteriId, { gumrukFirmaUnvanlari: yeni } as any);
+  }
+
+  // ============================================================================
+  // TAHSİLAT — AYARLAR (single-row)
+  // ============================================================================
+
+  private static readonly TAHSILAT_AYARLARI_ID = "00000000-0000-0000-0000-000000000001";
+
+  async getTahsilatAyarlari(): Promise<TahsilatAyarlari> {
+    const [row] = await db.select().from(tahsilatAyarlari).where(eq(tahsilatAyarlari.id, DatabaseStorage.TAHSILAT_AYARLARI_ID));
+    if (row) return row;
+    // Default kayıt yoksa oluştur
+    const [created] = await db.insert(tahsilatAyarlari).values({
+      id: DatabaseStorage.TAHSILAT_AYARLARI_ID,
+      vipEsik: "5000000",
+      yuksekBakiyeEsik: "500000",
+      eskiOdemeEsik: 30,
+      cokEskiOdemeEsik: 60,
+      eksiPozisyonYuzde: 20,
+      faturaPenceresi: 90,
+    }).returning();
+    return created;
+  }
+
+  async updateTahsilatAyarlari(data: Partial<InsertTahsilatAyarlari>): Promise<TahsilatAyarlari> {
+    await this.getTahsilatAyarlari(); // varlığı garanti et
+    const [row] = await db
+      .update(tahsilatAyarlari)
+      .set({ ...data, guncellenme: new Date() })
+      .where(eq(tahsilatAyarlari.id, DatabaseStorage.TAHSILAT_AYARLARI_ID))
+      .returning();
     return row;
   }
 }
