@@ -108,6 +108,24 @@ import { AIChat } from "@/components/AIChat";
   return aylar.find((a) => a.value === value)?.label || value;
 }
 
+// Tarihi dd/mm/yyyy formatına getirir. new Date(...) KULLANMAZ — timezone bug riskini önler.
+// Kabul ettiği girdiler: "dd.mm.yyyy", "dd/mm/yyyy", "dd-mm-yyyy", "yyyy-mm-dd"
+function formatTarihDisplay(value: string | null | undefined): string {
+  if (!value) return "-";
+  const s = String(value).trim();
+  if (!s) return "-";
+  const parts = s.split(/[.\/\-]/).map((p) => p.trim());
+  if (parts.length !== 3) return s;
+  const [a, b, c] = parts;
+  const pad = (x: string) => (x.length === 1 ? `0${x}` : x);
+  if (a.length === 4) {
+    // yyyy-mm-dd
+    return `${pad(c)}/${pad(b)}/${a}`;
+  }
+  // dd.mm.yyyy / dd/mm/yyyy / dd-mm-yyyy
+  return `${pad(a)}/${pad(b)}/${c}`;
+}
+
         function getAySira(value: string): number {
   return aylar.find((a) => a.value === value)?.sira || 0;
 }
@@ -152,7 +170,7 @@ type Arac = {
                 const [isGiderUploadModalOpen, setIsGiderUploadModalOpen] = useState(false);
                 const [selectedGiderAy, setSelectedGiderAy] = useState<string>("toplam");
                   const [selectedGiderYil, setSelectedGiderYil] = useState<string>(String(currentYear));
-                    const [sortConfig, setSortConfig] = useState<{ key: keyof Gider | 'tryTutar' | null; direction: 'asc' | 'desc' }>({key: null, direction: 'asc' });
+                    const [sortConfig, setSortConfig] = useState<{ key: keyof Gider | 'tryTutar' | null; direction: 'asc' | 'desc' }>({key: 'tarih', direction: 'desc' });
                     const [editingGider, setEditingGider] = useState<Gider | null>(null);
                     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
                     const { toast } = useToast();
@@ -493,35 +511,61 @@ type Arac = {
     if (!giderler) return [];
                     if (!sortConfig.key) return giderler;
 
+    const parseDate = (d: unknown): number => {
+      if (d == null) return Number.NEGATIVE_INFINITY;
+      const s = String(d).trim();
+      if (!s) return Number.NEGATIVE_INFINITY;
+      const parts = s.split(/[.\/\-]/).map((p) => p.trim());
+      if (parts.length !== 3) return Number.NEGATIVE_INFINITY;
+      let d1: number, m: number, y: number;
+      if (parts[0].length === 4) {
+        // YYYY-MM-DD
+        y = Number(parts[0]); m = Number(parts[1]); d1 = Number(parts[2]);
+      } else {
+        // dd.mm.yyyy / dd/mm/yyyy / dd-mm-yyyy
+        d1 = Number(parts[0]); m = Number(parts[1]); y = Number(parts[2]);
+      }
+      if (!y || !m || !d1) return Number.NEGATIVE_INFINITY;
+      return new Date(y, m - 1, d1).getTime();
+    };
+
     return [...giderler].sort((a, b) => {
       const aValue = a[sortConfig.key as keyof Gider];
-                    const bValue = b[sortConfig.key as keyof Gider];
+      const bValue = b[sortConfig.key as keyof Gider];
 
-                    if (sortConfig.key === 'tarih') {
-        const parseDate = (d: string) => {
-          const parts = d.split('.');
-                    return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
-        };
-                    const dateA = parseDate(String(aValue));
-                    const dateB = parseDate(String(bValue));
-                    return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
+      if (sortConfig.key === 'tarih') {
+        const dateA = parseDate(aValue);
+        const dateB = parseDate(bValue);
+        return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
       }
 
-                    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      // Sayısal sütunlar (string olarak gelse de Number'a çevrilir)
+      const NUMERIC_KEYS = new Set(['malBedeli', 'kdvTutari', 'toplamTutar', 'tryTutar']);
+      if (NUMERIC_KEYS.has(String(sortConfig.key))) {
+        const na = Number(aValue ?? 0);
+        const nb = Number(bValue ?? 0);
+        const sa = Number.isNaN(na) ? 0 : na;
+        const sb = Number.isNaN(nb) ? 0 : nb;
+        return sortConfig.direction === 'asc' ? sa - sb : sb - sa;
+      }
+
+      if (typeof aValue === 'number' && typeof bValue === 'number') {
         return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
       }
 
-                    if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortConfig.direction === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
-      }
-
-                    return 0;
+      const sa = (aValue ?? '') as string | number;
+      const sb = (bValue ?? '') as string | number;
+      return sortConfig.direction === 'asc'
+        ? String(sa).localeCompare(String(sb), 'tr', { numeric: true, sensitivity: 'base' })
+        : String(sb).localeCompare(String(sa), 'tr', { numeric: true, sensitivity: 'base' });
     });
   }, [giderler, sortConfig]);
 
                     const SortIcon = ({column}: {column: keyof Gider | 'tryTutar' }) => {
-    if (sortConfig.key !== column) return <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />;
-                    return sortConfig.direction === 'asc' ? <ArrowUp className="ml-2 h-4 w-4" /> : <ArrowDown className="ml-2 h-4 w-4" />;
+    if (sortConfig.key !== column) return <ArrowUpDown className="ml-1.5 h-3.5 w-3.5 opacity-40" />;
+                    return sortConfig.direction === 'asc'
+      ? <ArrowUp className="ml-1.5 h-3.5 w-3.5 text-primary" />
+      : <ArrowDown className="ml-1.5 h-3.5 w-3.5 text-primary" />;
   };
 
 
@@ -1462,146 +1506,151 @@ type Arac = {
 
                               {/* Data Table */}
                               <Card>
-                                <CardHeader>
+                                <CardHeader className="flex flex-row items-center justify-between">
                                   <CardTitle>Gider Listesi</CardTitle>
+                                  <span className="text-sm text-muted-foreground tabular-nums">
+                                    {sortedGiderler?.length ?? 0} kayıt
+                                  </span>
                                 </CardHeader>
                                 <CardContent>
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('tarih')}>
-                                          <div className="flex items-center">Tarih <SortIcon column="tarih" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('firma')}>
-                                          <div className="flex items-center">Firma <SortIcon column="firma" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('faturaNo')}>
-                                          <div className="flex items-center">Fatura No <SortIcon column="faturaNo" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50 text-right" onClick={() => handleSort('malBedeli')}>
-                                          <div className="flex items-center justify-end">Mal Bedeli <SortIcon column="malBedeli" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50 text-right" onClick={() => handleSort('kdvTutari')}>
-                                          <div className="flex items-center justify-end">KDV <SortIcon column="kdvTutari" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50 text-right" onClick={() => handleSort('toplamTutar')}>
-                                          <div className="flex items-center justify-end">Toplam (Orj) <SortIcon column="toplamTutar" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('paraBirimi')}>
-                                          <div className="flex items-center">Para Birimi <SortIcon column="paraBirimi" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50 text-right" onClick={() => handleSort('kur')}>
-                                          <div className="flex items-center justify-end">Kur <SortIcon column="kur" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50 text-right" onClick={() => handleSort('tryTutar')}>
-                                          <div className="flex items-center justify-end">TRY Tutar <SortIcon column="tryTutar" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('sube')}>
-                                          <div className="flex items-center">Şube <SortIcon column="sube" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('kategori')}>
-                                          <div className="flex items-center">Kategori <SortIcon column="kategori" /></div>
-                                        </TableHead>
-                                        <TableHead>Plaka</TableHead>
-                                        <TableHead className="w-[50px]"></TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {giderlerLoading ? (
-                                        <TableRow>
-                                          <TableCell colSpan={13} className="text-center py-8">
-                                            <Loader2 className="w-8 h-8 animate-spin mx-auto text-muted-foreground" />
-                                          </TableCell>
-                                        </TableRow>
-                                      ) : giderlerError ? (
-                                        <TableRow>
-                                          <TableCell colSpan={13} className="text-center py-8 text-red-500">
-                                            Veriler yüklenirken hata oluştu. <button className="underline" onClick={() => refetchGiderler()}>Tekrar dene</button>
-                                          </TableCell>
-                                        </TableRow>
-                                      ) : sortedGiderler?.length === 0 ? (
-                                        <TableRow>
-                                          <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
-                                            Kayıt bulunamadı
-                                          </TableCell>
-                                        </TableRow>
-                                      ) : (
-                                        sortedGiderler?.map((gider) => (
-                                          <TableRow key={gider.id}>
-                                            <TableCell>{gider.tarih}</TableCell>
-                                            <TableCell>{gider.firma}</TableCell>
-                                            <TableCell>{gider.faturaNo}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(gider.malBedeli)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(gider.kdvTutari)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(gider.toplamTutar)}</TableCell>
-                                            <TableCell>{gider.paraBirimi}</TableCell>
-                                            <TableCell className="text-right">{Number(gider.kur).toFixed(4)}</TableCell>
-                                            <TableCell className="text-right font-bold">{formatCurrency(gider.tryTutar)}</TableCell>
-                                            <TableCell className="p-2">
-                                              <Select 
-                                                defaultValue={gider.sube || ""} 
-                                                onValueChange={(val) => handleInlineUpdate(gider.id, 'sube', val)}
-                                              >
-                                                <SelectTrigger className="h-8 w-[130px]">
-                                                  <SelectValue placeholder="Seçiniz" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                  {subeler.map((s) => (
-                                                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                                                  ))}
-                                                </SelectContent>
-                                              </Select>
-                                            </TableCell>
-                                            <TableCell className="p-2">
-                                               <Select
-                                                defaultValue={gider.kategori || ""}
-                                                onValueChange={(val) => {
-                                                  handleInlineUpdate(gider.id, 'kategori', val);
-                                                  // Araç kategorisi değilse plakayı temizle
-                                                  if (!ARAC_KATEGORILERI.includes(val)) {
-                                                    handleInlineUpdate(gider.id, 'plaka', null);
-                                                  }
-                                                }}
-                                              >
-                                                <SelectTrigger className="h-8 w-[140px]">
-                                                  <SelectValue placeholder="Seçiniz" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                  {categories?.map((c) => (
-                                                    <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
-                                                  ))}
-                                                </SelectContent>
-                                              </Select>
-                                            </TableCell>
-                                            <TableCell className="p-2">
-                                              {ARAC_KATEGORILERI.includes(gider.kategori || "") ? (
-                                                <Select
-                                                  defaultValue={gider.plaka || ""}
-                                                  onValueChange={(val) => handleInlineUpdate(gider.id, 'plaka', val)}
-                                                >
-                                                  <SelectTrigger className="h-8 w-[120px]">
-                                                    <SelectValue placeholder="Plaka seç" />
-                                                  </SelectTrigger>
-                                                  <SelectContent>
-                                                    {araclar?.map((a) => (
-                                                      <SelectItem key={a.id} value={a.plaka}>{a.plaka}</SelectItem>
-                                                    ))}
-                                                  </SelectContent>
-                                                </Select>
-                                              ) : (
-                                                <span className="text-muted-foreground text-xs">-</span>
-                                              )}
-                                            </TableCell>
-                                            <TableCell>
-                                              <Button variant="ghost" size="icon" onClick={() => { setEditingGider(gider); setIsEditModalOpen(true); }}>
-                                                <Pencil className="w-4 h-4" />
-                                              </Button>
-                                            </TableCell>
+                                  <div className="rounded-md border bg-card w-full overflow-hidden">
+                                    <div className="max-h-[70vh] overflow-y-auto overflow-x-hidden">
+                                      <Table className="text-xs w-full">
+                                        <TableHeader className="sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                                          <TableRow className="hover:bg-transparent border-b">
+                                            <TableHead onClick={() => handleSort('tarih')} className="cursor-pointer select-none whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[92px]">
+                                              <div className="flex items-center">Tarih <SortIcon column="tarih" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('firma')} className="cursor-pointer select-none font-semibold text-foreground hover:bg-muted h-9 px-2">
+                                              <div className="flex items-center">Firma <SortIcon column="firma" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('faturaNo')} className="cursor-pointer select-none font-semibold text-foreground hover:bg-muted h-9 px-2 w-[110px]">
+                                              <div className="flex items-center">Fatura No <SortIcon column="faturaNo" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('malBedeli')} className="cursor-pointer select-none text-right whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[110px]">
+                                              <div className="flex items-center justify-end">Mal Bedeli <SortIcon column="malBedeli" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('kdvTutari')} className="cursor-pointer select-none text-right whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[100px]">
+                                              <div className="flex items-center justify-end">KDV <SortIcon column="kdvTutari" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('toplamTutar')} className="cursor-pointer select-none text-right whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[110px]">
+                                              <div className="flex items-center justify-end">Toplam <SortIcon column="toplamTutar" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('paraBirimi')} className="cursor-pointer select-none whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[60px]">
+                                              <div className="flex items-center">Brm <SortIcon column="paraBirimi" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('tryTutar')} className="cursor-pointer select-none text-right whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[120px]">
+                                              <div className="flex items-center justify-end">TRY Tutar <SortIcon column="tryTutar" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('sube')} className="cursor-pointer select-none whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[125px]">
+                                              <div className="flex items-center">Şube <SortIcon column="sube" /></div>
+                                            </TableHead>
+                                            <TableHead onClick={() => handleSort('kategori')} className="cursor-pointer select-none whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[140px]">
+                                              <div className="flex items-center">Kategori <SortIcon column="kategori" /></div>
+                                            </TableHead>
+                                            <TableHead className="font-semibold text-foreground h-9 px-2 w-[110px]">Plaka</TableHead>
+                                            <TableHead className="h-9 px-1 w-[40px]"></TableHead>
                                           </TableRow>
-                                        ))
-                                      )}
-                                    </TableBody>
-                                  </Table>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {giderlerLoading ? (
+                                            <TableRow>
+                                              <TableCell colSpan={12} className="text-center py-12">
+                                                <Loader2 className="w-8 h-8 animate-spin mx-auto text-muted-foreground" />
+                                              </TableCell>
+                                            </TableRow>
+                                          ) : giderlerError ? (
+                                            <TableRow>
+                                              <TableCell colSpan={12} className="text-center py-12 text-destructive">
+                                                Veriler yüklenirken hata oluştu. <button className="underline" onClick={() => refetchGiderler()}>Tekrar dene</button>
+                                              </TableCell>
+                                            </TableRow>
+                                          ) : sortedGiderler?.length === 0 ? (
+                                            <TableRow>
+                                              <TableCell colSpan={12} className="text-center py-12 text-muted-foreground">
+                                                Kayıt bulunamadı
+                                              </TableCell>
+                                            </TableRow>
+                                          ) : (
+                                            sortedGiderler?.map((gider, idx) => (
+                                              <TableRow
+                                                key={gider.id}
+                                                className={`${idx % 2 === 0 ? 'bg-background' : 'bg-muted/30'} hover:bg-accent/50 transition-colors`}
+                                              >
+                                                <TableCell className="whitespace-nowrap tabular-nums font-medium px-2 py-1.5">{formatTarihDisplay(gider.tarih)}</TableCell>
+                                                <TableCell className="font-medium px-2 py-1.5 break-words" title={gider.firma ?? undefined}>{gider.firma}</TableCell>
+                                                <TableCell className="text-muted-foreground px-2 py-1.5 truncate max-w-[110px]" title={gider.faturaNo ?? undefined}>{gider.faturaNo}</TableCell>
+                                                <TableCell className="text-right tabular-nums whitespace-nowrap px-2 py-1.5">{formatCurrency(gider.malBedeli)}</TableCell>
+                                                <TableCell className="text-right tabular-nums whitespace-nowrap px-2 py-1.5">{formatCurrency(gider.kdvTutari)}</TableCell>
+                                                <TableCell className="text-right tabular-nums whitespace-nowrap px-2 py-1.5">{formatCurrency(gider.toplamTutar)}</TableCell>
+                                                <TableCell className="whitespace-nowrap px-2 py-1.5">{gider.paraBirimi}</TableCell>
+                                                <TableCell className="text-right tabular-nums whitespace-nowrap font-semibold text-foreground px-2 py-1.5">{formatCurrency(gider.tryTutar)}</TableCell>
+                                                <TableCell className="px-1 py-1">
+                                                  <Select
+                                                    defaultValue={gider.sube || ""}
+                                                    onValueChange={(val) => handleInlineUpdate(gider.id, 'sube', val)}
+                                                  >
+                                                    <SelectTrigger className="h-7 w-full text-xs px-2">
+                                                      <SelectValue placeholder="Seçiniz" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                      {subeler.map((s) => (
+                                                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                                                      ))}
+                                                    </SelectContent>
+                                                  </Select>
+                                                </TableCell>
+                                                <TableCell className="px-1 py-1">
+                                                  <Select
+                                                    defaultValue={gider.kategori || ""}
+                                                    onValueChange={(val) => {
+                                                      handleInlineUpdate(gider.id, 'kategori', val);
+                                                      if (!ARAC_KATEGORILERI.includes(val)) {
+                                                        handleInlineUpdate(gider.id, 'plaka', null);
+                                                      }
+                                                    }}
+                                                  >
+                                                    <SelectTrigger className="h-7 w-full text-xs px-2">
+                                                      <SelectValue placeholder="Seçiniz" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                      {categories?.map((c) => (
+                                                        <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                                                      ))}
+                                                    </SelectContent>
+                                                  </Select>
+                                                </TableCell>
+                                                <TableCell className="px-1 py-1">
+                                                  {ARAC_KATEGORILERI.includes(gider.kategori || "") ? (
+                                                    <Select
+                                                      defaultValue={gider.plaka || ""}
+                                                      onValueChange={(val) => handleInlineUpdate(gider.id, 'plaka', val)}
+                                                    >
+                                                      <SelectTrigger className="h-7 w-full text-xs px-2">
+                                                        <SelectValue placeholder="Plaka" />
+                                                      </SelectTrigger>
+                                                      <SelectContent>
+                                                        {araclar?.map((a) => (
+                                                          <SelectItem key={a.id} value={a.plaka}>{a.plaka}</SelectItem>
+                                                        ))}
+                                                      </SelectContent>
+                                                    </Select>
+                                                  ) : (
+                                                    <span className="text-muted-foreground text-xs">-</span>
+                                                  )}
+                                                </TableCell>
+                                                <TableCell className="px-1 py-1">
+                                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditingGider(gider); setIsEditModalOpen(true); }}>
+                                                    <Pencil className="w-3.5 h-3.5" />
+                                                  </Button>
+                                                </TableCell>
+                                              </TableRow>
+                                            ))
+                                          )}
+                                        </TableBody>
+                                      </Table>
+                                    </div>
+                                  </div>
                                 </CardContent>
                               </Card>
 
