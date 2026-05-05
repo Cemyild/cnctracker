@@ -822,3 +822,128 @@ export const yonetimAksiyonlar = pgTable("yonetim_aksiyonlar", {
 export const insertYonetimAksiyonSchema = createInsertSchema(yonetimAksiyonlar).omit({ id: true, olusturmaTarihi: true });
 export type InsertYonetimAksiyon = z.infer<typeof insertYonetimAksiyonSchema>;
 export type YonetimAksiyon = typeof yonetimAksiyonlar.$inferSelect;
+
+// ============================================================================
+// MÜŞTERİ TAHSİLAT MODÜLÜ
+// ============================================================================
+
+export const musteriler = pgTable("musteriler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  hesapKodu: text("hesap_kodu").notNull(),       // "120-01-000-002"
+  ad: text("ad").notNull(),
+  sektor: text("sektor"),
+  firmaGrubu: text("firma_grubu"),
+  limitTutar: decimal("limit_tutar", { precision: 18, scale: 2 }),
+  problemli: boolean("problemli").notNull().default(false),
+  gumrukFirmaUnvanlari: text("gumruk_firma_unvanlari").array().notNull().default(sql`'{}'::text[]`),
+  sonGoruldugu: timestamp("son_goruldugu"),
+  ilkGoruldugu: timestamp("ilk_goruldugu").defaultNow(),
+}, (table) => [
+  uniqueIndex("musteriler_hesap_kodu_idx").on(table.hesapKodu),
+  index("musteriler_son_goruldugu_idx").on(table.sonGoruldugu),
+]);
+
+export const insertMusteriSchema = createInsertSchema(musteriler).omit({
+  id: true,
+  ilkGoruldugu: true,
+});
+export type InsertMusteri = z.infer<typeof insertMusteriSchema>;
+export type Musteri = typeof musteriler.$inferSelect;
+
+export const mizanYuklemeleri = pgTable("mizan_yuklemeleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  mizanTarihi: text("mizan_tarihi").notNull(),    // YYYY-MM-DD
+  filename: text("filename").notNull(),
+  filepath: text("filepath").notNull(),
+  sizeBytes: integer("size_bytes"),
+  md5Hash: text("md5_hash"),
+  kayitSayisi: integer("kayit_sayisi").notNull().default(0),
+  toplamNetBakiye: decimal("toplam_net_bakiye", { precision: 18, scale: 2 }),
+  yuklemeTarihi: timestamp("yukleme_tarihi").defaultNow(),
+  not: text("not"),
+}, (table) => [
+  index("mizan_yukleme_tarih_idx").on(table.mizanTarihi),
+  index("mizan_yukleme_md5_idx").on(table.md5Hash),
+]);
+
+export const insertMizanYuklemeSchema = createInsertSchema(mizanYuklemeleri).omit({
+  id: true,
+  yuklemeTarihi: true,
+});
+export type InsertMizanYukleme = z.infer<typeof insertMizanYuklemeSchema>;
+export type MizanYukleme = typeof mizanYuklemeleri.$inferSelect;
+
+export const mizanBakiye = pgTable("mizan_bakiye", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  mizanId: varchar("mizan_id").notNull().references(() => mizanYuklemeleri.id, { onDelete: "cascade" }),
+  musteriId: varchar("musteri_id").notNull().references(() => musteriler.id, { onDelete: "cascade" }),
+  borc: decimal("borc", { precision: 18, scale: 2 }),
+  alacak: decimal("alacak", { precision: 18, scale: 2 }),
+  bakiyeBorc: decimal("bakiye_borc", { precision: 18, scale: 2 }),
+  bakiyeAlacak: decimal("bakiye_alacak", { precision: 18, scale: 2 }),
+  sonBakiye: decimal("son_bakiye", { precision: 18, scale: 2 }),
+  sonBakiyeBA: text("son_bakiye_ba").default("B"),
+  sonBorcTarihi: text("son_borc_tarihi"),
+  sonAlacakTarihi: text("son_alacak_tarihi"),
+}, (table) => [
+  index("mizan_bakiye_musteri_mizan_idx").on(table.musteriId, table.mizanId),
+  uniqueIndex("mizan_bakiye_unique_idx").on(table.mizanId, table.musteriId),
+]);
+
+export const insertMizanBakiyeSchema = createInsertSchema(mizanBakiye).omit({ id: true });
+export type InsertMizanBakiye = z.infer<typeof insertMizanBakiyeSchema>;
+export type MizanBakiye = typeof mizanBakiye.$inferSelect;
+
+export const mizanEslestirmeLog = pgTable("mizan_eslestirme_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  musteriId: varchar("musteri_id").notNull().references(() => musteriler.id, { onDelete: "cascade" }),
+  gumrukUnvan: text("gumruk_unvan").notNull(),
+  eklemeTarihi: timestamp("ekleme_tarihi").defaultNow(),
+  eklemeTipi: text("ekleme_tipi").notNull(),     // 'auto-fuzzy' | 'manual'
+  benzerlikSkoru: decimal("benzerlik_skoru", { precision: 4, scale: 3 }),
+}, (table) => [
+  index("eslestirme_log_musteri_idx").on(table.musteriId),
+]);
+
+export const insertEslestirmeLogSchema = createInsertSchema(mizanEslestirmeLog).omit({
+  id: true,
+  eklemeTarihi: true,
+});
+export type InsertEslestirmeLog = z.infer<typeof insertEslestirmeLogSchema>;
+export type EslestirmeLog = typeof mizanEslestirmeLog.$inferSelect;
+
+export const mizanEslestirmeOnerileri = pgTable("mizan_eslestirme_onerileri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  musteriId: varchar("musteri_id").notNull().references(() => musteriler.id, { onDelete: "cascade" }),
+  gumrukUnvan: text("gumruk_unvan").notNull(),
+  benzerlikSkoru: decimal("benzerlik_skoru", { precision: 4, scale: 3 }).notNull(),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+  reddedildi: boolean("reddedildi").notNull().default(false),
+}, (table) => [
+  index("oneriler_musteri_idx").on(table.musteriId, table.reddedildi),
+  uniqueIndex("oneriler_unique_idx").on(table.musteriId, table.gumrukUnvan),
+]);
+
+export const insertEslestirmeOneriSchema = createInsertSchema(mizanEslestirmeOnerileri).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertEslestirmeOneri = z.infer<typeof insertEslestirmeOneriSchema>;
+export type EslestirmeOneri = typeof mizanEslestirmeOnerileri.$inferSelect;
+
+export const tahsilatAyarlari = pgTable("tahsilat_ayarlari", {
+  id: varchar("id").primaryKey(),
+  vipEsik: decimal("vip_esik", { precision: 18, scale: 2 }).notNull().default("5000000"),
+  yuksekBakiyeEsik: decimal("yuksek_bakiye_esik", { precision: 18, scale: 2 }).notNull().default("500000"),
+  eskiOdemeEsik: integer("eski_odeme_esik").notNull().default(30),
+  cokEskiOdemeEsik: integer("cok_eski_odeme_esik").notNull().default(60),
+  eksiPozisyonYuzde: integer("eksi_pozisyon_yuzde").notNull().default(20),
+  faturaPenceresi: integer("fatura_penceresi").notNull().default(90),
+  guncellenme: timestamp("guncellenme").defaultNow(),
+});
+
+export const insertTahsilatAyarlariSchema = createInsertSchema(tahsilatAyarlari).omit({
+  guncellenme: true,
+});
+export type InsertTahsilatAyarlari = z.infer<typeof insertTahsilatAyarlariSchema>;
+export type TahsilatAyarlari = typeof tahsilatAyarlari.$inferSelect;
