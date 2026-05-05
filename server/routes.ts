@@ -2321,8 +2321,15 @@ export async function registerRoutes(
       // Gümrük fatura toplamlarını tek seferde çek
       const tumGumruk = await storage.getAllGumrukVerileri();
       const faturaPenceresi = ayarlar.faturaPenceresi;
-      const faturaCutoff = new Date(Date.now() - faturaPenceresi * 86400000);
-      const yillikCutoff = new Date(Date.now() - 365 * 86400000);
+      // Cutoff hesabını mizan tarihinden geriye yap (bugün değil) — geçmiş bir mizan
+      // seçildiğinde fatura penceresi mizan tarihine göre olmalı
+      const refMs = (() => {
+        const m = refTarih.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : Date.now();
+      })();
+      const faturaCutoff = new Date(refMs - faturaPenceresi * 86400000);
+      const yillikCutoff = new Date(refMs - 365 * 86400000);
+      const refMaxDate = new Date(refMs);
 
       // unvan → { son90: number, yillik: number }
       const faturaMap = new Map<string, { son90: number; yillik: number }>();
@@ -2334,6 +2341,8 @@ export async function registerRoutes(
         const tutar = Number(g.topFaturaTutar || 0);
         if (!faturaMap.has(g.firmaUnvan)) faturaMap.set(g.firmaUnvan, { son90: 0, yillik: 0 });
         const entry = faturaMap.get(g.firmaUnvan)!;
+        // Sadece mizan tarihine kadar olan faturalar (geçmiş mizan referansı için)
+        if (fTarih > refMaxDate) continue;
         if (fTarih >= yillikCutoff) entry.yillik += tutar;
         if (fTarih >= faturaCutoff) entry.son90 += tutar;
       }
