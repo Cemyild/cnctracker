@@ -115,7 +115,7 @@ import {
   netBakiye, gecikme, isAktivitesiAcigi, bakiyeFaturaAcigi, riskProfili,
   type RiskEsikleri,
 } from "@shared/tahsilatHesaplari";
-import { type InsertMusteri, type InsertMizanYukleme, type InsertMizanBakiye, type InsertEslestirmeOneri, musteriler } from "@shared/schema";
+import { type InsertMusteri, type InsertMizanYukleme, type InsertMizanBakiye, type InsertEslestirmeOneri, musteriler, mizanEslestirmeOnerileri } from "@shared/schema";
 import { db } from "./db";
 import { inArray } from "drizzle-orm";
 
@@ -2445,6 +2445,74 @@ export async function registerRoutes(
       if (!r) return res.status(404).json({ error: "Bulunamadı" });
       res.json(r);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Tüm bekleyen önerileri sil + algoritmayı yeniden çalıştır
+  // (Algoritma değişikliği sonrası mevcut önerileri tazelemek için)
+  app.post("/api/tahsilat/eslestirme/reset", async (_req, res) => {
+    try {
+      // Tüm bekleyen önerileri sil (reddedildi=false olanlar)
+      const silinen = await db.delete(mizanEslestirmeOnerileri).returning({ id: mizanEslestirmeOnerileri.id });
+
+      // Hiç gümrük unvanı eşleşmesi olmayan müşteriler için yeniden öner
+      const tumMusteriler = await db.select().from(musteriler);
+      const eslesmesizMusteriler = tumMusteriler.filter(
+        (m) => !m.gumrukFirmaUnvanlari || m.gumrukFirmaUnvanlari.length === 0,
+      );
+
+      // Gümrük unvanlarını çek
+      const gumrukUnvanSet = new Set<string>();
+      const gumrukVeriler = await storage.getAllGumrukVerileri();
+      gumrukVeriler.forEach((g) => { if (g.firmaUnvan) gumrukUnvanSet.add(g.firmaUnvan); });
+      const gumrukUnvanlar = Array.from(gumrukUnvanSet);
+
+      let yeniOneri = 0;
+      let yeniOtomatik = 0;
+      for (const m of eslesmesizMusteriler) {
+        let gumrukEslesen: string | null = null;
+        let gumrukEslesenSkor: number = 0;
+        const oneriler: { unvan: string; skor: number }[] = [];
+        for (const u of gumrukUnvanlar) {
+          const s = benzerlikSkoru(m.ad, u);
+          if (s >= ESLESME_AUTO_ESIK && !gumrukEslesen) {
+            gumrukEslesen = u;
+            gumrukEslesenSkor = s;
+          } else if (s >= ESLESME_ONERI_ESIK && s < ESLESME_AUTO_ESIK) {
+            oneriler.push({ unvan: u, skor: s });
+          }
+        }
+        if (gumrukEslesen) {
+          await storage.addGumrukUnvan(m.id, gumrukEslesen);
+          await storage.insertEslestirmeLog({
+            musteriId: m.id,
+            gumrukUnvan: gumrukEslesen,
+            eklemeTipi: "auto-fuzzy",
+            benzerlikSkoru: gumrukEslesenSkor.toFixed(3),
+          });
+          yeniOtomatik++;
+        }
+        // En yüksek 5 öneri
+        oneriler.sort((a, b) => b.skor - a.skor);
+        for (const o of oneriler.slice(0, 5)) {
+          await storage.insertEslestirmeOneri({
+            musteriId: m.id,
+            gumrukUnvan: o.unvan,
+            benzerlikSkoru: o.skor.toFixed(3),
+          });
+          yeniOneri++;
+        }
+      }
+
+      res.json({
+        silinenEskiOneri: silinen.length,
+        kontroliMusteri: eslesmesizMusteriler.length,
+        yeniOtomatikEslesen: yeniOtomatik,
+        yeniOneri,
+      });
+    } catch (e: any) {
+      console.error("Eşleştirme reset hatası:", e);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // 14. Manuel ekleme/silme + ayarlar
