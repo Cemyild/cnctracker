@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { subeler } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -687,7 +688,18 @@ export default function Calisanlar() {
         <div className="relative min-h-screen pb-20">
             <BackgroundPaths />
 
-            <div className="relative z-10 p-6 lg:p-8 max-w-[1600px] mx-auto space-y-8">
+            <div className="relative z-10 p-6 lg:p-8 max-w-[1600px] mx-auto">
+              <Tabs defaultValue="maaslar" className="w-full">
+                <TabsList className="mb-6">
+                  <TabsTrigger value="maaslar" className="gap-2">
+                    <Wallet className="w-4 h-4" /> Maaşlar
+                  </TabsTrigger>
+                  <TabsTrigger value="izinler" className="gap-2">
+                    <Calendar className="w-4 h-4" /> İzinler
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="maaslar" className="space-y-8">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                     <div>
                         <h2 className="text-4xl font-black tracking-tight bg-gradient-to-r from-foreground to-foreground/50 bg-clip-text text-transparent">Personel Portalı</h2>
@@ -895,6 +907,27 @@ export default function Calisanlar() {
                         </Card>
                     )}
                 </div>
+                </TabsContent>
+
+                <TabsContent value="izinler" className="space-y-6">
+                  <Tabs defaultValue="takvim" className="w-full">
+                    <TabsList>
+                      <TabsTrigger value="takvim">Aylık Takvim</TabsTrigger>
+                      <TabsTrigger value="liste">İzin Listesi</TabsTrigger>
+                      <TabsTrigger value="bakiye">Bakiye Yönetimi</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="takvim" className="mt-6">
+                      <div className="text-muted-foreground text-center py-12">Takvim — Task 11'de gelecek</div>
+                    </TabsContent>
+                    <TabsContent value="liste" className="mt-6">
+                      <div className="text-muted-foreground text-center py-12">Liste — Task 9'da gelecek</div>
+                    </TabsContent>
+                    <TabsContent value="bakiye" className="mt-6">
+                      <div className="text-muted-foreground text-center py-12">Bakiye — Task 8'de gelecek</div>
+                    </TabsContent>
+                  </Tabs>
+                </TabsContent>
+              </Tabs>
             </div>
 
             {/* Detaylı Hesaplama Modal */}
