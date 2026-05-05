@@ -3,6 +3,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { storage } from "./storage";
 
 const app = express();
 const httpServer = createServer(app);
@@ -90,4 +91,11 @@ app.use((req, res, next) => {
   httpServer.listen(port, "0.0.0.0", () => {
     log(`serving on port ${port}`);
   });
+
+  // İzin sistemi: resmi tatilleri seed et (idempotent)
+  storage.seedResmiTatiller()
+    .then((r) => {
+      if (r.inserted > 0) log(`✓ ${r.inserted} resmi tatil eklendi.`, "izin-seed");
+    })
+    .catch((e) => log(`Resmi tatil seed hatası: ${e.message}`, "izin-seed"));
 })();

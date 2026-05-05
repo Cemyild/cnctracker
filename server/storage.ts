@@ -13,7 +13,10 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   yonetimAksiyonlar, type YonetimAksiyon, type InsertYonetimAksiyon,
   bakimVarliklar, type BakimVarlik, type InsertBakimVarlik,
   bakimKayitlari, type BakimKayit, type InsertBakimKayit,
-  bordroDosyalar, type BordroDosya, type InsertBordroDosya } from "@shared/schema";
+  bordroDosyalar, type BordroDosya, type InsertBordroDosya,
+  calisanIzinler, type CalisanIzin, type InsertCalisanIzin,
+  calisanIzinAcilisBakiyesi, type AcilisBakiye, type InsertAcilisBakiye,
+  resmiTatiller, type ResmiTatil, type InsertResmiTatil } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import { db } from "./db";
@@ -288,6 +291,22 @@ export interface IStorage {
   // Toplu upsert: maaş listesinden gelen aylık çalışan kayıtlarını
   // (tcNo + ay + yıl unique) varsa günceller, yoksa ekler
   upsertCalisanlarToplu(kayitlar: InsertCalisan[]): Promise<{ inserted: number; updated: number }>;
+
+  // İzin sistemi — kayıtlar
+  getIzinler(filter?: { yil?: number; tcNo?: string; tur?: string }): Promise<CalisanIzin[]>;
+  getIzinlerForCalendar(yil: number, ay: number): Promise<CalisanIzin[]>;
+  insertIzin(data: InsertCalisanIzin): Promise<CalisanIzin>;
+  updateIzin(id: string, data: Partial<InsertCalisanIzin>): Promise<CalisanIzin | null>;
+  deleteIzin(id: string): Promise<{ success: boolean }>;
+
+  // İzin sistemi — açılış bakiyesi
+  getAcilisBakiyeler(): Promise<AcilisBakiye[]>;
+  getAcilisBakiye(tcNo: string): Promise<AcilisBakiye | null>;
+  upsertAcilisBakiye(data: InsertAcilisBakiye): Promise<AcilisBakiye>;
+
+  // İzin sistemi — resmi tatiller
+  seedResmiTatiller(): Promise<{ inserted: number }>;
+  getResmiTatiller(yil?: number): Promise<ResmiTatil[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2558,6 +2577,170 @@ export class DatabaseStorage implements IStorage {
     }
 
     return { inserted, updated };
+  }
+
+  // ============================================================================
+  // İZİN SİSTEMİ — RESMİ TATİL SEED
+  // ============================================================================
+
+  // 2024-2030 arası TR resmi tatilleri (sabit + hicri).
+  // Hicri bayramları her yıl Diyanet takviminden teyit edilir.
+  private static readonly RESMI_TATILLER_DATA: { tarih: string; ad: string }[] = [
+    // SABİT
+    ...["2024", "2025", "2026", "2027", "2028", "2029", "2030"].flatMap((y) => [
+      { tarih: `${y}-01-01`, ad: "Yılbaşı" },
+      { tarih: `${y}-04-23`, ad: "Ulusal Egemenlik ve Çocuk Bayramı" },
+      { tarih: `${y}-05-01`, ad: "Emek ve Dayanışma Günü" },
+      { tarih: `${y}-05-19`, ad: "Atatürk'ü Anma, Gençlik ve Spor Bayramı" },
+      { tarih: `${y}-07-15`, ad: "Demokrasi ve Milli Birlik Günü" },
+      { tarih: `${y}-08-30`, ad: "Zafer Bayramı" },
+      { tarih: `${y}-10-29`, ad: "Cumhuriyet Bayramı" },
+    ]),
+    // HİCRİ — Diyanet takviminden alınan tarihler
+    // 2024
+    { tarih: "2024-04-10", ad: "Ramazan Bayramı 1. Gün" },
+    { tarih: "2024-04-11", ad: "Ramazan Bayramı 2. Gün" },
+    { tarih: "2024-04-12", ad: "Ramazan Bayramı 3. Gün" },
+    { tarih: "2024-06-16", ad: "Kurban Bayramı 1. Gün" },
+    { tarih: "2024-06-17", ad: "Kurban Bayramı 2. Gün" },
+    { tarih: "2024-06-18", ad: "Kurban Bayramı 3. Gün" },
+    { tarih: "2024-06-19", ad: "Kurban Bayramı 4. Gün" },
+    // 2025
+    { tarih: "2025-03-30", ad: "Ramazan Bayramı 1. Gün" },
+    { tarih: "2025-03-31", ad: "Ramazan Bayramı 2. Gün" },
+    { tarih: "2025-04-01", ad: "Ramazan Bayramı 3. Gün" },
+    { tarih: "2025-06-06", ad: "Kurban Bayramı 1. Gün" },
+    { tarih: "2025-06-07", ad: "Kurban Bayramı 2. Gün" },
+    { tarih: "2025-06-08", ad: "Kurban Bayramı 3. Gün" },
+    { tarih: "2025-06-09", ad: "Kurban Bayramı 4. Gün" },
+    // 2026
+    { tarih: "2026-03-20", ad: "Ramazan Bayramı 1. Gün" },
+    { tarih: "2026-03-21", ad: "Ramazan Bayramı 2. Gün" },
+    { tarih: "2026-03-22", ad: "Ramazan Bayramı 3. Gün" },
+    { tarih: "2026-05-27", ad: "Kurban Bayramı 1. Gün" },
+    { tarih: "2026-05-28", ad: "Kurban Bayramı 2. Gün" },
+    { tarih: "2026-05-29", ad: "Kurban Bayramı 3. Gün" },
+    { tarih: "2026-05-30", ad: "Kurban Bayramı 4. Gün" },
+    // 2027
+    { tarih: "2027-03-09", ad: "Ramazan Bayramı 1. Gün" },
+    { tarih: "2027-03-10", ad: "Ramazan Bayramı 2. Gün" },
+    { tarih: "2027-03-11", ad: "Ramazan Bayramı 3. Gün" },
+    { tarih: "2027-05-16", ad: "Kurban Bayramı 1. Gün" },
+    { tarih: "2027-05-17", ad: "Kurban Bayramı 2. Gün" },
+    { tarih: "2027-05-18", ad: "Kurban Bayramı 3. Gün" },
+    { tarih: "2027-05-19", ad: "Kurban Bayramı 4. Gün" },
+    // 2028
+    { tarih: "2028-02-26", ad: "Ramazan Bayramı 1. Gün" },
+    { tarih: "2028-02-27", ad: "Ramazan Bayramı 2. Gün" },
+    { tarih: "2028-02-28", ad: "Ramazan Bayramı 3. Gün" },
+    { tarih: "2028-05-04", ad: "Kurban Bayramı 1. Gün" },
+    { tarih: "2028-05-05", ad: "Kurban Bayramı 2. Gün" },
+    { tarih: "2028-05-06", ad: "Kurban Bayramı 3. Gün" },
+    { tarih: "2028-05-07", ad: "Kurban Bayramı 4. Gün" },
+    // 2029
+    { tarih: "2029-02-14", ad: "Ramazan Bayramı 1. Gün" },
+    { tarih: "2029-02-15", ad: "Ramazan Bayramı 2. Gün" },
+    { tarih: "2029-02-16", ad: "Ramazan Bayramı 3. Gün" },
+    { tarih: "2029-04-24", ad: "Kurban Bayramı 1. Gün" },
+    { tarih: "2029-04-25", ad: "Kurban Bayramı 2. Gün" },
+    { tarih: "2029-04-26", ad: "Kurban Bayramı 3. Gün" },
+    { tarih: "2029-04-27", ad: "Kurban Bayramı 4. Gün" },
+    // 2030
+    { tarih: "2030-02-04", ad: "Ramazan Bayramı 1. Gün" },
+    { tarih: "2030-02-05", ad: "Ramazan Bayramı 2. Gün" },
+    { tarih: "2030-02-06", ad: "Ramazan Bayramı 3. Gün" },
+    { tarih: "2030-04-13", ad: "Kurban Bayramı 1. Gün" },
+    { tarih: "2030-04-14", ad: "Kurban Bayramı 2. Gün" },
+    { tarih: "2030-04-15", ad: "Kurban Bayramı 3. Gün" },
+    { tarih: "2030-04-16", ad: "Kurban Bayramı 4. Gün" },
+  ];
+
+  async seedResmiTatiller(): Promise<{ inserted: number }> {
+    const existing = await db.select({ tarih: resmiTatiller.tarih }).from(resmiTatiller);
+    const existingSet = new Set(existing.map((r) => r.tarih));
+    const yeni = DatabaseStorage.RESMI_TATILLER_DATA
+      .filter((r) => !existingSet.has(r.tarih))
+      .map((r) => ({ ...r, yil: parseInt(r.tarih.slice(0, 4), 10) }));
+    if (yeni.length === 0) return { inserted: 0 };
+    await db.insert(resmiTatiller).values(yeni);
+    return { inserted: yeni.length };
+  }
+
+  async getResmiTatiller(yil?: number): Promise<ResmiTatil[]> {
+    if (yil) {
+      return await db.select().from(resmiTatiller).where(eq(resmiTatiller.yil, yil)).orderBy(resmiTatiller.tarih);
+    }
+    return await db.select().from(resmiTatiller).orderBy(resmiTatiller.tarih);
+  }
+
+  // ============================================================================
+  // İZİN SİSTEMİ — KAYITLAR (CRUD)
+  // ============================================================================
+
+  async getIzinler(filter?: { yil?: number; tcNo?: string; tur?: string }): Promise<CalisanIzin[]> {
+    const filters = [];
+    if (filter?.tcNo) filters.push(eq(calisanIzinler.tcNo, filter.tcNo));
+    if (filter?.tur) filters.push(eq(calisanIzinler.tur, filter.tur));
+    if (filter?.yil) {
+      const start = `${filter.yil}-01-01`;
+      const end = `${filter.yil}-12-31`;
+      filters.push(sql`${calisanIzinler.baslangicTarihi} <= ${end} AND ${calisanIzinler.bitisTarihi} >= ${start}`);
+    }
+    if (filters.length > 0) {
+      return await db.select().from(calisanIzinler).where(and(...filters)).orderBy(desc(calisanIzinler.baslangicTarihi));
+    }
+    return await db.select().from(calisanIzinler).orderBy(desc(calisanIzinler.baslangicTarihi));
+  }
+
+  async getIzinlerForCalendar(yil: number, ay: number): Promise<CalisanIzin[]> {
+    const ayStr = String(ay).padStart(2, "0");
+    const ayBas = `${yil}-${ayStr}-01`;
+    const sonGun = new Date(Date.UTC(yil, ay, 0)).getUTCDate();
+    const ayBit = `${yil}-${ayStr}-${String(sonGun).padStart(2, "0")}`;
+    return await db.select().from(calisanIzinler)
+      .where(sql`${calisanIzinler.baslangicTarihi} <= ${ayBit} AND ${calisanIzinler.bitisTarihi} >= ${ayBas}`)
+      .orderBy(calisanIzinler.baslangicTarihi);
+  }
+
+  async insertIzin(data: InsertCalisanIzin): Promise<CalisanIzin> {
+    const [row] = await db.insert(calisanIzinler).values(data).returning();
+    return row;
+  }
+
+  async updateIzin(id: string, data: Partial<InsertCalisanIzin>): Promise<CalisanIzin | null> {
+    const [row] = await db.update(calisanIzinler).set(data).where(eq(calisanIzinler.id, id)).returning();
+    return row ?? null;
+  }
+
+  async deleteIzin(id: string): Promise<{ success: boolean }> {
+    const result = await db.delete(calisanIzinler).where(eq(calisanIzinler.id, id)).returning({ id: calisanIzinler.id });
+    return { success: result.length > 0 };
+  }
+
+  // ============================================================================
+  // İZİN SİSTEMİ — AÇILIŞ BAKİYESİ
+  // ============================================================================
+
+  async getAcilisBakiyeler(): Promise<AcilisBakiye[]> {
+    return await db.select().from(calisanIzinAcilisBakiyesi);
+  }
+
+  async getAcilisBakiye(tcNo: string): Promise<AcilisBakiye | null> {
+    const [row] = await db.select().from(calisanIzinAcilisBakiyesi).where(eq(calisanIzinAcilisBakiyesi.tcNo, tcNo));
+    return row ?? null;
+  }
+
+  async upsertAcilisBakiye(data: InsertAcilisBakiye): Promise<AcilisBakiye> {
+    const existing = await this.getAcilisBakiye(data.tcNo);
+    if (existing) {
+      const [row] = await db.update(calisanIzinAcilisBakiyesi)
+        .set(data)
+        .where(eq(calisanIzinAcilisBakiyesi.id, existing.id))
+        .returning();
+      return row;
+    }
+    const [row] = await db.insert(calisanIzinAcilisBakiyesi).values(data).returning();
+    return row;
   }
 }
 
