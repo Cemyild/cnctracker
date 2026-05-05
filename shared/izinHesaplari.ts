@@ -3,11 +3,15 @@
 // Tarih hesapları YYYY-MM-DD string parse'ı ile yapılır;
 // Date objeleri sadece UTC midnight için kullanılır (DST etkisi yok).
 
-// YYYY-MM-DD → { yil, ay (1-12), gun }
+// "YYYY-MM-DD" veya "DD.MM.YYYY" → { yil, ay (1-12), gun }
+// İki formatı da kabul ediyoruz çünkü eski bordro upload sistemi DD.MM.YYYY
+// kullanıyordu, yeni sistemde YYYY-MM-DD; karışık veri olabilir.
 function parseDate(s: string): { yil: number; ay: number; gun: number } {
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) throw new Error(`Geçersiz tarih: ${s}`);
-  return { yil: +m[1], ay: +m[2], gun: +m[3] };
+  const isoM = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoM) return { yil: +isoM[1], ay: +isoM[2], gun: +isoM[3] };
+  const trM = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (trM) return { yil: +trM[3], ay: +trM[2], gun: +trM[1] };
+  throw new Error(`Geçersiz tarih: ${s}`);
 }
 
 // İki tarih arası gün farkı (bitis dahil DEĞİL)
