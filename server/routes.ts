@@ -104,6 +104,8 @@ import {
   type MonthlyCalculation2026
 } from "@shared/salaryCalculations";
 import { parseMaasListesiPdf, ayNumaraToKey, type MaasSatiri } from "./bordroParser";
+import { isGunuSayisi, bakiyeHesapla } from "@shared/izinHesaplari";
+import { type InsertAcilisBakiye, type InsertCalisanIzin } from "@shared/schema";
 
 
 import { PDFParse } from "pdf-parse";
@@ -1810,6 +1812,219 @@ export async function registerRoutes(
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // ============================================================================
+  // İZİN TAKİP SİSTEMİ
+  // ============================================================================
+
+  // GET /api/izinler — liste, filtre params (yil, tcNo, tur)
+  app.get("/api/izinler", async (req, res) => {
+    try {
+      const yil = req.query.yil ? parseInt(req.query.yil as string) : undefined;
+      const tcNo = req.query.tcNo ? String(req.query.tcNo) : undefined;
+      const tur = req.query.tur ? String(req.query.tur) : undefined;
+      const list = await storage.getIzinler({ yil, tcNo, tur });
+      res.json(list);
+    } catch (e) {
+      console.error("İzinler listesi hatası:", e);
+      res.status(500).json({ error: "Listeleme başarısız" });
+    }
+  });
+
+  // GET /api/izinler/takvim?yil=&ay=
+  app.get("/api/izinler/takvim", async (req, res) => {
+    try {
+      const yil = parseInt(req.query.yil as string);
+      const ay = parseInt(req.query.ay as string);
+      if (!yil || !ay || ay < 1 || ay > 12) {
+        return res.status(400).json({ error: "Geçersiz yil veya ay" });
+      }
+      const list = await storage.getIzinlerForCalendar(yil, ay);
+      res.json(list);
+    } catch (e) {
+      console.error("Takvim sorgu hatası:", e);
+      res.status(500).json({ error: "Takvim alınamadı" });
+    }
+  });
+
+  // GET /api/izinler/bakiye?refTarih= — tüm aktif çalışanlar için bakiye
+  app.get("/api/izinler/bakiye", async (req, res) => {
+    try {
+      const refTarih = (req.query.refTarih as string) || new Date().toISOString().slice(0, 10);
+      // Aktif çalışan: en yeni (yıl, ay) bordrosundaki tcNo'lar
+      const allCalisanlar = await storage.getCalisanlar();
+      let maxYil = 0;
+      let maxAy = "";
+      for (const c of allCalisanlar) {
+        if (c.yil > maxYil) { maxYil = c.yil; maxAy = c.ay; }
+        else if (c.yil === maxYil && c.ay > maxAy) { maxAy = c.ay; }
+      }
+      const aktifler = allCalisanlar.filter((c) => c.yil === maxYil && c.ay === maxAy);
+
+      const acilisList = await storage.getAcilisBakiyeler();
+      const acilisMap = new Map(acilisList.map((a) => [a.tcNo, a]));
+      const tumIzinler = await storage.getIzinler({ tur: "YILLIK" });
+      const kullanilanMap = new Map<string, number>();
+      for (const i of tumIzinler) {
+        kullanilanMap.set(i.tcNo, (kullanilanMap.get(i.tcNo) || 0) + i.gunSayisi);
+      }
+
+      const sonuc = aktifler.map((c) => {
+        const acilis = acilisMap.get(c.tcNo);
+        const acilisBakiyesi = acilis?.acilisBakiyesi ?? 0;
+        const acilisTarihi = acilis?.acilisTarihi ?? "2026-01-01";
+        const kullanilan = kullanilanMap.get(c.tcNo) ?? 0;
+        const b = bakiyeHesapla({
+          tcNo: c.tcNo,
+          iseGirisTarihi: c.isGirisTarihi || null,
+          acilisTarihi,
+          acilisBakiyesi,
+          kullanilanYillikGun: kullanilan,
+          refTarih,
+        });
+        const netUcret = Number(c.netUcret || 0);
+        return {
+          ...b,
+          adSoyad: c.adSoyad,
+          sube: c.sube,
+          netUcret,
+          gunlukNet: netUcret / 30,
+        };
+      });
+
+      res.json(sonuc);
+    } catch (e) {
+      console.error("Bakiye hatası:", e);
+      res.status(500).json({ error: "Bakiye alınamadı" });
+    }
+  });
+
+  // GET /api/izinler/acilis-bakiye
+  app.get("/api/izinler/acilis-bakiye", async (_req, res) => {
+    try {
+      const list = await storage.getAcilisBakiyeler();
+      res.json(list);
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // PUT /api/izinler/acilis-bakiye/:tcNo — upsert
+  app.put("/api/izinler/acilis-bakiye/:tcNo", async (req, res) => {
+    try {
+      const { acilisBakiyesi, acilisTarihi, not } = req.body;
+      if (acilisBakiyesi == null || isNaN(parseInt(acilisBakiyesi))) {
+        return res.status(400).json({ error: "acilisBakiyesi zorunlu (sayı)" });
+      }
+      const data: InsertAcilisBakiye = {
+        tcNo: req.params.tcNo,
+        acilisTarihi: acilisTarihi || "2026-01-01",
+        acilisBakiyesi: parseInt(acilisBakiyesi),
+        not: not ?? null,
+      };
+      const row = await storage.upsertAcilisBakiye(data);
+      res.json(row);
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // POST /api/izinler — yeni izin (gunSayisi otomatik hesaplanır)
+  app.post("/api/izinler", async (req, res) => {
+    try {
+      const { tcNo, baslangicTarihi, bitisTarihi, tur, aciklama, parayaCevrildi, parayaCevrilenTutar } = req.body;
+      if (!tcNo || !baslangicTarihi || !bitisTarihi || !tur) {
+        return res.status(400).json({ error: "Zorunlu alanlar eksik (tcNo, baslangicTarihi, bitisTarihi, tur)" });
+      }
+      if (tur !== "YILLIK" && tur !== "MAZERET") {
+        return res.status(400).json({ error: "Geçersiz tür (YILLIK | MAZERET)" });
+      }
+      if (baslangicTarihi > bitisTarihi) {
+        return res.status(400).json({ error: "Başlangıç bitişten sonra olamaz" });
+      }
+      const startYil = parseInt(baslangicTarihi.slice(0, 4));
+      const endYil = parseInt(bitisTarihi.slice(0, 4));
+      const tatilSet = new Set<string>();
+      for (let y = startYil; y <= endYil; y++) {
+        const list = await storage.getResmiTatiller(y);
+        list.forEach((t) => tatilSet.add(t.tarih));
+      }
+      const gunSayisi = isGunuSayisi(baslangicTarihi, bitisTarihi, tatilSet);
+
+      const inserted = await storage.insertIzin({
+        tcNo,
+        baslangicTarihi,
+        bitisTarihi,
+        tur,
+        gunSayisi,
+        aciklama: aciklama ?? null,
+        parayaCevrildi: !!parayaCevrildi,
+        parayaCevrilenTutar: parayaCevrilenTutar != null ? String(parayaCevrilenTutar) : null,
+      });
+      res.json(inserted);
+    } catch (e) {
+      console.error("İzin ekleme hatası:", e);
+      res.status(500).json({ error: "Ekleme başarısız" });
+    }
+  });
+
+  // PUT /api/izinler/:id
+  app.put("/api/izinler/:id", async (req, res) => {
+    try {
+      const { tcNo, baslangicTarihi, bitisTarihi, tur, aciklama, parayaCevrildi, parayaCevrilenTutar } = req.body;
+      const updateData: Partial<InsertCalisanIzin> = {};
+      if (tcNo !== undefined) updateData.tcNo = tcNo;
+      if (tur !== undefined) updateData.tur = tur;
+      if (aciklama !== undefined) updateData.aciklama = aciklama;
+      if (parayaCevrildi !== undefined) updateData.parayaCevrildi = !!parayaCevrildi;
+      if (parayaCevrilenTutar !== undefined) {
+        updateData.parayaCevrilenTutar = parayaCevrilenTutar != null ? String(parayaCevrilenTutar) : null;
+      }
+
+      if (baslangicTarihi !== undefined && bitisTarihi !== undefined) {
+        if (baslangicTarihi > bitisTarihi) return res.status(400).json({ error: "Başlangıç bitişten sonra olamaz" });
+        updateData.baslangicTarihi = baslangicTarihi;
+        updateData.bitisTarihi = bitisTarihi;
+        const startYil = parseInt(baslangicTarihi.slice(0, 4));
+        const endYil = parseInt(bitisTarihi.slice(0, 4));
+        const tatilSet = new Set<string>();
+        for (let y = startYil; y <= endYil; y++) {
+          const list = await storage.getResmiTatiller(y);
+          list.forEach((t) => tatilSet.add(t.tarih));
+        }
+        updateData.gunSayisi = isGunuSayisi(baslangicTarihi, bitisTarihi, tatilSet);
+      }
+
+      const updated = await storage.updateIzin(req.params.id, updateData);
+      if (!updated) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(updated);
+    } catch (e) {
+      console.error("İzin güncelleme hatası:", e);
+      res.status(500).json({ error: "Güncelleme başarısız" });
+    }
+  });
+
+  // DELETE /api/izinler/:id
+  app.delete("/api/izinler/:id", async (req, res) => {
+    try {
+      const r = await storage.deleteIzin(req.params.id);
+      if (!r.success) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(r);
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // GET /api/resmi-tatiller?yil=
+  app.get("/api/resmi-tatiller", async (req, res) => {
+    try {
+      const yil = req.query.yil ? parseInt(req.query.yil as string) : undefined;
+      const list = await storage.getResmiTatiller(yil);
+      res.json(list);
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
     }
   });
 
