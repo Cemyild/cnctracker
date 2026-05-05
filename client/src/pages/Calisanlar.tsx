@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IzinBakiye } from "@/components/IzinBakiye";
+import { IzinListesi } from "@/components/IzinListesi";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -927,7 +928,10 @@ export default function Calisanlar() {
                       <div className="text-muted-foreground text-center py-12">Takvim — Task 11'de gelecek</div>
                     </TabsContent>
                     <TabsContent value="liste" className="mt-6">
-                      <div className="text-muted-foreground text-center py-12">Liste — Task 9'da gelecek</div>
+                      <IzinListesi
+                        onYeniEkle={() => { setIzinModalTcNo(null); setIzinModalEdit(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
+                        onDuzenle={(izin) => { setIzinModalEdit(izin); setIzinModalTcNo(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
+                      />
                     </TabsContent>
                     <TabsContent value="bakiye" className="mt-6">
                       <IzinBakiye onYeniIzin={(tcNo) => { setIzinModalTcNo(tcNo); setIzinModalEdit(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }} />
