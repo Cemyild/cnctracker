@@ -10,6 +10,7 @@ import { subeler } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IzinBakiye } from "@/components/IzinBakiye";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -245,6 +246,12 @@ export default function Calisanlar() {
     const [arsivYil, setArsivYil] = useState<number>(2026);
     const [arsivList, setArsivList] = useState<any[]>([]);
     const [arsivBusy, setArsivBusy] = useState(false);
+
+    // İzin Modal state'leri (Task 8-11 ortak kullanımda)
+    const [izinModalOpen, setIzinModalOpen] = useState(false);
+    const [izinModalTcNo, setIzinModalTcNo] = useState<string | null>(null);
+    const [izinModalDefaultDate, setIzinModalDefaultDate] = useState<string | null>(null);
+    const [izinModalEdit, setIzinModalEdit] = useState<any>(null);
 
     const fetchCalisanlar = async () => {
         setLoading(true);
@@ -923,7 +930,7 @@ export default function Calisanlar() {
                       <div className="text-muted-foreground text-center py-12">Liste — Task 9'da gelecek</div>
                     </TabsContent>
                     <TabsContent value="bakiye" className="mt-6">
-                      <div className="text-muted-foreground text-center py-12">Bakiye — Task 8'de gelecek</div>
+                      <IzinBakiye onYeniIzin={(tcNo) => { setIzinModalTcNo(tcNo); setIzinModalEdit(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }} />
                     </TabsContent>
                   </Tabs>
                 </TabsContent>
