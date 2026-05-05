@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IzinBakiye } from "@/components/IzinBakiye";
 import { IzinListesi } from "@/components/IzinListesi";
+import { IzinEkleModal } from "@/components/IzinEkleModal";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1416,6 +1417,15 @@ export default function Calisanlar() {
                     </div>
                 </DialogContent>
             </Dialog>
+
+            {/* İzin Ekle/Düzenle Modal (3 sekmeden de açılır) */}
+            <IzinEkleModal
+              open={izinModalOpen}
+              onClose={() => { setIzinModalOpen(false); setIzinModalTcNo(null); setIzinModalEdit(null); setIzinModalDefaultDate(null); }}
+              defaultTcNo={izinModalTcNo}
+              defaultDate={izinModalDefaultDate}
+              editIzin={izinModalEdit}
+            />
         </div>
     );
 }
