@@ -187,6 +187,13 @@ export async function registerRoutes(
   app.get("/api/gumruk/analiz", async (req, res) => {
     try {
       const churnMonths = req.query.churnMonths ? parseInt(req.query.churnMonths as string) : 2;
+      // Karşılaştırma penceresi (kaç ay vs kaç ay) — varsayılan 3
+      const comparisonWindow = req.query.comparisonWindow ? Math.max(1, parseInt(req.query.comparisonWindow as string)) : 3;
+      // "Tamamen kaybedilenleri de göster" → lookback limitini kaldır
+      const includeAllChurn = req.query.includeAllChurn === "true";
+      // Trend listesi sınırı (default 100, "all" → sınırsız)
+      const topNRaw = req.query.topN as string | undefined;
+      const topN = topNRaw === "all" ? Infinity : (topNRaw ? Math.max(10, parseInt(topNRaw)) : 100);
       const allData = await storage.getAllGumrukVerileri();
       
       const parseBalance = (val: string | null | undefined): number => {
@@ -265,132 +272,261 @@ export async function registerRoutes(
       
       const currentAbs = toAbsMonth(maxYil, maxAyIndex);
       
-      // Define Periods
-      // Current Period: Last 3 Months (inclusive of current) -> [current-2, current]
-      // Previous Period: The 3 months before that -> [current-5, current-3]
-      
+      // Define Periods (parametrik karşılaştırma penceresi)
+      // Current Period: Son N ay (currentAbs dahil) → [current - (N-1), current]
+      // Previous Period: Bunun öncesi N ay → [current - (2N-1), current - N]
+      const W = comparisonWindow;
+      const currentStart = currentAbs - (W - 1);
+      const currentEnd = currentAbs;
+      const prevStart = currentAbs - (2 * W - 1);
+      const prevEnd = currentAbs - W;
+
       const firms = new Map<string, {
          name: string;
-         volCurrent: number; // Last 3 months
-         volPrev: number;    // Previous 3 months
+         volCurrent: number;
+         volPrev: number;
          lastSeenAbs: number;
          firstSeenAbs: number;
          totalVol: number;
+         transactionCount: number; // toplam işlem sayısı
       }>();
+
+      // Ay numarasını okunabilir label'a çevir: "ocak"+2026 → "Ocak 2026"
+      const absToLabel = (abs: number): string => {
+         const y = Math.floor(abs / 12);
+         const mIdx = abs - y * 12;
+         const ayObj = aylar[mIdx];
+         return ayObj ? `${ayObj.label} ${y}` : `?${abs}`;
+      };
 
       for (const d of allData) {
          if (!d.firmaUnvan) continue;
          const fName = d.firmaUnvan;
-         
+
          if (!firms.has(fName)) {
-            firms.set(fName, { 
-                name: fName, 
-                volCurrent: 0, 
-                volPrev: 0, 
-                lastSeenAbs: -1, 
+            firms.set(fName, {
+                name: fName,
+                volCurrent: 0,
+                volPrev: 0,
+                lastSeenAbs: -1,
                 firstSeenAbs: 9999999,
-                totalVol: 0
+                totalVol: 0,
+                transactionCount: 0,
             });
          }
-         
+
          const firm = firms.get(fName)!;
          const dAyIdx = getAyIndex(d.ay);
          if (dAyIdx === -1) continue;
-         
+
          const dAbs = toAbsMonth(d.yil, dAyIdx);
-         
-         // Use robust parsing
-         const vol = parseBalance(d.malBedeli); 
+
+         const vol = parseBalance(d.malBedeli);
 
          firm.totalVol += vol;
+         firm.transactionCount += 1;
 
-         // Update Last/First Seen
          if (dAbs > firm.lastSeenAbs) firm.lastSeenAbs = dAbs;
          if (dAbs < firm.firstSeenAbs) firm.firstSeenAbs = dAbs;
 
-         // Bin into periods
-         // Current: [currentAbs - 2, currentAbs]
-         if (dAbs >= currentAbs - 2 && dAbs <= currentAbs) {
+         if (dAbs >= currentStart && dAbs <= currentEnd) {
             firm.volCurrent += vol;
-         }
-         // Previous: [currentAbs - 5, currentAbs - 3]
-         else if (dAbs >= currentAbs - 5 && dAbs <= currentAbs - 3) {
+         } else if (dAbs >= prevStart && dAbs <= prevEnd) {
             firm.volPrev += vol;
          }
       }
 
       const alerts: any[] = [];
       const trends: any[] = [];
+      // Risk altındaki ciro: son işlem ayında aktif olan ama şimdi inactive
+      // firmaların TOPLAM hacmi (KDV hariç). Kayıp yıllık potansiyel.
+      let riskliFirmalarToplamHacim = 0;
+      let riskliFirmaSayisi = 0;
+      // "Yeni" kategorisindeki firmalar — trends'ten çıkarmak için
+      const yeniFirmalar = new Set<string>();
 
       firms.forEach(f => {
-         // ALERTS
-         
-         // 1. Churn Risk: Active before (LastSeen < current-churnMonths)
-         // But within a relevant window so we don't show ancient history for short queries.
-         // Sliding window: Look back (churnMonths + 3) max.
-         // e.g. If churn=3, show inactive for 3..6 months. (Excludes 9mo).
+         // 1. Churn Risk
+         // includeAllChurn=true ise lookback yok (her zaman aktif olmuş herkes dahil)
+         // false ise sadece son (churnMonths + 3) ay içinde aktif olanlar
          const lookbackLimit = currentAbs - (churnMonths + 3);
-         
-         const isRelevant = f.lastSeenAbs >= lookbackLimit;
-         const isInactive = f.lastSeenAbs <= (currentAbs - churnMonths); 
-         
-         if (isRelevant && isInactive) {
+         const isRelevant = includeAllChurn ? true : f.lastSeenAbs >= lookbackLimit;
+         const isInactive = f.lastSeenAbs <= (currentAbs - churnMonths);
+         // Hiç görülmemiş firmalar dahil olmasın (lastSeenAbs = -1)
+         const everSeen = f.lastSeenAbs >= 0;
+
+         if (everSeen && isRelevant && isInactive) {
              const inactiveMonths = Math.floor(currentAbs - f.lastSeenAbs);
              alerts.push({
                  type: "churn_risk",
                  company: f.name,
                  message: `Son işlem: ${inactiveMonths} ay önce`,
-                 severity: "high"
+                 inactiveMonths,
+                 lastSeenLabel: absToLabel(f.lastSeenAbs),
+                 totalVol: f.totalVol,
+                 transactionCount: f.transactionCount,
+                 severity: "high",
              });
+             riskliFirmalarToplamHacim += f.totalVol;
+             riskliFirmaSayisi += 1;
          }
 
-         // 2. New Customer: First seen in last 3 months
-         if (f.firstSeenAbs >= (currentAbs - 2)) {
+         // 2. Yeni Müşteri: ilk işlem son N ayda
+         if (f.firstSeenAbs >= (currentAbs - (W - 1)) && f.firstSeenAbs >= 0) {
              alerts.push({
                  type: "new_customer",
                  company: f.name,
-                 message: "Yeni Müşteri",
-                 severity: "success"
+                 message: `İlk işlem: ${absToLabel(f.firstSeenAbs)}`,
+                 firstSeenLabel: absToLabel(f.firstSeenAbs),
+                 firstSeenAbs: f.firstSeenAbs,
+                 totalVol: f.totalVol,
+                 transactionCount: f.transactionCount,
+                 currentVol: f.volCurrent,
+                 severity: "success",
              });
+             yeniFirmalar.add(f.name);
          }
-         
+
          // TRENDS
-         // Calculate Growth if volume exists in both periods or at least current
          if (f.volCurrent > 0 || f.volPrev > 0) {
              let growthPct = 0;
              if (f.volPrev > 0) {
                  growthPct = ((f.volCurrent - f.volPrev) / f.volPrev) * 100;
              } else if (f.volCurrent > 0) {
-                 growthPct = 100; // New or reactivated
+                 growthPct = 100;
              }
 
-             // Only relevant if significant volume (e.g. > 1000 TL to avoid noise)
-             if (f.volCurrent + f.volPrev > 1000) { 
+             if (f.volCurrent + f.volPrev > 1000) {
                  trends.push({
                      company: f.name,
                      currentVol: f.volCurrent,
                      prevVol: f.volPrev,
                      growth: growthPct,
-                     absGrowth: f.volCurrent - f.volPrev
+                     absGrowth: f.volCurrent - f.volPrev,
                  });
              }
          }
       });
 
-      // Sort and Split Trends
-      const risingTrends = trends.filter(t => t.growth > 0).sort((a, b) => b.growth - a.growth).slice(0, 50);
-      const fallingTrends = trends.filter(t => t.growth < 0).sort((a, b) => a.growth - b.growth).slice(0, 50);
+      // Yeni müşterileri rising trendsten çıkar (çakışma — onlar zaten Yeni tab'ında)
+      const trendsExcludingNew = trends.filter(t => !yeniFirmalar.has(t.company));
+
+      // Sırala + topN ile kes
+      const risingTrends = trendsExcludingNew
+         .filter(t => t.growth > 0)
+         .sort((a, b) => b.growth - a.growth)
+         .slice(0, Number.isFinite(topN) ? topN : trendsExcludingNew.length);
+      const fallingTrends = trendsExcludingNew
+         .filter(t => t.growth < 0)
+         .sort((a, b) => a.growth - b.growth)
+         .slice(0, Number.isFinite(topN) ? topN : trendsExcludingNew.length);
+
+      const currentPeriodLabel = W === 1
+         ? `Son Ay (${absToLabel(currentEnd)})`
+         : `Son ${W} Ay (${absToLabel(currentStart)} – ${absToLabel(currentEnd)})`;
+      const previousPeriodLabel = W === 1
+         ? `Önceki Ay (${absToLabel(prevEnd)})`
+         : `Önceki ${W} Ay (${absToLabel(prevStart)} – ${absToLabel(prevEnd)})`;
 
       res.json({
-         currentPeriodLabel: "Son 3 Ay",
+         currentPeriodLabel,
+         previousPeriodLabel,
+         comparisonWindow: W,
          alerts,
          risingTrends,
-         fallingTrends
+         fallingTrends,
+         riskOzet: {
+             firmaSayisi: riskliFirmaSayisi,
+             toplamHacim: riskliFirmalarToplamHacim,
+         },
       });
 
     } catch (e) {
       console.error("Analiz hatası:", e);
       res.status(500).json({ error: "Analiz yapılamadı" });
+    }
+  });
+
+  // Firma drill-down: belirli firmanın aylık hacim+işlem timeline'ı.
+  // Trend Analizi'nden bir firmaya tıklandığında detay grafik için.
+  app.get("/api/gumruk/firma-timeline", async (req, res) => {
+    try {
+      const firma = (req.query.firma as string || "").trim();
+      if (!firma) return res.status(400).json({ error: "firma parametresi zorunlu" });
+
+      const allData = await storage.getAllGumrukVerileri();
+      const getAyIndex = (ayStr: string) => aylar.findIndex(a => a.value === ayStr);
+
+      // TR/US locale-aware sayı parse'ı (analiz endpoint'iyle aynı mantık)
+      const parseBalance = (val: string | null | undefined): number => {
+         if (!val) return 0;
+         let v = String(val).trim();
+         if (!v) return 0;
+         if (v.includes(",") && v.includes(".")) {
+             const lastDot = v.lastIndexOf(".");
+             const lastComma = v.lastIndexOf(",");
+             v = lastComma > lastDot ? v.replace(/\./g, "").replace(",", ".") : v.replace(/,/g, "");
+         } else if (v.includes(",")) {
+             v = v.replace(",", ".");
+         }
+         const parsed = parseFloat(v);
+         return isNaN(parsed) ? 0 : parsed;
+      };
+
+      // Firmaya ait kayıtları topla
+      const matched = allData.filter(d => d.firmaUnvan === firma);
+      if (matched.length === 0) {
+         return res.json({ firma, timeline: [], toplamHacim: 0, toplamIslem: 0 });
+      }
+
+      // (yıl, ayIdx) → { malBedeli, kdv, faturaTutari, islemSayisi }
+      const monthly = new Map<number, {
+         yil: number; ayIdx: number; ay: string;
+         malBedeli: number; kdv: number; faturaTutari: number; islemSayisi: number;
+      }>();
+
+      let toplamHacim = 0;
+      for (const d of matched) {
+         const ayIdx = getAyIndex(d.ay);
+         if (ayIdx === -1) continue;
+         const abs = d.yil * 12 + ayIdx;
+         if (!monthly.has(abs)) {
+             monthly.set(abs, { yil: d.yil, ayIdx, ay: d.ay, malBedeli: 0, kdv: 0, faturaTutari: 0, islemSayisi: 0 });
+         }
+         const m = monthly.get(abs)!;
+         const mb = parseBalance(d.malBedeli);
+         m.malBedeli += mb;
+         m.kdv += parseBalance(d.topKdvTutar);
+         m.faturaTutari += parseBalance(d.topFaturaTutar);
+         m.islemSayisi += 1;
+         toplamHacim += mb;
+      }
+
+      // Sırala (kronolojik)
+      const timeline = Array.from(monthly.values())
+         .sort((a, b) => (a.yil * 12 + a.ayIdx) - (b.yil * 12 + b.ayIdx))
+         .map(m => ({
+             yil: m.yil,
+             ay: m.ay,
+             label: `${aylar[m.ayIdx]?.label || m.ay} ${m.yil}`,
+             kisaLabel: `${(aylar[m.ayIdx]?.label || m.ay).slice(0, 3)} ${String(m.yil).slice(2)}`,
+             malBedeli: m.malBedeli,
+             kdv: m.kdv,
+             faturaTutari: m.faturaTutari,
+             islemSayisi: m.islemSayisi,
+         }));
+
+      res.json({
+         firma,
+         timeline,
+         toplamHacim,
+         toplamIslem: matched.length,
+         ilkIslem: timeline[0]?.label,
+         sonIslem: timeline[timeline.length - 1]?.label,
+      });
+    } catch (e) {
+      console.error("Firma timeline hatası:", e);
+      res.status(500).json({ error: "Timeline alınamadı" });
     }
   });
 

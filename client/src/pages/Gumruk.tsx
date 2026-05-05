@@ -21,7 +21,8 @@ import {
   Pencil,
   Target,
   History,
-  Trash2
+  Trash2,
+  Calculator
 } from "lucide-react";
 import { GiderEditModal } from "@/components/GiderEditModal";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,9 @@ import {
   TableFooter 
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Download as DownloadIcon, X as XIcon } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { 
@@ -2023,10 +2027,158 @@ type Arac = {
                         );
 }
 
+// CSV satırlarını Türkçe Excel uyumlu (UTF-8 BOM + ; ayraç) string'e çevir.
+// Excel TR locale otomatik tanır, çift tırnak içindeki virgül/yeni satır kaçar.
+function toCsv(rows: (string | number | null | undefined)[][], headers: string[]): string {
+  const escape = (v: any) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    if (s.includes(";") || s.includes('"') || s.includes("\n")) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+  const lines = [headers.map(escape).join(";")];
+  for (const row of rows) lines.push(row.map(escape).join(";"));
+  return "﻿" + lines.join("\r\n");
+}
+
+function downloadCsv(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Firma drill-down dialog: aylık hacim + işlem grafiği
+function FirmaTimelineDialog({ firma, onClose }: { firma: string | null; onClose: () => void }) {
+  const open = !!firma;
+  const { data, isLoading } = useQuery<any>({
+    queryKey: [`/api/gumruk/firma-timeline?firma=${encodeURIComponent(firma || "")}`],
+    enabled: open,
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-[1100px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-primary" />
+            {firma}
+          </DialogTitle>
+          <DialogDescription>Aylık işlem hacmi ve sayısı</DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+        ) : !data || data.timeline?.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">Bu firma için kayıt yok.</div>
+        ) : (
+          <div className="space-y-4 py-2">
+            {/* Üst özet */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Card className="p-3">
+                <div className="text-xs text-muted-foreground">Toplam Hacim (KDV hariç)</div>
+                <div className="text-lg font-bold tabular-nums text-primary">
+                  {new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(data.toplamHacim)}
+                </div>
+              </Card>
+              <Card className="p-3">
+                <div className="text-xs text-muted-foreground">Toplam İşlem</div>
+                <div className="text-lg font-bold tabular-nums">{data.toplamIslem}</div>
+              </Card>
+              <Card className="p-3">
+                <div className="text-xs text-muted-foreground">İlk İşlem</div>
+                <div className="text-sm font-semibold">{data.ilkIslem || "-"}</div>
+              </Card>
+              <Card className="p-3">
+                <div className="text-xs text-muted-foreground">Son İşlem</div>
+                <div className="text-sm font-semibold">{data.sonIslem || "-"}</div>
+              </Card>
+            </div>
+
+            {/* Bar chart */}
+            <Card className="p-4">
+              <div className="font-semibold text-sm mb-3 flex items-center gap-2">
+                <BarChart3 className="w-4 h-4" /> Aylık Hacim ({data.timeline.length} ay)
+              </div>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={data.timeline} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="kisaLabel" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${(v / 1_000).toFixed(0)}K` : String(v)} />
+                  <Tooltip
+                    formatter={(v: any) => [new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(v), "Mal Bedeli"]}
+                    labelFormatter={(l) => `${l}`}
+                  />
+                  <Bar dataKey="malBedeli" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+
+            {/* Detay tablo */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="max-h-[300px] overflow-auto">
+                <Table className="text-sm">
+                  <TableHeader className="sticky top-0 bg-muted">
+                    <TableRow>
+                      <TableHead>Dönem</TableHead>
+                      <TableHead className="text-right">İşlem</TableHead>
+                      <TableHead className="text-right">Mal Bedeli</TableHead>
+                      <TableHead className="text-right">KDV</TableHead>
+                      <TableHead className="text-right">Fatura Toplamı</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {[...data.timeline].reverse().map((m: any, i: number) => (
+                      <TableRow key={i}>
+                        <TableCell className="font-medium whitespace-nowrap">{m.label}</TableCell>
+                        <TableCell className="text-right tabular-nums">{m.islemSayisi}</TableCell>
+                        <TableCell className="text-right tabular-nums text-green-600 font-semibold">
+                          {new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(m.malBedeli)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-orange-600">
+                          {new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(m.kdv)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(m.faturaTutari)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function TrendAnalysis() {
   const [churnMonths, setChurnMonths] = useState("2");
-  const { data, isLoading } = useQuery<{ risingTrends: any[], fallingTrends: any[], alerts: any[], currentPeriodLabel: string }>({ 
-    queryKey: [`/api/gumruk/analiz?churnMonths=${churnMonths}`] 
+  const [comparisonWindow, setComparisonWindow] = useState("3");
+  const [includeAllChurn, setIncludeAllChurn] = useState(false);
+  const [topN, setTopN] = useState("100");
+  const [drillFirma, setDrillFirma] = useState<string | null>(null);
+
+  const queryUrl = `/api/gumruk/analiz?churnMonths=${churnMonths}&comparisonWindow=${comparisonWindow}&includeAllChurn=${includeAllChurn}&topN=${topN}`;
+  const { data, isLoading } = useQuery<{
+    risingTrends: any[];
+    fallingTrends: any[];
+    alerts: any[];
+    currentPeriodLabel: string;
+    previousPeriodLabel: string;
+    comparisonWindow: number;
+    riskOzet?: { firmaSayisi: number; toplamHacim: number };
+  }>({
+    queryKey: [queryUrl],
   });
 
   if (isLoading) {
@@ -2037,7 +2189,7 @@ function TrendAnalysis() {
     );
   }
 
-  if (!data?.risingTrends && !data?.fallingTrends && !data?.alerts) {
+  if (!data || (!data.risingTrends?.length && !data.fallingTrends?.length && !data.alerts?.length)) {
     return (
         <div className="flex flex-col items-center justify-center min-h-[400px] text-muted-foreground border-2 border-dashed rounded-lg">
             <TrendingUp className="w-12 h-12 mb-4 opacity-50" />
@@ -2046,7 +2198,7 @@ function TrendAnalysis() {
     )
   }
 
-  const { alerts, risingTrends, fallingTrends, currentPeriodLabel } = data;
+  const { alerts, risingTrends, fallingTrends, currentPeriodLabel, previousPeriodLabel, riskOzet } = data;
   
   // Sort Churn Alerts: Longest inactive time first
   const churnAlerts = alerts
@@ -2063,7 +2215,7 @@ function TrendAnalysis() {
   const newCustomerAlerts = alerts.filter((a: any) => a.type === 'new_customer');
 
   // Trend Table Component
-  const TrendTable = ({ trends = [], isRising, defaultSortField = 'currentVol' }: { trends: any[], isRising: boolean, defaultSortField?: 'currentVol' | 'prevVol' }) => {
+  const TrendTable = ({ trends = [], defaultSortField = 'currentVol' }: { trends: any[], defaultSortField?: 'currentVol' | 'prevVol' }) => {
     const [sortField, setSortField] = useState<'currentVol' | 'prevVol' | 'growth' | 'absGrowth'>(defaultSortField);
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
@@ -2081,68 +2233,145 @@ function TrendAnalysis() {
             setSortDirection('desc');
         }
     };
-    
+
     return (
     <Card>
         <CardContent className="p-0">
-            <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Firma</TableHead>
-                        <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('currentVol')}>
-                             <div className="flex items-center justify-end gap-1">
-                                Son Dönem Hacim ({currentPeriodLabel})
-                                {sortField === 'currentVol' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
-                             </div>
-                        </TableHead>
-                        <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('prevVol')}>
-                             <div className="flex items-center justify-end gap-1">
-                                Önceki Dönem
-                                {sortField === 'prevVol' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
-                             </div>
-                        </TableHead>
-                        <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('growth')}>
-                             <div className="flex items-center justify-end gap-1">
-                                Büyüme
-                                {sortField === 'growth' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
-                             </div>
-                        </TableHead>
-                        <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('absGrowth')}>
-                             <div className="flex items-center justify-end gap-1">
-                                Fark (TL)
-                                {sortField === 'absGrowth' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
-                             </div>
-                        </TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {!sortedTrends || sortedTrends.length === 0 ? (
-                        <TableRow><TableCell colSpan={5} className="text-center py-8">Veri yok</TableCell></TableRow>
-                    ) : sortedTrends.map((t: any, i: number) => (
-                        <TableRow key={i}>
-                            <TableCell className="font-medium">{t.company}</TableCell>
-                            <TableCell className="text-right font-bold">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(t.currentVol)}</TableCell>
-                            <TableCell className="text-right text-muted-foreground">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(t.prevVol)}</TableCell>
-                            <TableCell className="text-right">
-                                <Badge variant={t.growth > 0 ? "secondary" : "destructive"} className={t.growth > 0 ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}>
-                                    {t.growth > 0 ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
-                                    %{t.growth.toFixed(1)}
-                                </Badge>
-                            </TableCell>
-                            <TableCell className={`text-right font-medium ${t.absGrowth > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                {t.absGrowth > 0 ? '+' : ''}{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(t.absGrowth)}
-                            </TableCell>
-                        </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
+            <div className="rounded-md overflow-hidden">
+                <div className="max-h-[600px] overflow-y-auto">
+                    <Table className="text-sm">
+                        <TableHeader className="sticky top-0 bg-muted z-10">
+                            <TableRow>
+                                <TableHead>Firma</TableHead>
+                                <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('currentVol')}>
+                                     <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                                        Son Dönem
+                                        {sortField === 'currentVol' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                                     </div>
+                                </TableHead>
+                                <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('prevVol')}>
+                                     <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                                        Önceki Dönem
+                                        {sortField === 'prevVol' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                                     </div>
+                                </TableHead>
+                                <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('growth')}>
+                                     <div className="flex items-center justify-end gap-1">
+                                        Büyüme
+                                        {sortField === 'growth' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                                     </div>
+                                </TableHead>
+                                <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('absGrowth')}>
+                                     <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                                        Fark (TL)
+                                        {sortField === 'absGrowth' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                                     </div>
+                                </TableHead>
+                                <TableHead className="w-[40px]"></TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {!sortedTrends || sortedTrends.length === 0 ? (
+                                <TableRow><TableCell colSpan={5} className="text-center py-8">Veri yok</TableCell></TableRow>
+                            ) : sortedTrends.map((t: any, i: number) => (
+                                <TableRow key={i} className="cursor-pointer hover:bg-accent/40" onClick={() => setDrillFirma(t.company)}>
+                                    <TableCell className="font-medium">{t.company}</TableCell>
+                                    <TableCell className="text-right font-bold tabular-nums whitespace-nowrap">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(t.currentVol)}</TableCell>
+                                    <TableCell className="text-right text-muted-foreground tabular-nums whitespace-nowrap">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(t.prevVol)}</TableCell>
+                                    <TableCell className="text-right">
+                                        <Badge variant={t.growth > 0 ? "secondary" : "destructive"} className={t.growth > 0 ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}>
+                                            {t.growth > 0 ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
+                                            %{t.growth.toFixed(1)}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell className={`text-right font-medium tabular-nums whitespace-nowrap ${t.absGrowth > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {t.absGrowth > 0 ? '+' : ''}{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(t.absGrowth)}
+                                    </TableCell>
+                                    <TableCell><BarChart3 className="w-3.5 h-3.5 opacity-30" /></TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            </div>
         </CardContent>
     </Card>
     );
   };
 
+  const exportChurnCsv = () => {
+    const rows = churnAlerts.map((a: any) => [a.company, a.lastSeenLabel || "-", a.inactiveMonths ?? "", a.transactionCount ?? "", a.totalVol ?? 0]);
+    downloadCsv(`riskli-firmalar-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows, ["Firma", "Son İşlem Ayı", "Inactive Ay", "Toplam İşlem", "Toplam Hacim (TL)"]));
+  };
+  const exportNewCsv = () => {
+    const rows = newCustomerAlerts.map((a: any) => [a.company, a.firstSeenLabel || "-", a.transactionCount ?? "", a.currentVol ?? 0, a.totalVol ?? 0]);
+    downloadCsv(`yeni-musteriler-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows, ["Firma", "İlk İşlem Ayı", "Toplam İşlem", "Son Dönem Hacim (TL)", "Toplam Hacim (TL)"]));
+  };
+  const exportTrendCsv = (trends: any[], filename: string) => {
+    const rows = trends.map((t: any) => [t.company, t.currentVol, t.prevVol, t.growth.toFixed(2), t.absGrowth.toFixed(2)]);
+    downloadCsv(`${filename}-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows, ["Firma", `Son Dönem (${currentPeriodLabel})`, `Önceki Dönem (${previousPeriodLabel})`, "Büyüme %", "Fark (TL)"]));
+  };
+
+  const fmtCurrency = (v: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(v);
+
   return (
     <div className="space-y-6">
+      {/* Genel kontrol bar — tüm tablar için ortak parametreler */}
+      <div className="flex flex-wrap items-end justify-between gap-3 p-4 rounded-lg border bg-muted/20">
+        <div>
+          <div className="text-sm font-semibold flex items-center gap-2">
+            <Calculator className="w-4 h-4 text-primary" />
+            Karşılaştırma: <span className="text-primary">{currentPeriodLabel}</span> vs <span className="text-muted-foreground">{previousPeriodLabel}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <Label className="text-xs">Karşılaştırma Penceresi</Label>
+            <Select value={comparisonWindow} onValueChange={setComparisonWindow}>
+              <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">1 ay</SelectItem>
+                <SelectItem value="3">3 ay</SelectItem>
+                <SelectItem value="6">6 ay</SelectItem>
+                <SelectItem value="12">12 ay</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Risk Süresi (Ay)</Label>
+            <Select value={churnMonths} onValueChange={setChurnMonths}>
+              <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="2">2</SelectItem>
+                <SelectItem value="3">3</SelectItem>
+                <SelectItem value="4">4</SelectItem>
+                <SelectItem value="5">5</SelectItem>
+                <SelectItem value="6">6</SelectItem>
+                <SelectItem value="9">9</SelectItem>
+                <SelectItem value="12">12</SelectItem>
+                <SelectItem value="24">24</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Sıralama Limiti</Label>
+            <Select value={topN} onValueChange={setTopN}>
+              <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="50">İlk 50</SelectItem>
+                <SelectItem value="100">İlk 100</SelectItem>
+                <SelectItem value="200">İlk 200</SelectItem>
+                <SelectItem value="all">Tümü</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer pb-2">
+            <Switch checked={includeAllChurn} onCheckedChange={setIncludeAllChurn} />
+            <span className="text-xs font-medium">Tamamen kaybedilenleri de göster</span>
+          </label>
+        </div>
+      </div>
+
       <Tabs defaultValue="risks" className="w-full">
         <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="risks" className="gap-2">
@@ -2155,42 +2384,47 @@ function TrendAnalysis() {
             </TabsTrigger>
             <TabsTrigger value="rising" className="gap-2">
                 <TrendingUp className="w-4 h-4 text-green-500" />
-                Yükselen Şirketler ve Trendler
+                Yükselen ({risingTrends?.length || 0})
             </TabsTrigger>
             <TabsTrigger value="falling" className="gap-2">
                 <TrendingDown className="w-4 h-4 text-red-500" />
-                Düşüşteki Şirketler ve Trendler
+                Düşüşte ({fallingTrends?.length || 0})
             </TabsTrigger>
         </TabsList>
-        
+
         {/* RISKLI SIRKETLER */}
         <TabsContent value="risks" className="space-y-4 mt-6">
-            <div className="flex items-center justify-between mb-4 bg-muted/30 p-4 rounded-lg border">
+            {/* Risk altındaki ciro özet */}
+            {riskOzet && riskOzet.firmaSayisi > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Card className="border-l-4 border-l-red-500 p-4">
+                  <div className="text-xs text-muted-foreground">Riskli Firma Sayısı</div>
+                  <div className="text-2xl font-black text-red-600 tabular-nums">{riskOzet.firmaSayisi}</div>
+                </Card>
+                <Card className="border-l-4 border-l-orange-500 p-4 md:col-span-2">
+                  <div className="text-xs text-muted-foreground">Risk Altındaki Ciro (Toplam Geçmiş Hacim, KDV hariç)</div>
+                  <div className="text-2xl font-black text-orange-600 tabular-nums">{fmtCurrency(riskOzet.toplamHacim)}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Bu firmalar geçmişte aktifken {fmtCurrency(riskOzet.toplamHacim)} hacim üretti — şu an tehlikedeler.
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between mb-2 bg-muted/30 p-4 rounded-lg border">
                 <div>
                      <h3 className="text-lg font-semibold flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-red-500" /> 
+                        <AlertTriangle className="w-5 h-5 text-red-500" />
                         Kaybetme Riski Olan Şirketler
                     </h3>
-                    <p className="text-sm text-muted-foreground mt-1">Belirlenen süre boyunca işlem yapmayan eski müşteriler.</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                        Son işlemi {churnMonths}+ ay önce yapan eski müşteriler.
+                        {!includeAllChurn && ` (Sadece son ${parseInt(churnMonths) + 3} ay içinde aktiftiler.)`}
+                    </p>
                 </div>
-               
-                <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium whitespace-nowrap">Risk Süresi (Ay):</span>
-                    <Select value={churnMonths} onValueChange={setChurnMonths}>
-                        <SelectTrigger className="w-[80px]">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="2">2</SelectItem>
-                            <SelectItem value="3">3</SelectItem>
-                            <SelectItem value="4">4</SelectItem>
-                            <SelectItem value="5">5</SelectItem>
-                            <SelectItem value="6">6</SelectItem>
-                            <SelectItem value="9">9</SelectItem>
-                            <SelectItem value="12">12</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
+                <Button variant="outline" size="sm" onClick={exportChurnCsv} disabled={churnAlerts.length === 0}>
+                  <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
+                </Button>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -2201,18 +2435,28 @@ function TrendAnalysis() {
                 </div>
             ) : (
                 churnAlerts.map((alert: any, i: number) => (
-                <Card key={i} className="border-l-4 border-l-red-500">
+                <Card key={i} className="border-l-4 border-l-red-500 cursor-pointer hover:shadow-md transition-shadow" onClick={() => setDrillFirma(alert.company)}>
                     <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start">
+                        <div className="flex justify-between items-start gap-2">
                             <CardTitle className="text-base font-bold">{alert.company}</CardTitle>
-                            <Badge variant="destructive">Risk</Badge>
+                            <Badge variant="destructive" className="shrink-0">Risk</Badge>
                         </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-1.5">
                         <div className="flex items-center gap-2 text-sm text-red-600 font-medium">
                             <AlertTriangle className="w-4 h-4" />
                             <span>{alert.message}</span>
                         </div>
+                        {alert.lastSeenLabel && (
+                          <div className="text-xs text-muted-foreground">Son işlem: <strong>{alert.lastSeenLabel}</strong></div>
+                        )}
+                        {alert.totalVol > 0 && (
+                          <div className="text-xs flex items-center gap-2">
+                            <span className="text-muted-foreground">Geçmiş hacim:</span>
+                            <strong className="text-orange-600 tabular-nums">{fmtCurrency(alert.totalVol)}</strong>
+                            <span className="text-muted-foreground">· {alert.transactionCount} işlem</span>
+                          </div>
+                        )}
                     </CardContent>
                 </Card>
                 ))
@@ -2222,11 +2466,17 @@ function TrendAnalysis() {
 
         {/* YENI SIRKETLER */}
         <TabsContent value="new" className="space-y-4 mt-6">
-             <div className="mb-4 bg-muted/30 p-4 rounded-lg border">
-                 <h3 className="text-lg font-semibold flex items-center gap-2">
-                    <Lightbulb className="w-5 h-5 text-yellow-500" /> 
-                    Portföye Yeni Katılanlar (Son 3 Ay)
-                </h3>
+             <div className="flex items-center justify-between mb-2 bg-muted/30 p-4 rounded-lg border">
+                 <div>
+                     <h3 className="text-lg font-semibold flex items-center gap-2">
+                        <Lightbulb className="w-5 h-5 text-yellow-500" />
+                        Portföye Yeni Katılanlar
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">Karşılaştırma penceresi içinde ({currentPeriodLabel}) ilk işlemini yapan firmalar.</p>
+                 </div>
+                 <Button variant="outline" size="sm" onClick={exportNewCsv} disabled={newCustomerAlerts.length === 0}>
+                   <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
+                 </Button>
             </div>
              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {newCustomerAlerts.length === 0 ? (
@@ -2235,18 +2485,27 @@ function TrendAnalysis() {
                 </div>
             ) : (
                 newCustomerAlerts.map((alert: any, i: number) => (
-                <Card key={i} className="border-l-4 border-l-green-500">
+                <Card key={i} className="border-l-4 border-l-green-500 cursor-pointer hover:shadow-md transition-shadow" onClick={() => setDrillFirma(alert.company)}>
                     <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start">
+                        <div className="flex justify-between items-start gap-2">
                              <CardTitle className="text-base font-bold">{alert.company}</CardTitle>
-                             <Badge className="bg-green-500 hover:bg-green-600">Yeni</Badge>
+                             <Badge className="bg-green-500 hover:bg-green-600 shrink-0">Yeni</Badge>
                         </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-1.5">
                         <div className="flex items-center gap-2 text-sm text-green-600 font-medium">
                             <TrendingUp className="w-4 h-4" />
-                            <span>{alert.message}</span>
+                            <span>İlk işlem: <strong>{alert.firstSeenLabel}</strong></span>
                         </div>
+                        <div className="text-xs text-muted-foreground">
+                            <strong className="text-foreground tabular-nums">{alert.transactionCount}</strong> işlem · Son dönem hacim:{' '}
+                            <strong className="text-green-700 tabular-nums">{fmtCurrency(alert.currentVol || 0)}</strong>
+                        </div>
+                        {alert.totalVol > (alert.currentVol || 0) && (
+                          <div className="text-xs text-muted-foreground">
+                            Toplam hacim: <strong className="tabular-nums">{fmtCurrency(alert.totalVol)}</strong>
+                          </div>
+                        )}
                     </CardContent>
                 </Card>
                 ))
@@ -2256,29 +2515,47 @@ function TrendAnalysis() {
 
         {/* YUKSELEN TRENDLER */}
         <TabsContent value="rising" className="space-y-4 mt-6">
-            <div className="mb-4 bg-muted/30 p-4 rounded-lg border">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 text-green-500" /> 
-                    Yükselen Şirketler ve Trendler (Son 3 Ay)
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">İşlem hacmini en çok artıran şirketler.</p>
+            <div className="flex items-center justify-between mb-2 bg-muted/30 p-4 rounded-lg border">
+                <div>
+                    <h3 className="text-lg font-semibold flex items-center gap-2">
+                        <TrendingUp className="w-5 h-5 text-green-500" />
+                        Yükselen Şirketler ve Trendler
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                        İşlem hacmi {currentPeriodLabel} döneminde artan şirketler.
+                        Yeni müşteriler hariç (Yeni sekmesinde gösterilir).
+                    </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => exportTrendCsv(risingTrends || [], "yukselen-trendler")} disabled={!risingTrends?.length}>
+                  <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
+                </Button>
             </div>
-            <TrendTable trends={risingTrends || []} isRising={true} defaultSortField="currentVol" />
+            <TrendTable trends={risingTrends || []} defaultSortField="currentVol" />
         </TabsContent>
 
         {/* DUSUSTEKI TRENDLER */}
         <TabsContent value="falling" className="space-y-4 mt-6">
-             <div className="mb-4 bg-muted/30 p-4 rounded-lg border">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                    <TrendingDown className="w-5 h-5 text-red-500" /> 
-                    Düşüşteki Şirketler ve Trendler (Son 3 Ay)
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">İşlem hacmi en çok azalan şirketler.</p>
+             <div className="flex items-center justify-between mb-2 bg-muted/30 p-4 rounded-lg border">
+                <div>
+                    <h3 className="text-lg font-semibold flex items-center gap-2">
+                        <TrendingDown className="w-5 h-5 text-red-500" />
+                        Düşüşteki Şirketler ve Trendler
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                        Önceki dönemde aktifken {currentPeriodLabel} döneminde hacmi azalan şirketler.
+                    </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => exportTrendCsv(fallingTrends || [], "dususte-trendler")} disabled={!fallingTrends?.length}>
+                  <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
+                </Button>
             </div>
-            <TrendTable trends={fallingTrends || []} isRising={false} defaultSortField="prevVol" />
+            <TrendTable trends={fallingTrends || []} defaultSortField="prevVol" />
         </TabsContent>
 
       </Tabs>
+
+      {/* Drill-down dialog */}
+      <FirmaTimelineDialog firma={drillFirma} onClose={() => setDrillFirma(null)} />
     </div>
   );
 }
