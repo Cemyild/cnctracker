@@ -30,11 +30,17 @@ export interface MizanParseSonuc {
   toplamAlacak: number;
 }
 
-// "1.234,56" / "1234.56" / 1234.56 → number
+// Çok formatlı sayı parser:
+//   1234.56 (number) | "1.234,56" (TR) | "1,234.56" (US) | "₺1.234,56" | "1234,56 TL" → 1234.56
 function parseNum(v: any): number {
   if (v == null || v === "") return 0;
   if (typeof v === "number") return v;
   let s = String(v).trim();
+  if (!s) return 0;
+  // Para birimi simgeleri ve metin etiketlerini temizle (₺, $, €, TL, USD, EUR, vb)
+  s = s.replace(/[₺$€£¥]/g, "").replace(/\b(TL|USD|EUR|GBP|TRY)\b/gi, "").trim();
+  // Negatif: parantez "(1.234,56)" → "-1.234,56"
+  if (/^\(.*\)$/.test(s)) s = "-" + s.slice(1, -1).trim();
   if (!s) return 0;
   // TR: nokta binlik, virgül ondalık → "1.234,56" → "1234.56"
   if (s.includes(",") && s.includes(".")) {
@@ -44,24 +50,88 @@ function parseNum(v: any): number {
   } else if (s.includes(",")) {
     s = s.replace(",", ".");
   }
+  // Beyaz boşlukları temizle (1 234,56 stiline karşı)
+  s = s.replace(/\s+/g, "");
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
 
-// "06.02.2026" / Date / serial → "YYYY-MM-DD"
+// Çok formatlı tarih parser:
+//   Date obj | Excel serial number (45693) | "dd.mm.yyyy" | "dd/mm/yyyy" | "dd-mm-yyyy"
+//   "yyyy-mm-dd" | "yyyy/mm/dd" | "dd.mm.yy" | "6 Şubat 2026" → "YYYY-MM-DD"
 function parseTarih(v: any): string | null {
   if (v == null || v === "") return null;
+
+  // Date object (cellDates: true ile gelen)
   if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
     const y = v.getFullYear();
     const m = String(v.getMonth() + 1).padStart(2, "0");
     const d = String(v.getDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
   }
+
+  // Excel serial number — number olarak gelirse (cellDates: false durumunda)
+  // Excel epoch: 1900-01-01 = 1, ama 1900-02-29 hatası nedeniyle offset 25569 kullanılır
+  if (typeof v === "number" && v > 0 && v < 100000) {
+    const ms = (v - 25569) * 86400 * 1000;
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) {
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(d.getUTCDate()).padStart(2, "0");
+      return `${y}-${m}-${dd}`;
+    }
+  }
+
   const s = String(v).trim();
-  const tr = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  if (tr) return `${tr[3]}-${tr[2]}-${tr[1]}`;
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return iso[0];
+  if (!s) return null;
+
+  // dd[./-]mm[./-]yyyy (4-haneli yıl)
+  const m1 = s.match(/^(\d{1,2})[./\-](\d{1,2})[./\-](\d{4})$/);
+  if (m1) {
+    const dd = m1[1].padStart(2, "0");
+    const mm = m1[2].padStart(2, "0");
+    return `${m1[3]}-${mm}-${dd}`;
+  }
+  // yyyy[./-]mm[./-]dd (4-haneli yıl başta)
+  const m2 = s.match(/^(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})/);
+  if (m2) {
+    const mm = m2[2].padStart(2, "0");
+    const dd = m2[3].padStart(2, "0");
+    return `${m2[1]}-${mm}-${dd}`;
+  }
+  // dd[./-]mm[./-]yy (2-haneli yıl) — 50+ → 19xx, 50- → 20xx
+  const m3 = s.match(/^(\d{1,2})[./\-](\d{1,2})[./\-](\d{2})$/);
+  if (m3) {
+    const dd = m3[1].padStart(2, "0");
+    const mm = m3[2].padStart(2, "0");
+    const yy = parseInt(m3[3], 10);
+    const fullYear = yy >= 50 ? 1900 + yy : 2000 + yy;
+    return `${fullYear}-${mm}-${dd}`;
+  }
+  // "6 Şubat 2026" / "6 Subat 2026" / "06 Şub 2026"
+  const aylar: Record<string, string> = {
+    ocak: "01", oca: "01", subat: "02", şubat: "02", sub: "02", şub: "02",
+    mart: "03", mar: "03", nisan: "04", nis: "04", mayis: "05", mayıs: "05", may: "05",
+    haziran: "06", haz: "06", temmuz: "07", tem: "07", agustos: "08", ağustos: "08", agu: "08", ağu: "08",
+    eylul: "09", eylül: "09", eyl: "09", ekim: "10", eki: "10",
+    kasim: "11", kasım: "11", kas: "11", aralik: "12", aralık: "12", ara: "12",
+  };
+  const m4 = s.toLocaleLowerCase("tr").match(/^(\d{1,2})\s+([a-zçğıöşü]+)\s+(\d{4})$/);
+  if (m4 && aylar[m4[2]]) {
+    const dd = m4[1].padStart(2, "0");
+    return `${m4[3]}-${aylar[m4[2]]}-${dd}`;
+  }
+  // "Sun Feb 06 2026 ..." gibi JS Date.toString çıktısı (fallback)
+  const fallback = new Date(s);
+  if (!isNaN(fallback.getTime()) && fallback.getFullYear() > 1900 && fallback.getFullYear() < 2100) {
+    const y = fallback.getFullYear();
+    const m = String(fallback.getMonth() + 1).padStart(2, "0");
+    const d = String(fallback.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
   return null;
 }
 
