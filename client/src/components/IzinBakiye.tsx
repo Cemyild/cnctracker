@@ -105,14 +105,14 @@ export function IzinBakiye({ onYeniIzin }: { onYeniIzin: (tcNo: string) => void 
 
             <div className="border-t pt-2 space-y-1 text-sm">
               <div className="flex items-center justify-between">
-                <span>Açılış bakiyesi:</span>
+                <span>Kullanılmayan Gün:</span>
                 {editingTcNo === b.tcNo ? (
                   <div className="flex items-center gap-1">
                     <Input value={editVal} onChange={(e) => setEditVal(e.target.value)} className="h-7 w-16" type="number" />
                     <Button size="sm" className="h-7" onClick={() => handleAcilisSave(b.tcNo)}>OK</Button>
                   </div>
                 ) : (
-                  <button className="font-semibold tabular-nums hover:text-primary inline-flex items-center gap-1" onClick={() => { setEditingTcNo(b.tcNo); setEditVal(String(b.acilisBakiyesi)); }}>
+                  <button className="font-semibold tabular-nums hover:text-primary inline-flex items-center gap-1" onClick={() => { setEditingTcNo(b.tcNo); setEditVal(String(b.acilisBakiyesi)); }} title="Bu sistemden önce devreden kullanılmayan izin günleri">
                     {b.acilisBakiyesi} <Edit2 className="w-3 h-3 opacity-50" />
                   </button>
                 )}
@@ -120,7 +120,7 @@ export function IzinBakiye({ onYeniIzin }: { onYeniIzin: (tcNo: string) => void 
               <div className="flex justify-between"><span>Toplam hak edilen:</span><strong className="tabular-nums">{b.toplamHakEdilen}</strong></div>
               <div className="flex justify-between"><span>Kullanılan:</span><strong className="tabular-nums text-orange-600">{b.kullanilan}</strong></div>
               <div className="flex justify-between border-t pt-1 mt-1">
-                <span className="font-bold">Kalan bakiye:</span>
+                <span className="font-bold">Kalan Gün:</span>
                 <strong className={`tabular-nums text-lg ${b.guncelBakiye < 0 ? "text-red-600" : "text-green-600"}`}>{b.guncelBakiye}</strong>
               </div>
             </div>
