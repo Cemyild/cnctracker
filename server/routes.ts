@@ -1861,7 +1861,7 @@ export async function registerRoutes(
         if (c.yil > maxYil) { maxYil = c.yil; maxAy = c.ay; }
         else if (c.yil === maxYil && c.ay > maxAy) { maxAy = c.ay; }
       }
-      const aktifler = allCalisanlar.filter((c) => c.yil === maxYil && c.ay === maxAy);
+      const aktifler = allCalisanlar.filter((c) => c.yil === maxYil && c.ay === maxAy && c.tcNo && c.tcNo.trim().length > 0);
 
       const acilisList = await storage.getAcilisBakiyeler();
       const acilisMap = new Map(acilisList.map((a) => [a.tcNo, a]));

@@ -99,7 +99,9 @@ export function IzinListesi({ onYeniEkle, onDuzenle }: IzinListesiProps) {
               <SelectTrigger className="w-[200px]"><SelectValue placeholder="Hepsi" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="HEPSI">Hepsi</SelectItem>
-                {Array.from(adMap.entries()).map(([tc, ad]) => <SelectItem key={tc} value={tc}>{ad}</SelectItem>)}
+                {Array.from(adMap.entries())
+                  .filter(([tc]) => tc && tc.trim().length > 0)
+                  .map(([tc, ad]) => <SelectItem key={tc} value={tc}>{ad}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

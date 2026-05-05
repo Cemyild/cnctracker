@@ -134,7 +134,9 @@ export function IzinEkleModal({ open, onClose, defaultTcNo, defaultDate, editIzi
             <Select value={tcNo} onValueChange={setTcNo}>
               <SelectTrigger><SelectValue placeholder="Çalışan seçin" /></SelectTrigger>
               <SelectContent>
-                {aktifler.map((c: any) => <SelectItem key={c.tcNo} value={c.tcNo}>{c.adSoyad}</SelectItem>)}
+                {aktifler
+                  .filter((c: any) => c.tcNo && String(c.tcNo).trim().length > 0)
+                  .map((c: any) => <SelectItem key={c.tcNo} value={c.tcNo}>{c.adSoyad}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
