@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, Building2, X } from "lucide-react";
@@ -18,6 +18,7 @@ export function MusteriDrillDown({ musteriId, onClose }: { musteriId: string | n
     enabled: open,
   });
   const { toast } = useToast();
+  const qc = useQueryClient();
 
   const fmtTry = (v: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(v);
 
@@ -27,7 +28,8 @@ export function MusteriDrillDown({ musteriId, onClose }: { musteriId: string | n
     const r = await fetch(`/api/tahsilat/eslestirme/${data.musteri.id}/${encodeURIComponent(unvan)}`, { method: "DELETE" });
     if (!r.ok) { toast({ variant: "destructive", title: "Silinemedi" }); return; }
     toast({ title: "Silindi" });
-    // Refetch handled by parent
+    qc.invalidateQueries({ queryKey: [`/api/tahsilat/musteriler/${musteriId}`] });
+    qc.invalidateQueries({ queryKey: ["/api/tahsilat/dashboard"] });
   };
 
   return (

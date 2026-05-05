@@ -2924,15 +2924,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async insertEslestirmeOneri(data: InsertEslestirmeOneri): Promise<EslestirmeOneri> {
-    // Aynı musteriId+gumrukUnvan varsa skip (UNIQUE constraint)
+    // Aynı musteriId+gumrukUnvan varsa skip (Postgres UNIQUE constraint = 23505)
     try {
       const [row] = await db.insert(mizanEslestirmeOnerileri).values(data).returning();
       return row;
     } catch (e: any) {
-      // Mevcut öneri var, döndür
+      // Sadece UNIQUE violation'da mevcut kaydı dön; diğer hataları (FK, bağlantı vs) yukarı fırlat
+      if (e?.code !== "23505") throw e;
       const [existing] = await db.select().from(mizanEslestirmeOnerileri).where(
         and(eq(mizanEslestirmeOnerileri.musteriId, data.musteriId), eq(mizanEslestirmeOnerileri.gumrukUnvan, data.gumrukUnvan))
       );
+      if (!existing) throw e; // beklenmedik: UNIQUE crash ama kayıt da yok
       return existing;
     }
   }

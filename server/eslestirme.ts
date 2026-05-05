@@ -1,7 +1,7 @@
 // server/eslestirme.ts
 // Müşteri adı ↔ gümrük firmaUnvan eşleştirme algoritması.
 
-const SIRKET_EKLERI = ["ltd", "sti", "as", "tic", "san", "paz", "ve", "sti"];
+const SIRKET_EKLERI = ["ltd", "sti", "as", "tic", "san", "paz", "ve"];
 const TR_REPLACE: Record<string, string> = { "ı": "i", "ş": "s", "ü": "u", "ö": "o", "ç": "c", "ğ": "g" };
 
 export function normalize(s: string): string {

@@ -10,8 +10,10 @@ export function TahsilatTrend() {
     queryKey: ["/api/tahsilat/trend-genel", mizanList?.length],
     queryFn: async () => {
       if (!mizanList?.length) return [];
-      // Her mizan için dashboard çek (paralel)
-      const results = await Promise.all(mizanList.map(async (m) => {
+      // Connection flood'u önlemek için en yeni 12 mizan ile sınırla.
+      // Daha uzun trend için ileride server-side aggregate endpoint eklenebilir.
+      const sinirli = mizanList.slice(0, 12);
+      const results = await Promise.all(sinirli.map(async (m) => {
         const r = await fetch(`/api/tahsilat/dashboard?mizanId=${m.id}`);
         const j = await r.json();
         return { mizanTarihi: m.mizanTarihi, ozet: j.ozet };

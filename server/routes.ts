@@ -2149,11 +2149,16 @@ export async function registerRoutes(
         if (!musteri) {
           // Otomatik eşleştirme dene
           let gumrukEslesen: string | null = null;
+          let gumrukEslesenSkor: number = 0;
           let oneriler: { unvan: string; skor: number }[] = [];
           for (const u of gumrukUnvanlar) {
             const s = benzerlikSkoru(r.hesapAdi, u);
-            if (s >= ESLESME_AUTO_ESIK && !gumrukEslesen) gumrukEslesen = u;
-            else if (s >= ESLESME_ONERI_ESIK && s < ESLESME_AUTO_ESIK) oneriler.push({ unvan: u, skor: s });
+            if (s >= ESLESME_AUTO_ESIK && !gumrukEslesen) {
+              gumrukEslesen = u;
+              gumrukEslesenSkor = s;
+            } else if (s >= ESLESME_ONERI_ESIK && s < ESLESME_AUTO_ESIK) {
+              oneriler.push({ unvan: u, skor: s });
+            }
           }
           musteri = await storage.insertMusteri({
             hesapKodu: r.hesapKodu,
@@ -2170,7 +2175,7 @@ export async function registerRoutes(
               musteriId: musteri.id,
               gumrukUnvan: gumrukEslesen,
               eklemeTipi: "auto-fuzzy",
-              benzerlikSkoru: "1.000",
+              benzerlikSkoru: gumrukEslesenSkor.toFixed(3),
             });
           }
           for (const o of oneriler.slice(0, 5)) { // max 5 öneri / müşteri
