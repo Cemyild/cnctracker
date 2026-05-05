@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, decimal, date, integer, uniqueIndex, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, decimal, date, integer, uniqueIndex, index, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -62,6 +62,68 @@ export const insertBordroDosyaSchema = createInsertSchema(bordroDosyalar).omit({
 
 export type InsertBordroDosya = z.infer<typeof insertBordroDosyaSchema>;
 export type BordroDosya = typeof bordroDosyalar.$inferSelect;
+
+// ============================================================================
+// İZİN TAKİP SİSTEMİ
+// ============================================================================
+
+// İzin kayıtları
+export const calisanIzinler = pgTable("calisan_izinler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tcNo: text("tc_no").notNull(),
+  baslangicTarihi: text("baslangic_tarihi").notNull(), // YYYY-MM-DD
+  bitisTarihi: text("bitis_tarihi").notNull(),         // YYYY-MM-DD
+  tur: text("tur").notNull(),                          // 'YILLIK' | 'MAZERET'
+  gunSayisi: integer("gun_sayisi").notNull(),          // hesaplanmış iş günü
+  aciklama: text("aciklama"),
+  parayaCevrildi: boolean("paraya_cevrildi").notNull().default(false),
+  parayaCevrilenTutar: decimal("paraya_cevrilen_tutar", { precision: 15, scale: 2 }),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  index("calisan_izinler_tc_idx").on(table.tcNo),
+  index("calisan_izinler_baslangic_idx").on(table.baslangicTarihi),
+]);
+
+export const insertCalisanIzinSchema = createInsertSchema(calisanIzinler).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertCalisanIzin = z.infer<typeof insertCalisanIzinSchema>;
+export type CalisanIzin = typeof calisanIzinler.$inferSelect;
+
+// Açılış bakiyesi (sistem öncesi snapshot)
+export const calisanIzinAcilisBakiyesi = pgTable("calisan_izin_acilis_bakiyesi", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tcNo: text("tc_no").notNull(),
+  acilisTarihi: text("acilis_tarihi").notNull(),       // YYYY-MM-DD, default '2026-01-01'
+  acilisBakiyesi: integer("acilis_bakiyesi").notNull(), // negatif olabilir
+  not: text("not"),
+}, (table) => [
+  uniqueIndex("acilis_bakiye_tc_idx").on(table.tcNo),
+]);
+
+export const insertAcilisBakiyeSchema = createInsertSchema(calisanIzinAcilisBakiyesi).omit({
+  id: true,
+});
+export type InsertAcilisBakiye = z.infer<typeof insertAcilisBakiyeSchema>;
+export type AcilisBakiye = typeof calisanIzinAcilisBakiyesi.$inferSelect;
+
+// Resmi tatiller
+export const resmiTatiller = pgTable("resmi_tatiller", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tarih: text("tarih").notNull(), // YYYY-MM-DD
+  ad: text("ad").notNull(),
+  yil: integer("yil").notNull(),
+}, (table) => [
+  uniqueIndex("resmi_tatiller_tarih_idx").on(table.tarih),
+  index("resmi_tatiller_yil_idx").on(table.yil),
+]);
+
+export const insertResmiTatilSchema = createInsertSchema(resmiTatiller).omit({
+  id: true,
+});
+export type InsertResmiTatil = z.infer<typeof insertResmiTatilSchema>;
+export type ResmiTatil = typeof resmiTatiller.$inferSelect;
 
 // Gümrük verileri tablosu
 export const gumrukVerileri = pgTable("gumruk_verileri", {
