@@ -37,6 +37,13 @@ export interface IStorage {
   // Gümrük verileri
   getGumrukVerileri(ay: string, yil: number): Promise<GumrukVerisi[]>
   getAllGumrukVerileri(): Promise<GumrukVerisi[]>;
+  // Hafif aggregate/projection helper'ları — getAllGumrukVerileri()
+  // çağrılarını azaltmak için. Bunlar DB'den binlerce satır yerine
+  // yalnızca ihtiyaç duyulan kolonları/aggregate'leri çeker.
+  getDistinctGumrukUnvanlar(): Promise<string[]>;
+  getGumrukFirmaFaturaAggregate(refDateStr: string, faturaPenceresiDays: number): Promise<Map<string, { son90: number; yillik: number }>>;
+  getGumrukHouseNoVerileri(): Promise<GumrukVerisi[]>;
+  getGumrukVerileriByFirma(firma: string): Promise<GumrukVerisi[]>;
   insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]>;
   updateGumrukDosyaRecordCount(id: string, count: number): Promise<void>;
   createGumrukDosya(dosya: InsertGumrukDosya): Promise<GumrukDosya>;
@@ -76,6 +83,9 @@ export interface IStorage {
 
   // Çalışanlar
   getCalisanlar(ay?: string, yil?: number): Promise<Calisan[]>;
+  // Hafif helper'lar — filtresiz getCalisanlar() çağrılarını azaltmak için.
+  getAktifCalisanlarSonAy(): Promise<Calisan[]>;
+  getCalisanSubeMap(): Promise<Map<string, string>>;
   insertCalisanlar(veriler: InsertCalisan[]): Promise<Calisan[]>;
   deleteCalisanlar(ay: string, yil: number): Promise<void>;
   updateCalisan(id: string, veri: Partial<InsertCalisan>): Promise<Calisan>;
@@ -370,6 +380,74 @@ export class DatabaseStorage implements IStorage {
 
   async getAllGumrukVerileri(): Promise<GumrukVerisi[]> {
     return await db.select().from(gumrukVerileri);
+  }
+
+  // Sadece firma unvanlarının benzersiz listesi — eşleştirme önerileri
+  // için gerekli olan tek şey bu, tüm satırları çekmek gerekmez.
+  async getDistinctGumrukUnvanlar(): Promise<string[]> {
+    const rows = await db
+      .selectDistinct({ firmaUnvan: gumrukVerileri.firmaUnvan })
+      .from(gumrukVerileri)
+      .where(isNotNull(gumrukVerileri.firmaUnvan));
+    return rows.map(r => r.firmaUnvan as string).filter(Boolean);
+  }
+
+  // DB-side fatura toplamları. Tahsilat risk hesabı için her firma
+  // için son N gün + son 365 gün fatura tutarlarını döndürür.
+  // refDateStr: "YYYY-MM-DD" (mizan tarihi referans)
+  // faturaPenceresiDays: tipik 90
+  // fatura_tarihi DD.MM.YYYY text formatında saklanıyor, to_date() ile parse'lıyoruz.
+  async getGumrukFirmaFaturaAggregate(
+    refDateStr: string,
+    faturaPenceresiDays: number,
+  ): Promise<Map<string, { son90: number; yillik: number }>> {
+    const result: any = await db.execute(sql`
+      SELECT
+        firma_unvan AS firma,
+        COALESCE(SUM(CASE
+          WHEN to_date(fatura_tarihi, 'DD.MM.YYYY')
+               BETWEEN (${refDateStr}::date - (${faturaPenceresiDays} || ' days')::interval)
+                   AND ${refDateStr}::date
+          THEN COALESCE(top_fatura_tutar, 0)
+          ELSE 0 END), 0) AS son90,
+        COALESCE(SUM(CASE
+          WHEN to_date(fatura_tarihi, 'DD.MM.YYYY')
+               BETWEEN (${refDateStr}::date - INTERVAL '365 days')
+                   AND ${refDateStr}::date
+          THEN COALESCE(top_fatura_tutar, 0)
+          ELSE 0 END), 0) AS yillik
+      FROM gumruk_verileri
+      WHERE firma_unvan IS NOT NULL
+        AND fatura_tarihi ~ '^[0-9]{2}\\.[0-9]{2}\\.[0-9]{4}$'
+      GROUP BY firma_unvan
+    `);
+    const map = new Map<string, { son90: number; yillik: number }>();
+    const rows = (result.rows ?? result) as Array<{ firma: string; son90: any; yillik: any }>;
+    for (const r of rows) {
+      map.set(r.firma, {
+        son90: Number(r.son90 ?? 0),
+        yillik: Number(r.yillik ?? 0),
+      });
+    }
+    return map;
+  }
+
+  // Nakliye eşleştirme için: sadece houseNo'su dolu satırları çek.
+  // Toplam tablonun küçük bir alt kümesi.
+  async getGumrukHouseNoVerileri(): Promise<GumrukVerisi[]> {
+    return await db
+      .select()
+      .from(gumrukVerileri)
+      .where(isNotNull(gumrukVerileri.houseNo));
+  }
+
+  // Tek firma için timeline. Eskiden tüm tabloyu çekip JS'de filter
+  // yapılıyordu; şimdi DB-side WHERE ile tek firmanın satırları geliyor.
+  async getGumrukVerileriByFirma(firma: string): Promise<GumrukVerisi[]> {
+    return await db
+      .select()
+      .from(gumrukVerileri)
+      .where(eq(gumrukVerileri.firmaUnvan, firma));
   }
 
   async createGumrukDosya(dosya: InsertGumrukDosya): Promise<GumrukDosya> {
@@ -921,6 +999,43 @@ export class DatabaseStorage implements IStorage {
       return await db.select().from(calisanlar).where(and(...filters)).orderBy(calisanlar.adSoyad);
     }
     return await db.select().from(calisanlar).orderBy(calisanlar.adSoyad);
+  }
+
+  // Yalnızca son ay'daki çalışan kayıtlarını döndürür — "izin bakiye"
+  // endpoint'i için aktif çalışan listesi olarak kullanılıyor.
+  // Tüm yılların kayıtlarını çekmek yerine 50-100 satır transfer eder.
+  async getAktifCalisanlarSonAy(): Promise<Calisan[]> {
+    const maxRow: any = await db.execute(sql`
+      SELECT yil, ay FROM calisanlar
+      WHERE tc_no IS NOT NULL AND tc_no <> ''
+      ORDER BY yil DESC, CAST(NULLIF(ay, '') AS INTEGER) DESC NULLS LAST
+      LIMIT 1
+    `);
+    const rows = (maxRow.rows ?? maxRow) as Array<{ yil: number; ay: string }>;
+    if (rows.length === 0) return [];
+    const { yil, ay } = rows[0];
+    return await db
+      .select()
+      .from(calisanlar)
+      .where(and(eq(calisanlar.yil, Number(yil)), eq(calisanlar.ay, ay)));
+  }
+
+  // Her TC için en güncel (yıl,ay) bordrosundaki şube değerini döndürür.
+  // Bordro yüklemede şube geçmişini uygulamak için kullanılır.
+  // DB-side DISTINCT ON sayesinde ~tüm tablo yerine kişi başına 1 satır transfer.
+  async getCalisanSubeMap(): Promise<Map<string, string>> {
+    const result: any = await db.execute(sql`
+      SELECT DISTINCT ON (tc_no) tc_no, sube
+      FROM calisanlar
+      WHERE tc_no IS NOT NULL AND tc_no <> '' AND sube IS NOT NULL AND sube <> ''
+      ORDER BY tc_no, yil DESC, CAST(NULLIF(ay, '') AS INTEGER) DESC NULLS LAST
+    `);
+    const rows = (result.rows ?? result) as Array<{ tc_no: string; sube: string }>;
+    const map = new Map<string, string>();
+    for (const r of rows) {
+      if (r.tc_no && r.sube) map.set(r.tc_no, r.sube);
+    }
+    return map;
   }
 
   async insertCalisanlar(veriler: InsertCalisan[]): Promise<Calisan[]> {

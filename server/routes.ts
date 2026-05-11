@@ -468,7 +468,6 @@ export async function registerRoutes(
       const firma = (req.query.firma as string || "").trim();
       if (!firma) return res.status(400).json({ error: "firma parametresi zorunlu" });
 
-      const allData = await storage.getAllGumrukVerileri();
       const getAyIndex = (ayStr: string) => aylar.findIndex(a => a.value === ayStr);
 
       // TR/US locale-aware sayı parse'ı (analiz endpoint'iyle aynı mantık)
@@ -487,8 +486,8 @@ export async function registerRoutes(
          return isNaN(parsed) ? 0 : parsed;
       };
 
-      // Firmaya ait kayıtları topla
-      const matched = allData.filter(d => d.firmaUnvan === firma);
+      // Firmaya ait kayıtları DB-side WHERE ile çek (filter optimize).
+      const matched = await storage.getGumrukVerileriByFirma(firma);
       if (matched.length === 0) {
          return res.json({ firma, timeline: [], toplamHacim: 0, toplamIslem: 0 });
       }
@@ -1116,22 +1115,11 @@ export async function registerRoutes(
   // ============================================================================
 
   // Bordro PDF/Excel Yükle ve Önizle
-  // Helper to apply branch history
+  // Helper to apply branch history.
+  // DB-side DISTINCT ON ile her TC için en son şube tek seferde alınır.
   const applyBranchHistory = async (newEmployees: any[]) => {
     try {
-      const allHistory = await storage.getCalisanlar();
-      // Sort by Year asc, Month asc to get latest at the end
-      allHistory.sort((a, b) => {
-        const yDiff = (a.yil || 0) - (b.yil || 0);
-        if (yDiff !== 0) return yDiff;
-        return parseInt(a.ay || "0") - parseInt(b.ay || "0");
-      });
-
-      const branchMap = new Map<string, string>();
-      for (const h of allHistory) {
-        if (h.sube && h.tcNo) branchMap.set(h.tcNo, h.sube);
-      }
-
+      const branchMap = await storage.getCalisanSubeMap();
       for (const emp of newEmployees) {
         if (emp.tcNo && branchMap.has(emp.tcNo)) {
           emp.sube = branchMap.get(emp.tcNo);
@@ -1865,15 +1853,10 @@ export async function registerRoutes(
   app.get("/api/izinler/bakiye", async (req, res) => {
     try {
       const refTarih = (req.query.refTarih as string) || new Date().toISOString().slice(0, 10);
-      // Aktif çalışan: en yeni (yıl, ay) bordrosundaki tcNo'lar
-      const allCalisanlar = await storage.getCalisanlar();
-      let maxYil = 0;
-      let maxAy = "";
-      for (const c of allCalisanlar) {
-        if (c.yil > maxYil) { maxYil = c.yil; maxAy = c.ay; }
-        else if (c.yil === maxYil && c.ay > maxAy) { maxAy = c.ay; }
-      }
-      const aktifler = allCalisanlar.filter((c) => c.yil === maxYil && c.ay === maxAy && c.tcNo && c.tcNo.trim().length > 0);
+      // Aktif çalışan: son ay bordrosundaki tcNo'lar.
+      // DB-side LIMIT 1 + WHERE ile sadece son ay'ın satırları transfer edilir.
+      const aktifler = (await storage.getAktifCalisanlarSonAy())
+        .filter((c) => c.tcNo && c.tcNo.trim().length > 0);
 
       const acilisList = await storage.getAcilisBakiyeler();
       const acilisMap = new Map(acilisList.map((a) => [a.tcNo, a]));
@@ -2138,11 +2121,9 @@ export async function registerRoutes(
       let guncellenenMusteri = 0;
       const bakiyeBatch: InsertMizanBakiye[] = [];
 
-      // Gümrük firma unvanlarını cache'le (eşleştirme önerisi için)
-      const gumrukUnvanlarSet = new Set<string>();
-      const gumrukVeriler = await storage.getAllGumrukVerileri();
-      gumrukVeriler.forEach((g) => { if (g.firmaUnvan) gumrukUnvanlarSet.add(g.firmaUnvan); });
-      const gumrukUnvanlar = Array.from(gumrukUnvanlarSet);
+      // Gümrük firma unvanlarını cache'le (eşleştirme önerisi için).
+      // DB-side DISTINCT — tüm tablo yerine sadece unique unvan listesi.
+      const gumrukUnvanlar = await storage.getDistinctGumrukUnvanlar();
 
       for (const r of parsed.satirlar) {
         let musteri = await storage.getMusteriByHesapKodu(r.hesapKodu);
@@ -2323,34 +2304,13 @@ export async function registerRoutes(
         : [];
       const musteriMap = new Map(musteriList.map((m) => [m.id, m]));
 
-      // Gümrük fatura toplamlarını tek seferde çek
-      const tumGumruk = await storage.getAllGumrukVerileri();
-      const faturaPenceresi = ayarlar.faturaPenceresi;
-      // Cutoff hesabını mizan tarihinden geriye yap (bugün değil) — geçmiş bir mizan
-      // seçildiğinde fatura penceresi mizan tarihine göre olmalı
-      const refMs = (() => {
-        const m = refTarih.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : Date.now();
-      })();
-      const faturaCutoff = new Date(refMs - faturaPenceresi * 86400000);
-      const yillikCutoff = new Date(refMs - 365 * 86400000);
-      const refMaxDate = new Date(refMs);
-
-      // unvan → { son90: number, yillik: number }
-      const faturaMap = new Map<string, { son90: number; yillik: number }>();
-      for (const g of tumGumruk) {
-        if (!g.firmaUnvan || !g.faturaTarihi) continue;
-        const tr = g.faturaTarihi.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-        if (!tr) continue;
-        const fTarih = new Date(`${tr[3]}-${tr[2]}-${tr[1]}`);
-        const tutar = Number(g.topFaturaTutar || 0);
-        if (!faturaMap.has(g.firmaUnvan)) faturaMap.set(g.firmaUnvan, { son90: 0, yillik: 0 });
-        const entry = faturaMap.get(g.firmaUnvan)!;
-        // Sadece mizan tarihine kadar olan faturalar (geçmiş mizan referansı için)
-        if (fTarih > refMaxDate) continue;
-        if (fTarih >= yillikCutoff) entry.yillik += tutar;
-        if (fTarih >= faturaCutoff) entry.son90 += tutar;
-      }
+      // Gümrük fatura toplamlarını DB-side aggregate ile çek (transfer optimize).
+      // Eskiden: getAllGumrukVerileri() ile binlerce satır + JS aggregate.
+      // Şimdi: SQL GROUP BY + SUM, firma sayısı kadar satır (binlerce → onlarca).
+      const faturaMap = await storage.getGumrukFirmaFaturaAggregate(
+        refTarih,
+        ayarlar.faturaPenceresi,
+      );
 
       // Her bakiye için risk hesapla
       const detaylar = bakiyeler.map((b) => {
@@ -2460,11 +2420,8 @@ export async function registerRoutes(
         (m) => !m.gumrukFirmaUnvanlari || m.gumrukFirmaUnvanlari.length === 0,
       );
 
-      // Gümrük unvanlarını çek
-      const gumrukUnvanSet = new Set<string>();
-      const gumrukVeriler = await storage.getAllGumrukVerileri();
-      gumrukVeriler.forEach((g) => { if (g.firmaUnvan) gumrukUnvanSet.add(g.firmaUnvan); });
-      const gumrukUnvanlar = Array.from(gumrukUnvanSet);
+      // Gümrük unvanlarını çek (DB-side DISTINCT, transfer optimize).
+      const gumrukUnvanlar = await storage.getDistinctGumrukUnvanlar();
 
       let yeniOneri = 0;
       let yeniOtomatik = 0;
@@ -2865,8 +2822,9 @@ export async function registerRoutes(
       const nakliyeVerileri = await storage.getNakliyeVerileri();
       let matchCount = 0;
 
-      // Tüm gümrük verilerini çek
-      const gumrukVerileri = await storage.getAllGumrukVerileri();
+      // Sadece houseNo'su dolu gümrük kayıtları (nakliye eşleştirme için
+      // tek lazım olan bunlar). DB-side WHERE ile transfer optimize.
+      const gumrukVerileri = await storage.getGumrukHouseNoVerileri();
       
       // Hızlı arama için House No tabanlı Map (Multi-Value)
       // Key: Normalized Container No -> Value: Array of Records
