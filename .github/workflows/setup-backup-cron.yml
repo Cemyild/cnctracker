@@ -30,9 +30,11 @@ jobs:
             echo "===== 1. Backup dizini hazırla ====="
             mkdir -p "$BACKUP_DIR"
             # postgres user pg_dump yazabilsin diye sahiplik postgres:postgres
-            chown postgres:postgres "$BACKUP_DIR"
+            # -R: önceki başarısız run'lardan root-owned dosyalar varsa onları da devral
+            chown -R postgres:postgres "$BACKUP_DIR"
             chmod 700 "$BACKUP_DIR"
-            echo "✓ $BACKUP_DIR (700, postgres:postgres)"
+            echo "✓ $BACKUP_DIR (700, postgres:postgres, recursive chown)"
+            ls -la "$BACKUP_DIR" | head -8
 
             echo "===== 2. pg_dump script'i yaz ====="
             cat > "$SCRIPT_PATH" <<'SCRIPT'
