@@ -128,7 +128,11 @@ jobs:
               sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
               echo "✓ DB oluşturuldu: $DB_NAME"
             else
-              if [ "$INPUT_FORCE_RECREATE" = "true" ]; then
+              # İçinde tablo var mı?
+              TABLE_COUNT=$(sudo -u postgres psql -d "$DB_NAME" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" || echo "0")
+              if [ "$TABLE_COUNT" = "0" ]; then
+                echo "✓ DB '$DB_NAME' zaten var ama boş — kullanılabilir."
+              elif [ "$INPUT_FORCE_RECREATE" = "true" ]; then
                 echo "DB var ve force_recreate=true → drop + create"
                 sudo -u postgres psql -d postgres -c \
                   "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$DB_NAME' AND pid <> pg_backend_pid();" >/dev/null
@@ -136,7 +140,7 @@ jobs:
                 sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
                 echo "✓ DB yeniden oluşturuldu"
               else
-                echo "::error::DB '$DB_NAME' zaten var. Force_recreate=true ile yeniden deneyin."
+                echo "::error::DB '$DB_NAME' var ve içinde $TABLE_COUNT tablo var. Force_recreate=true ile yeniden deneyin."
                 exit 1
               fi
             fi
@@ -147,12 +151,14 @@ jobs:
 
             echo "===== 4. Neon → Local data transfer ====="
             echo "pg_dump streaming başlıyor (büyük tablolarda dakikalar sürebilir)..."
-            # --no-owner --no-acl: hedef DB'de farklı user, ownership/grant'leri taşıma
-            # --no-comments: gereksiz uzunluk
-            # Direkt pipe — disk'te ara dosya tutmuyoruz
-            pg_dump "$NEON_URL" \
-                --no-owner --no-acl --no-comments --schema=public \
-              | sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" >/dev/null
+
+            # CREATE/COMMENT SCHEMA public satırlarını filtrele — yeni DB'de public zaten var.
+            # Restore cnctracker user'ıyla yapılır (DB owner, public schema'da CREATE yetkili).
+            PGPASSWORD="$DB_PASSWORD" pg_dump "$NEON_URL" \
+                --no-owner --no-acl --no-comments \
+              | sed -E '/^(CREATE|COMMENT ON) SCHEMA public[ ;]/d' \
+              | PGPASSWORD="$DB_PASSWORD" psql -h localhost -U "$DB_USER" -d "$DB_NAME" \
+                  -v ON_ERROR_STOP=1 -q >/dev/null
 
             echo "✓ Veri transferi tamamlandı"
 
