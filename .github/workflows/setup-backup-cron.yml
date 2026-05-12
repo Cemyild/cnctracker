@@ -43,6 +43,10 @@ jobs:
             # 30 günden eski dump'ları otomatik siler.
             set -euo pipefail
 
+            # postgres user'ın erişebileceği cwd'ye geç — sudo ile çağrılırken
+            # invoker'ın cwd'si (örn. /root) erişilemez olabilir, find bundan rahatsız olur.
+            cd /tmp
+
             BACKUP_DIR="/var/backups/postgres"
             DB_NAME="cnctracker_db"
             DATE=$(date +%Y%m%d-%H%M%S)
