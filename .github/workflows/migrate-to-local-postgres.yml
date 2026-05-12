@@ -65,47 +65,43 @@ jobs:
             echo "===== 2. PostgreSQL kurulumu ====="
             export DEBIAN_FRONTEND=noninteractive
 
-            # Neon PG 17 kullanıyor, pg_dump versiyon uyumluluğu için PG 17 lazım.
-            # Ubuntu 24.04 default'u PG 16 — PGDG resmi APT repo'su eklenerek PG 17 kurulur.
+            # Neon PG 17 kullanıyor → pg_dump versiyon uyumluluğu için PG 17 server+client şart.
+            # Ubuntu 24.04 default'u PG 16 — PGDG resmi script ile PG 17 kurulur.
 
-            # Eski PG 16 kurulu mu (önceki başarısız run'dan kalmış olabilir)?
-            if dpkg -l 2>/dev/null | grep -qE "^ii  postgresql-16 "; then
-              echo "Eski PG 16 kaldırılıyor (önceki run'dan kalan)..."
-              systemctl stop postgresql 2>/dev/null || true
-              apt-get purge -y "postgresql-16" "postgresql-client-16" "postgresql-contrib" 2>/dev/null || true
+            # Mevcut versiyonu tespit et
+            CURRENT_VER=""
+            if command -v psql >/dev/null 2>&1; then
+              CURRENT_VER=$(psql --version | grep -oE '[0-9]+' | head -1 || echo "")
+            fi
+            echo "Mevcut PG versiyonu: ${CURRENT_VER:-yok}"
+
+            if [ "$CURRENT_VER" != "17" ]; then
+              # Eski PG sürümlerini temizle (varsa). PG 16 ilk başarısız run'dan kalmış olabilir.
+              for old_ver in 12 13 14 15 16; do
+                if dpkg-query -W "postgresql-$old_ver" 2>/dev/null | grep -q "postgresql-$old_ver"; then
+                  echo "Eski PG $old_ver kaldırılıyor..."
+                  systemctl stop postgresql 2>/dev/null || true
+                  apt-get purge -y "postgresql-$old_ver" "postgresql-client-$old_ver" 2>/dev/null || true
+                  rm -rf "/var/lib/postgresql/$old_ver" "/etc/postgresql/$old_ver"
+                fi
+              done
               apt-get autoremove -y 2>/dev/null || true
-              rm -rf /var/lib/postgresql/16 /etc/postgresql/16
-              echo "✓ PG 16 temizlendi"
-            fi
 
-            # PGDG APT repo'su zaten ekli mi?
-            if [ ! -f /etc/apt/sources.list.d/pgdg.list ]; then
-              echo "PostgreSQL APT repo (PGDG) ekleniyor..."
-              apt-get install -y curl ca-certificates gnupg lsb-release >/dev/null
-              install -d /usr/share/postgresql-common/pgdg
-              curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-                | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
-              echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-                > /etc/apt/sources.list.d/pgdg.list
+              # PGDG resmi install script — kendi GPG/repo setup'ını non-interactive yapar
               apt-get update -qq
-              echo "✓ PGDG repo eklendi"
-            fi
+              apt-get install -y postgresql-common curl ca-certificates >/dev/null
+              echo "PGDG repo kurulumu (resmi script)..."
+              yes "" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
 
-            # PG 17 kur (idempotent)
-            if ! dpkg -l 2>/dev/null | grep -qE "^ii  postgresql-17 "; then
               echo "PostgreSQL 17 kuruluyor..."
               apt-get install -y postgresql-17 >/dev/null
-              echo "✓ Kuruldu: $(psql --version)"
-            else
-              echo "✓ PostgreSQL 17 zaten var: $(psql --version)"
             fi
 
             systemctl enable --now postgresql >/dev/null 2>&1 || true
             systemctl is-active --quiet postgresql || { echo "::error::postgresql servisi aktif değil"; exit 1; }
 
-            # pg_dump ile server versiyonu kıyaslamasını log'la
-            echo "psql client: $(psql --version)"
-            echo "pg_dump client: $(pg_dump --version)"
+            echo "✓ psql client: $(psql --version)"
+            echo "✓ pg_dump client: $(pg_dump --version)"
 
             echo "===== 3. User & Database oluşturma ====="
             # 32 karakterlik rastgele parola
