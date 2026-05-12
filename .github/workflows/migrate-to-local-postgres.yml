@@ -91,7 +91,8 @@ jobs:
               apt-get update -qq
               apt-get install -y postgresql-common curl ca-certificates >/dev/null
               echo "PGDG repo kurulumu (resmi script)..."
-              yes "" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+              # printf ile tek enter — yes sonsuz pipe SIGPIPE ile pipefail'a takılıyor
+              printf '\n' | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
 
               echo "PostgreSQL 17 kuruluyor..."
               apt-get install -y postgresql-17 >/dev/null
