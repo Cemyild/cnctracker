@@ -1,0 +1,181 @@
+name: Migrate to Local PostgreSQL
+
+# Tek seferlik (veya gerekirse yeniden) tetiklenecek migration workflow'u.
+# Neon serverless'tan VPS'in kendisindeki PostgreSQL'e veri taşır,
+# .env'deki DATABASE_URL'i localhost'a çevirir, pm2'yi yeniden başlatır.
+#
+# GÜVENLİ: Eski Neon URL'i .env'de NEON_BACKUP_URL olarak saklanır,
+# orijinal .env de timestamp'li bir dosyaya yedeklenir. Geri dönüş kolay.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_recreate:
+        description: "DB zaten varsa drop+create yap (TEHLİKELİ, veriler silinir)"
+        type: boolean
+        default: false
+      restart_pm2:
+        description: ".env güncellendikten sonra pm2 cnctracker'ı restart et"
+        type: boolean
+        default: true
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Migration script
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          INPUT_FORCE_RECREATE: ${{ inputs.force_recreate }}
+          INPUT_RESTART_PM2: ${{ inputs.restart_pm2 }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          envs: INPUT_FORCE_RECREATE,INPUT_RESTART_PM2
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+
+            APP_DIR="/var/www/cnctracker"
+            DB_USER="cnctracker"
+            DB_NAME="cnctracker_db"
+
+            cd "$APP_DIR"
+
+            echo "===== 1. Mevcut Neon URL'i .env'den oku ====="
+            if [ ! -f .env ]; then
+              echo "::error::$APP_DIR/.env bulunamadı"
+              exit 1
+            fi
+            NEON_URL=$(grep -E '^DATABASE_URL=' .env | head -1 | sed 's/^DATABASE_URL=//')
+            if [ -z "$NEON_URL" ]; then
+              echo "::error::DATABASE_URL .env'de boş"
+              exit 1
+            fi
+            # Eğer zaten localhost'a işaret ediyorsa migration tamamlanmıştır
+            if echo "$NEON_URL" | grep -qE "@(localhost|127\.0\.0\.1)"; then
+              echo "DATABASE_URL zaten localhost'a işaret ediyor. Migration daha önce yapılmış."
+              echo "Yeniden çalıştırmak için önce .env'deki DATABASE_URL'i NEON_BACKUP_URL ile değiştirin."
+              exit 0
+            fi
+            echo "Neon URL okundu (gizli, log'a yazılmıyor)."
+
+            echo "===== 2. PostgreSQL kurulumu ====="
+            if ! command -v psql >/dev/null 2>&1; then
+              echo "PostgreSQL kurulu değil — apt ile kuruluyor..."
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y postgresql postgresql-contrib >/dev/null
+              echo "✓ Kuruldu: $(psql --version)"
+            else
+              echo "✓ PostgreSQL zaten var: $(psql --version)"
+            fi
+            systemctl enable --now postgresql >/dev/null 2>&1 || true
+            systemctl is-active --quiet postgresql || { echo "::error::postgresql servisi aktif değil"; exit 1; }
+
+            echo "===== 3. User & Database oluşturma ====="
+            # 32 karakterlik rastgele parola
+            DB_PASSWORD=$(openssl rand -base64 48 | tr -d '=+/' | head -c 32)
+
+            # User'ı oluştur veya parolasını sıfırla
+            sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres >/dev/null <<SQL
+            DO \$do\$
+            BEGIN
+              IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$DB_USER') THEN
+                CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';
+              ELSE
+                ALTER USER $DB_USER WITH PASSWORD '$DB_PASSWORD';
+              END IF;
+            END
+            \$do\$;
+            SQL
+            echo "✓ User: $DB_USER"
+
+            # DB var mı kontrol
+            DB_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" || true)
+            if [ -z "$DB_EXISTS" ]; then
+              sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
+              echo "✓ DB oluşturuldu: $DB_NAME"
+            else
+              if [ "$INPUT_FORCE_RECREATE" = "true" ]; then
+                echo "DB var ve force_recreate=true → drop + create"
+                sudo -u postgres psql -d postgres -c \
+                  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$DB_NAME' AND pid <> pg_backend_pid();" >/dev/null
+                sudo -u postgres dropdb "$DB_NAME"
+                sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
+                echo "✓ DB yeniden oluşturuldu"
+              else
+                echo "::error::DB '$DB_NAME' zaten var. Force_recreate=true ile yeniden deneyin."
+                exit 1
+              fi
+            fi
+
+            # Public schema yetkileri
+            sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO $DB_USER;" >/dev/null
+            sudo -u postgres psql -d "$DB_NAME" -c "ALTER SCHEMA public OWNER TO $DB_USER;" >/dev/null
+
+            echo "===== 4. Neon → Local data transfer ====="
+            echo "pg_dump streaming başlıyor (büyük tablolarda dakikalar sürebilir)..."
+            # --no-owner --no-acl: hedef DB'de farklı user, ownership/grant'leri taşıma
+            # --no-comments: gereksiz uzunluk
+            # Direkt pipe — disk'te ara dosya tutmuyoruz
+            pg_dump "$NEON_URL" \
+                --no-owner --no-acl --no-comments --schema=public \
+              | sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" >/dev/null
+
+            echo "✓ Veri transferi tamamlandı"
+
+            echo "===== 5. Tutarlılık kontrolü (kritik tablolar) ====="
+            TABLES="gumruk_verileri musteriler calisanlar sigorta_policeleri mizan_bakiye araclar nakliye_verileri"
+            ALL_MATCH=true
+            for t in $TABLES; do
+              neon_count=$(psql "$NEON_URL" -tAc "SELECT count(*) FROM $t" 2>/dev/null || echo "?")
+              local_count=$(sudo -u postgres psql -d "$DB_NAME" -tAc "SELECT count(*) FROM $t" 2>/dev/null || echo "?")
+              if [ "$neon_count" = "$local_count" ] && [ "$neon_count" != "?" ]; then
+                echo "  ✓ $t: $neon_count satır"
+              else
+                echo "  ✗ $t: Neon=$neon_count, Local=$local_count  ←  UYUMSUZ"
+                ALL_MATCH=false
+              fi
+            done
+            if [ "$ALL_MATCH" != "true" ]; then
+              echo "::warning::Bazı tablolarda satır sayıları uyuşmuyor. .env değiştirilmiyor — manuel inceleme gerekli."
+              echo "Bu DB hâlâ kullanılabilir; .env'i manuel olarak DATABASE_URL=postgresql://$DB_USER:****@localhost:5432/$DB_NAME yapmanız yeterli."
+              exit 1
+            fi
+
+            echo "===== 6. .env güncelleme ====="
+            BACKUP_FILE=".env.neon-backup-$(date +%Y%m%d-%H%M%S)"
+            cp .env "$BACKUP_FILE"
+            echo "Yedek: $APP_DIR/$BACKUP_FILE"
+
+            NEW_URL="postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME"
+
+            # NEON_BACKUP_URL satırını yaz veya güncelle
+            if grep -q '^NEON_BACKUP_URL=' .env; then
+              sed -i.tmp "s|^NEON_BACKUP_URL=.*|NEON_BACKUP_URL=$NEON_URL|" .env
+            else
+              echo "NEON_BACKUP_URL=$NEON_URL" >> .env
+            fi
+            # DATABASE_URL'i yerinde değiştir
+            sed -i.tmp "s|^DATABASE_URL=.*|DATABASE_URL=$NEW_URL|" .env
+            rm -f .env.tmp
+
+            chmod 600 .env "$BACKUP_FILE"
+            echo "✓ .env güncellendi (DATABASE_URL → localhost, NEON_BACKUP_URL korundu)"
+
+            echo "===== 7. PM2 restart ====="
+            if [ "$INPUT_RESTART_PM2" = "true" ]; then
+              pm2 restart cnctracker --update-env
+              sleep 3
+              pm2 status | grep -E "name|cnctracker" || true
+              echo "✓ cnctracker pm2 process restart edildi"
+            else
+              echo "restart_pm2=false → manuel pm2 restart cnctracker --update-env gerekir"
+            fi
+
+            echo ""
+            echo "===== MIGRATION TAMAMLANDI ====="
+            echo "Geri alma: .env'de DATABASE_URL=\$NEON_BACKUP_URL yapıp pm2 restart cnctracker --update-env"
