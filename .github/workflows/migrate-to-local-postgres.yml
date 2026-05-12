@@ -63,17 +63,49 @@ jobs:
             echo "Neon URL okundu (gizli, log'a yazılmıyor)."
 
             echo "===== 2. PostgreSQL kurulumu ====="
-            if ! command -v psql >/dev/null 2>&1; then
-              echo "PostgreSQL kurulu değil — apt ile kuruluyor..."
-              export DEBIAN_FRONTEND=noninteractive
+            export DEBIAN_FRONTEND=noninteractive
+
+            # Neon PG 17 kullanıyor, pg_dump versiyon uyumluluğu için PG 17 lazım.
+            # Ubuntu 24.04 default'u PG 16 — PGDG resmi APT repo'su eklenerek PG 17 kurulur.
+
+            # Eski PG 16 kurulu mu (önceki başarısız run'dan kalmış olabilir)?
+            if dpkg -l 2>/dev/null | grep -qE "^ii  postgresql-16 "; then
+              echo "Eski PG 16 kaldırılıyor (önceki run'dan kalan)..."
+              systemctl stop postgresql 2>/dev/null || true
+              apt-get purge -y "postgresql-16" "postgresql-client-16" "postgresql-contrib" 2>/dev/null || true
+              apt-get autoremove -y 2>/dev/null || true
+              rm -rf /var/lib/postgresql/16 /etc/postgresql/16
+              echo "✓ PG 16 temizlendi"
+            fi
+
+            # PGDG APT repo'su zaten ekli mi?
+            if [ ! -f /etc/apt/sources.list.d/pgdg.list ]; then
+              echo "PostgreSQL APT repo (PGDG) ekleniyor..."
+              apt-get install -y curl ca-certificates gnupg lsb-release >/dev/null
+              install -d /usr/share/postgresql-common/pgdg
+              curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+                | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+              echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+                > /etc/apt/sources.list.d/pgdg.list
               apt-get update -qq
-              apt-get install -y postgresql postgresql-contrib >/dev/null
+              echo "✓ PGDG repo eklendi"
+            fi
+
+            # PG 17 kur (idempotent)
+            if ! dpkg -l 2>/dev/null | grep -qE "^ii  postgresql-17 "; then
+              echo "PostgreSQL 17 kuruluyor..."
+              apt-get install -y postgresql-17 >/dev/null
               echo "✓ Kuruldu: $(psql --version)"
             else
-              echo "✓ PostgreSQL zaten var: $(psql --version)"
+              echo "✓ PostgreSQL 17 zaten var: $(psql --version)"
             fi
+
             systemctl enable --now postgresql >/dev/null 2>&1 || true
             systemctl is-active --quiet postgresql || { echo "::error::postgresql servisi aktif değil"; exit 1; }
+
+            # pg_dump ile server versiyonu kıyaslamasını log'la
+            echo "psql client: $(psql --version)"
+            echo "pg_dump client: $(pg_dump --version)"
 
             echo "===== 3. User & Database oluşturma ====="
             # 32 karakterlik rastgele parola
