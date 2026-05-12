@@ -94,7 +94,16 @@ jobs:
 
             echo "===== 4. Test backup ====="
             echo "Test backup çalıştırılıyor..."
-            "$SCRIPT_PATH"
+            if ! "$SCRIPT_PATH"; then
+              echo "::error::Test backup başarısız. pgdump.log içeriği:"
+              echo "----- pgdump.log -----"
+              cat "$BACKUP_DIR/pgdump.log" 2>/dev/null || echo "(log dosyası yok)"
+              echo "----- pgdump.log sonu -----"
+              echo ""
+              echo "Manuel debug için pg_dump'ı tek başına çalıştırıyorum:"
+              sudo -u postgres pg_dump cnctracker_db -F c -Z 6 -f /tmp/test.dump 2>&1 || true
+              exit 1
+            fi
 
             # Doğrulama
             LATEST=$(ls -t "$BACKUP_DIR"/cnctracker_*.dump 2>/dev/null | head -1 || true)
