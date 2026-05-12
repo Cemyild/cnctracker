@@ -1,0 +1,132 @@
+name: Setup PostgreSQL Backup Cron
+
+# Tek seferlik (veya gerekirse rerun) — VPS'te PostgreSQL backup cron'unu kurar.
+# - Günlük 03:00'te /var/backups/postgres'a pg_dump -F c
+# - 30 günden eski olanları otomatik temizler
+# - Test backup'ı çalıştırır ve doğrular
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup backup cron
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+
+            BACKUP_DIR="/var/backups/postgres"
+            SCRIPT_PATH="/usr/local/bin/pgdump-cnctracker.sh"
+            CRON_PATH="/etc/cron.d/pgdump-cnctracker"
+
+            echo "===== 1. Backup dizini hazırla ====="
+            mkdir -p "$BACKUP_DIR"
+            chmod 700 "$BACKUP_DIR"
+            chown root:root "$BACKUP_DIR"
+            echo "✓ $BACKUP_DIR (700, root:root)"
+
+            echo "===== 2. pg_dump script'i yaz ====="
+            cat > "$SCRIPT_PATH" <<'SCRIPT'
+            #!/bin/bash
+            # PostgreSQL daily backup — cnctracker_db
+            # 30 günden eski dump'ları otomatik siler.
+            set -euo pipefail
+
+            BACKUP_DIR="/var/backups/postgres"
+            DB_NAME="cnctracker_db"
+            DATE=$(date +%Y%m%d-%H%M%S)
+            DUMP_FILE="$BACKUP_DIR/cnctracker_${DATE}.dump"
+            LOG_FILE="$BACKUP_DIR/pgdump.log"
+
+            mkdir -p "$BACKUP_DIR"
+            chmod 700 "$BACKUP_DIR"
+
+            ts() { date '+%Y-%m-%d %H:%M:%S'; }
+
+            echo "[$(ts)] Backup başlıyor → $DUMP_FILE" >> "$LOG_FILE"
+
+            if sudo -u postgres pg_dump "$DB_NAME" -F c -Z 6 -f "$DUMP_FILE" 2>>"$LOG_FILE"; then
+              SIZE=$(du -h "$DUMP_FILE" | cut -f1)
+              echo "[$(ts)] ✓ Tamamlandı: $DUMP_FILE ($SIZE)" >> "$LOG_FILE"
+            else
+              echo "[$(ts)] ✗ HATA: pg_dump başarısız" >> "$LOG_FILE"
+              rm -f "$DUMP_FILE"
+              exit 1
+            fi
+
+            # 30 günden eski dump'ları sil
+            DELETED=$(find "$BACKUP_DIR" -name "cnctracker_*.dump" -mtime +30 -print -delete | wc -l)
+            if [ "$DELETED" -gt 0 ]; then
+              echo "[$(ts)] $DELETED eski dump silindi (30+ gün)" >> "$LOG_FILE"
+            fi
+
+            # Log dosyasını trim et (1MB üstündeyse son 1000 satır)
+            if [ -f "$LOG_FILE" ] && [ "$(stat -c %s "$LOG_FILE")" -gt 1048576 ]; then
+              tail -1000 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+            fi
+            SCRIPT
+
+            chmod 755 "$SCRIPT_PATH"
+            chown root:root "$SCRIPT_PATH"
+            echo "✓ $SCRIPT_PATH yazıldı"
+
+            echo "===== 3. Cron entry'sini yaz ====="
+            cat > "$CRON_PATH" <<'CRON'
+            # cnctracker_db daily backup
+            # Her gün gece 03:00'te (Türkiye saatiyle düşük yük)
+            SHELL=/bin/bash
+            PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            0 3 * * * root /usr/local/bin/pgdump-cnctracker.sh
+            CRON
+            chmod 644 "$CRON_PATH"
+            chown root:root "$CRON_PATH"
+            # Cron daemon /etc/cron.d'yi otomatik okur, restart gerekmez ama servisin çalıştığından emin ol
+            systemctl is-active cron >/dev/null || systemctl restart cron
+            echo "✓ $CRON_PATH yazıldı"
+
+            echo "===== 4. Test backup ====="
+            echo "Test backup çalıştırılıyor..."
+            "$SCRIPT_PATH"
+
+            # Doğrulama
+            LATEST=$(ls -t "$BACKUP_DIR"/cnctracker_*.dump 2>/dev/null | head -1 || true)
+            if [ -z "$LATEST" ]; then
+              echo "::error::Test backup dosyası bulunamadı"
+              exit 1
+            fi
+            SIZE_BYTES=$(stat -c %s "$LATEST")
+            if [ "$SIZE_BYTES" -lt 10000 ]; then
+              echo "::error::Test backup çok küçük ($SIZE_BYTES bytes), bir şey ters"
+              exit 1
+            fi
+            SIZE_HUMAN=$(du -h "$LATEST" | cut -f1)
+            echo "✓ Test backup: $LATEST ($SIZE_HUMAN)"
+
+            # Dump dosyasının okunabilir olduğunu kontrol et (pg_restore --list ile header'ı oku)
+            if sudo -u postgres pg_restore --list "$LATEST" >/dev/null 2>&1; then
+              TABLE_COUNT=$(sudo -u postgres pg_restore --list "$LATEST" | grep -c "TABLE DATA" || echo "?")
+              echo "✓ Dump dosyası geçerli ($TABLE_COUNT tablo)"
+            else
+              echo "::warning::Dump dosyası okunamadı, manuel kontrol gerek"
+            fi
+
+            echo ""
+            echo "===== Kurulum tamamlandı ====="
+            echo ""
+            echo "📁 Backup dizini:"
+            ls -lh "$BACKUP_DIR" | head -10
+            echo ""
+            echo "⏰ Cron entry:"
+            cat "$CRON_PATH"
+            echo ""
+            echo "📝 Manuel backup koşturma: sudo $SCRIPT_PATH"
+            echo "📊 Log dosyası: $BACKUP_DIR/pgdump.log"
+            echo "🔄 Restore: sudo -u postgres pg_restore -d cnctracker_db --clean --if-exists /path/to/dump"
