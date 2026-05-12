@@ -29,9 +29,10 @@ jobs:
 
             echo "===== 1. Backup dizini hazırla ====="
             mkdir -p "$BACKUP_DIR"
+            # postgres user pg_dump yazabilsin diye sahiplik postgres:postgres
+            chown postgres:postgres "$BACKUP_DIR"
             chmod 700 "$BACKUP_DIR"
-            chown root:root "$BACKUP_DIR"
-            echo "✓ $BACKUP_DIR (700, root:root)"
+            echo "✓ $BACKUP_DIR (700, postgres:postgres)"
 
             echo "===== 2. pg_dump script'i yaz ====="
             cat > "$SCRIPT_PATH" <<'SCRIPT'
@@ -47,13 +48,13 @@ jobs:
             LOG_FILE="$BACKUP_DIR/pgdump.log"
 
             mkdir -p "$BACKUP_DIR"
-            chmod 700 "$BACKUP_DIR"
 
             ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
             echo "[$(ts)] Backup başlıyor → $DUMP_FILE" >> "$LOG_FILE"
 
-            if sudo -u postgres pg_dump "$DB_NAME" -F c -Z 6 -f "$DUMP_FILE" 2>>"$LOG_FILE"; then
+            # Script postgres user altında çalışıyor (cron entry de öyle ayarlı)
+            if pg_dump "$DB_NAME" -F c -Z 6 -f "$DUMP_FILE" 2>>"$LOG_FILE"; then
               SIZE=$(du -h "$DUMP_FILE" | cut -f1)
               echo "[$(ts)] ✓ Tamamlandı: $DUMP_FILE ($SIZE)" >> "$LOG_FILE"
             else
@@ -84,7 +85,7 @@ jobs:
             # Her gün gece 03:00'te (Türkiye saatiyle düşük yük)
             SHELL=/bin/bash
             PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-            0 3 * * * root /usr/local/bin/pgdump-cnctracker.sh
+            0 3 * * * postgres /usr/local/bin/pgdump-cnctracker.sh
             CRON
             chmod 644 "$CRON_PATH"
             chown root:root "$CRON_PATH"
@@ -93,15 +94,12 @@ jobs:
             echo "✓ $CRON_PATH yazıldı"
 
             echo "===== 4. Test backup ====="
-            echo "Test backup çalıştırılıyor..."
-            if ! "$SCRIPT_PATH"; then
+            echo "Test backup çalıştırılıyor (postgres user olarak)..."
+            if ! sudo -u postgres "$SCRIPT_PATH"; then
               echo "::error::Test backup başarısız. pgdump.log içeriği:"
               echo "----- pgdump.log -----"
               cat "$BACKUP_DIR/pgdump.log" 2>/dev/null || echo "(log dosyası yok)"
               echo "----- pgdump.log sonu -----"
-              echo ""
-              echo "Manuel debug için pg_dump'ı tek başına çalıştırıyorum:"
-              sudo -u postgres pg_dump cnctracker_db -F c -Z 6 -f /tmp/test.dump 2>&1 || true
               exit 1
             fi
 
