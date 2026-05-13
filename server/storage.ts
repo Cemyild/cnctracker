@@ -122,6 +122,7 @@ export interface IStorage {
   insertSigortaPoliceleri(veriler: InsertSigortaPolice[]): Promise<SigortaPolice[]>;
   deleteSigortaPoliceleri(sirket: string, ay?: string, yil?: number): Promise<void>;
   getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; toplamBedel: number; evetSayisi: number; tutarFarkiSayisi: number }[]>;
+  getSigortaFirmaOzet(yil: number, ay?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]>;
   updateSigortaPoliceDekontDurumu(id: string, durum: string): Promise<SigortaPolice | null>;
   updateSigortaPoliceleriDekontDurumuBulk(ids: string[], durum: string): Promise<number>;
 
@@ -1415,6 +1416,30 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
+
+  async getSigortaFirmaOzet(yil: number, ay?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]> {
+    const filters = [eq(sigortaPoliceleri.yil, yil)];
+    if (ay && ay !== 'toplam' && ay !== 'ALL') {
+      filters.push(eq(sigortaPoliceleri.ay, ay));
+    }
+
+    const result = await db.select({
+      sigortali: sigortaPoliceleri.sigortali,
+      brutPrim: sql<string>`sum(${sigortaPoliceleri.brutPrim})`,
+      komisyon: sql<string>`sum(${sigortaPoliceleri.komisyon})`,
+      policeSayisi: sql<number>`count(*)`,
+    })
+    .from(sigortaPoliceleri)
+    .where(and(...filters))
+    .groupBy(sigortaPoliceleri.sigortali);
+
+    return result.map(r => ({
+      sigortali: r.sigortali || '(Bilinmiyor)',
+      brutPrim: parseFloat(r.brutPrim || '0'),
+      komisyon: parseFloat(r.komisyon || '0'),
+      policeSayisi: Number(r.policeSayisi),
+    }));
+  }
 
   // ==========================================================
   // SİGORTA MUHASEBE KAYITLARI IMPLEMENTATION

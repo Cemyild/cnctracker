@@ -922,6 +922,18 @@ export async function registerRoutes(
   // NOT: Eski `DELETE /api/sigorta/muhasebe-clear/mapfre` endpoint'i kaldırıldı.
   // Aynı işi `DELETE /api/sigorta/muhasebe?sirket=Mapfre` zaten yapıyor.
 
+  app.get("/api/sigorta/firmalar/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const { ay } = req.query;
+      const result = await storage.getSigortaFirmaOzet(parseInt(yil), ay as string | undefined);
+      res.json(result);
+    } catch (err) {
+      console.error("Firma özeti alınırken hata:", err);
+      res.status(500).json({ error: "Firma özeti alınırken hata oluştu" });
+    }
+  });
+
   app.get("/api/sigorta/ozet/:yil", async (req, res) => {
     try {
       const { yil } = req.params;

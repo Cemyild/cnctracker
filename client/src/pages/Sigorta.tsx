@@ -166,6 +166,55 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
         }
     });
 
+    // Firma bazlı toplam — yıl (+ opsiyonel ay) bazında sigortali alanına göre agregasyon
+    const { data: firmalar } = useQuery({
+        queryKey: ['sigorta-firmalar', yil, ay],
+        queryFn: async () => {
+            const qs = ay && ay !== 'toplam' ? `?ay=${ay}` : '';
+            const res = await apiRequest("GET", `/api/sigorta/firmalar/${yil}${qs}`);
+            return res.json();
+        }
+    });
+
+    // Sortable firma tablosu — her sütun tıklanabilir, asc/desc toggle
+    const [firmaSortKey, setFirmaSortKey] = useState<'sigortali' | 'brutPrim' | 'komisyon' | 'policeSayisi'>('brutPrim');
+    const [firmaSortDir, setFirmaSortDir] = useState<'asc' | 'desc'>('desc');
+
+    const sortedFirmalar = useMemo(() => {
+        if (!firmalar) return [];
+        const arr = [...firmalar];
+        arr.sort((a: any, b: any) => {
+            if (firmaSortKey === 'sigortali') {
+                return firmaSortDir === 'asc'
+                    ? String(a.sigortali).localeCompare(String(b.sigortali), 'tr')
+                    : String(b.sigortali).localeCompare(String(a.sigortali), 'tr');
+            }
+            const aVal = Number(a[firmaSortKey]) || 0;
+            const bVal = Number(b[firmaSortKey]) || 0;
+            return firmaSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+        return arr;
+    }, [firmalar, firmaSortKey, firmaSortDir]);
+
+    const toggleFirmaSort = (key: typeof firmaSortKey) => {
+        if (firmaSortKey === key) {
+            // Aynı kolona tekrar tıklanırsa yönü değiştir
+            setFirmaSortDir(firmaSortDir === 'asc' ? 'desc' : 'asc');
+        } else {
+            setFirmaSortKey(key);
+            // Yeni kolon seçildiğinde: sigortali için A→Z (asc), sayısal için
+            // büyükten küçüğe (desc — "en çok" anlamlı default)
+            setFirmaSortDir(key === 'sigortali' ? 'asc' : 'desc');
+        }
+    };
+
+    const FirmaSortIcon = ({ column }: { column: typeof firmaSortKey }) => {
+        if (firmaSortKey !== column) return <ArrowUpDown className="ml-1 h-3 w-3 inline" />;
+        return firmaSortDir === 'asc'
+            ? <ArrowUp className="ml-1 h-3 w-3 inline" />
+            : <ArrowDown className="ml-1 h-3 w-3 inline" />;
+    };
+
     // Filter by month if selected
     const filteredOzet = ay === 'toplam' ? ozet : ozet?.filter((o: any) => o.ay === ay);
 
@@ -289,6 +338,64 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* En Çok Brüt Prim Üreten Firmalar — sortable */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>En Çok Brüt Prim Üreten Firmalar</CardTitle>
+                    <CardDescription>
+                        {yil} yılı{ay !== 'toplam' ? ` / ${AYLAR.find(a => a.value === ay)?.label}` : ''} — {sortedFirmalar.length} firma. Sütun başlığına tıklayarak sırala.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="rounded-md border">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>
+                                        <Button variant="ghost" onClick={() => toggleFirmaSort('sigortali')} className="p-0 h-auto font-bold hover:bg-transparent">
+                                            Firma Adı
+                                            <FirmaSortIcon column="sigortali" />
+                                        </Button>
+                                    </TableHead>
+                                    <TableHead className="text-right">
+                                        <Button variant="ghost" onClick={() => toggleFirmaSort('brutPrim')} className="p-0 h-auto font-bold hover:bg-transparent">
+                                            Brüt Prim
+                                            <FirmaSortIcon column="brutPrim" />
+                                        </Button>
+                                    </TableHead>
+                                    <TableHead className="text-right">
+                                        <Button variant="ghost" onClick={() => toggleFirmaSort('komisyon')} className="p-0 h-auto font-bold hover:bg-transparent">
+                                            Komisyon
+                                            <FirmaSortIcon column="komisyon" />
+                                        </Button>
+                                    </TableHead>
+                                    <TableHead className="text-right">
+                                        <Button variant="ghost" onClick={() => toggleFirmaSort('policeSayisi')} className="p-0 h-auto font-bold hover:bg-transparent">
+                                            Poliçe Adedi
+                                            <FirmaSortIcon column="policeSayisi" />
+                                        </Button>
+                                    </TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {sortedFirmalar.length === 0 ? (
+                                    <TableRow><TableCell colSpan={4} className="text-center h-16 text-muted-foreground">Veri yok</TableCell></TableRow>
+                                ) : (
+                                    sortedFirmalar.map((f: any, idx: number) => (
+                                        <TableRow key={`${f.sigortali}-${idx}`}>
+                                            <TableCell className="font-medium max-w-[420px] truncate" title={f.sigortali}>{f.sigortali}</TableCell>
+                                            <TableCell className="text-right">{fmtPara(f.brutPrim)}</TableCell>
+                                            <TableCell className="text-right">{fmtPara(f.komisyon)}</TableCell>
+                                            <TableCell className="text-right">{f.policeSayisi}</TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </CardContent>
+            </Card>
         </div>
     );
 }
