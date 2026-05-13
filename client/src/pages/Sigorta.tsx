@@ -893,6 +893,8 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
     const [isMatchModalOpen, setIsMatchModalOpen] = useState(false);
     const [selectedUnmatchedRecord, setSelectedUnmatchedRecord] = useState<any>(null);
     const [matchSearchQuery, setMatchSearchQuery] = useState("");
+    const [matchSortBy, setMatchSortBy] = useState<"sigortali" | "brutPrim">("sigortali");
+    const [rematchProcessing, setRematchProcessing] = useState(false);
 
     // Fetch Accounting Records (Muhasebe)
     const { data: storedMuhasebe, refetch: refetchMuhasebe } = useQuery({
@@ -974,6 +976,110 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
         setSelectedPolicies([]);
         setStatusFilter("ALL");
     }, [subTab]);
+
+    // Tekrar Eşleştir — eşleşmeyen muhasebe kayıtlarını mevcut poliçe listesine
+    // karşı yeniden tarar. Use case: kullanıcı önce muhasebeyi yükledi, sonra
+    // poliçeleri yükledi → otomatik akış zaten kapanmış, manuel buton gerek.
+    // Mantık: VeriYukleme akışındaki matching ile aynı (exact + Ray suffix).
+    const handleRematchUnmatched = async () => {
+        if (!storedPolicies || storedPolicies.length === 0) {
+            toast({ variant: "destructive", title: "Hata", description: "Önce poliçe listesi yüklenmeli." });
+            return;
+        }
+        if (!unmatchedRecordsList || unmatchedRecordsList.length === 0) {
+            toast({ title: "Bilgi", description: "Eşleşmeyen kayıt yok." });
+            return;
+        }
+
+        setRematchProcessing(true);
+        try {
+            const isMapfre = subTab === 'mapfre';
+            const policyMap = new Map<string, any>();
+            const mapfreSuffixMap = new Map<string, any[]>();
+            storedPolicies.forEach((p: any) => {
+                const norm = String(p.policeNo).replace(/[^a-zA-Z0-9]/g, "");
+                policyMap.set(norm, p);
+                if (isMapfre && norm.startsWith('21025')) {
+                    const rawSuffix = norm.slice(5);
+                    if (rawSuffix.length > 0) {
+                        const suffix = String(parseInt(rawSuffix));
+                        if (!mapfreSuffixMap.has(suffix)) mapfreSuffixMap.set(suffix, []);
+                        mapfreSuffixMap.get(suffix)?.push(p);
+                    }
+                }
+            });
+
+            const matches: Array<{ muhasebeId: string; policyId: string }> = [];
+            for (const rec of unmatchedRecordsList) {
+                const accNo = String(rec.belgeNo || "").replace(/[^a-zA-Z0-9]/g, "");
+                const accAmount = parseFloat(rec.alacak || "0");
+                if (!accNo) continue;
+
+                let matched: any = null;
+                if (isMapfre) {
+                    if (policyMap.has(accNo)) {
+                        matched = policyMap.get(accNo);
+                    } else {
+                        const suffixKey = String(parseInt(accNo));
+                        const cand = mapfreSuffixMap.get(suffixKey);
+                        if (cand && cand.length === 1) matched = cand[0];
+                        else if (cand && cand.length > 1) {
+                            const close = cand.filter((p: any) => Math.abs(parseFloat(p.brutPrim) - accAmount) < 1.0);
+                            if (close.length === 1) matched = close[0];
+                        }
+                    }
+                } else {
+                    if (policyMap.has(accNo)) {
+                        matched = policyMap.get(accNo);
+                    } else if (accNo.length >= 4 && accNo.length <= 8) {
+                        const cand = storedPolicies.filter((p: any) => {
+                            const norm = String(p.policeNo).replace(/\D/g, "");
+                            return norm.endsWith(accNo);
+                        });
+                        if (cand.length === 1) matched = cand[0];
+                        else if (cand.length > 1) {
+                            const close = cand.filter((p: any) => {
+                                const pBrut = parseFloat(p.brutPrim);
+                                return Math.abs(pBrut - accAmount) < Math.max(1, pBrut * 0.01);
+                            });
+                            if (close.length === 1) matched = close[0];
+                        }
+                    }
+                }
+
+                if (matched) matches.push({ muhasebeId: rec.id, policyId: matched.id });
+            }
+
+            if (matches.length === 0) {
+                toast({ title: "Eşleşme bulunamadı", description: "Mevcut poliçe listesinde eşleşen kayıt yok." });
+                setRematchProcessing(false);
+                return;
+            }
+
+            // Paralel PATCH — match endpoint hem muhasebe hem poliçeyi günceller
+            await Promise.all(matches.map(m =>
+                apiRequest("PUT", `/api/sigorta/muhasebe/${m.muhasebeId}/match`, {
+                    eslestiMi: true,
+                    eslesenPolicyId: m.policyId,
+                })
+            ));
+
+            refetch();
+            refetchMuhasebe();
+            queryClient.invalidateQueries({ queryKey: ['sigorta-policeler'] });
+            queryClient.invalidateQueries({ queryKey: ['sigorta-ozet'] });
+            queryClient.invalidateQueries({ queryKey: ['sigorta-muhasebe'] });
+            toast({
+                title: "Eşleştirme Tamamlandı",
+                description: `${matches.length} muhasebe kaydı eşleştirildi.`,
+            });
+        } catch (err) {
+            console.error(err);
+            toast({ variant: "destructive", title: "Hata", description: "Yeniden eşleştirme sırasında hata oluştu." });
+        } finally {
+            setRematchProcessing(false);
+        }
+    };
 
     // Bulk Update Handler — race-safe PATCH ile sadece dekontDurumu alanını gönderir.
     const handleBulkUpdate = async () => {
@@ -1367,56 +1473,22 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                          }
                     });
 
-                    // Ray cutoff hesaplaması — üç katmanlı strateji:
-                    // 1. Kullanıcı manuel girdi varsa onu kullan (en güvenilir)
-                    // 2. Yoksa: 2025 Aralık zeyilleri 2026'ya aynı eski numara ile
-                    //    geliyor olabilir → sıralı poliçe numaralarında EN BÜYÜK
-                    //    ardışık sıçramayı bul (>1.000.000 ise yıl sınırı say)
-                    // 3. Yoksa: min(numaralar) fallback
+                    // Ray cutoff — default'ta KAPALI. Auto-gap detection devre dışı
+                    // çünkü muhasebe kayıtlarında bazen poliçe numarası kısaltılarak
+                    // (son 5-6 hane) yazılıyor, ve auto-cutoff bunları yanlışlıkla
+                    // atıyordu. Bunun yerine: cutoff yok + Ray suffix matching.
+                    // Manuel override hâlâ desteklenir (UI input dolu ise).
                     let rayMinPolicyNo = 0;
                     let cutoffSource = "";
                     if (subTab === 'ray') {
-                        const nums = (storedPolicies || [])
-                            .map((p: any) => parseInt(String(p.policeNo).replace(/\D/g, '')))
-                            .filter((n: number) => !isNaN(n) && n > 0);
-
                         const manual = parseInt((rayCutoffOverride || "").replace(/\D/g, ''));
                         if (!isNaN(manual) && manual > 0) {
                             rayMinPolicyNo = manual;
                             cutoffSource = "manuel";
-                        } else if (nums.length > 0) {
-                            const sorted = [...nums].sort((a, b) => a - b);
-                            const GAP_THRESHOLD = 1_000_000;
-                            // En SAĞDAKİ anlamlı sıçrama = en yakın yıl sınırı.
-                            // Eski yıllar arasında daha büyük sıçramalar olabilir
-                            // (eski zeyiller arası), bunlar bizim için ilgisiz.
-                            let rightmostAfter: number | null = null;
-                            let rightmostGapSize = 0;
-                            for (let i = 1; i < sorted.length; i++) {
-                                const g = sorted[i] - sorted[i - 1];
-                                if (g > GAP_THRESHOLD) {
-                                    rightmostAfter = sorted[i];
-                                    rightmostGapSize = g;
-                                }
-                            }
-                            if (rightmostAfter !== null) {
-                                rayMinPolicyNo = rightmostAfter;
-                                cutoffSource = `auto-gap rightmost (sıçrama=${rightmostGapSize.toLocaleString('tr-TR')})`;
-                            } else {
-                                rayMinPolicyNo = sorted[0];
-                                cutoffSource = "min (anlamlı sıçrama yok)";
-                            }
+                            console.log(`[Ray cutoff] ${cutoffSource}: ${rayMinPolicyNo} (bundan küçük muhasebe satırları atlanacak)`);
                         } else {
-                            toast({
-                                variant: "destructive",
-                                title: "Önce poliçeleri yükle",
-                                description: `Ray için bu yıl (${yil}) hiç poliçe yok. Cutoff hesaplanamadığı için muhasebe yüklemesi durduruldu.`,
-                            });
-                            setProcessing(false);
-                            e.target.value = "";
-                            return;
+                            console.log(`[Ray cutoff] devre dışı — tüm satırlar değerlendirilecek, kısaltılmış no'lar suffix ile eşleşecek`);
                         }
-                        console.log(`[Ray cutoff] ${cutoffSource}: ${rayMinPolicyNo} (bundan küçük muhasebe satırları atlanacak)`);
                     }
                     let skippedByCutoff = 0;
 
@@ -1527,9 +1599,31 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                 }
                             }
                         } else {
-                            // RAY LOGIC — yalnızca tam eşleşme
+                            // RAY LOGIC — önce tam eşleşme, yoksa suffix fallback
+                            // (muhasebe kayıtlarında bazen poliçe no son 5-6 hane
+                            // olarak kısaltılır — "1494789982" yerine "789982")
                             if (accountingPolicyNo && policyMap.has(accountingPolicyNo)) {
                                 matchedPolicy = policyMap.get(accountingPolicyNo);
+                            } else if (accountingPolicyNo && accountingPolicyNo.length >= 4 && accountingPolicyNo.length <= 8) {
+                                const candidates = storedPolicies.filter((p: any) => {
+                                    const norm = String(p.policeNo).replace(/\D/g, "");
+                                    return norm.endsWith(accountingPolicyNo);
+                                });
+                                if (candidates.length === 1) {
+                                    matchedPolicy = candidates[0];
+                                } else if (candidates.length > 1) {
+                                    // Tutar yakınlığı ile disambiguate (₺1 / %1)
+                                    const closeByAmount = candidates.filter((p: any) => {
+                                        const pBrut = parseFloat(p.brutPrim);
+                                        return Math.abs(pBrut - accAmount) < Math.max(1, pBrut * 0.01);
+                                    });
+                                    if (closeByAmount.length === 1) {
+                                        matchedPolicy = closeByAmount[0];
+                                    } else {
+                                        isSuspicious = true;
+                                        console.warn(`Ray suffix "${accountingPolicyNo}" için ${candidates.length} aday var, manuel seçim gerekli`);
+                                    }
+                                }
                             }
                         }
 
@@ -1875,8 +1969,20 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
 
                             <TabsContent value="unmatched">
                                  <div className="rounded-md border border-red-200 bg-red-50/20 shadow-sm">
-                                    <div className="p-4 bg-red-50 border-b border-red-100 text-red-800 text-sm">
-                                        Bu listedeki kayıtlar Muhasebe Excel'inde bulunup poliçe listesinde eşleşmeyenlerdir (Evrak No/Poliçe No bulunamadı).
+                                    <div className="p-4 bg-red-50 border-b border-red-100 flex items-center justify-between gap-4">
+                                        <span className="text-red-800 text-sm">
+                                            Bu listedeki kayıtlar Muhasebe Excel'inde bulunup poliçe listesinde eşleşmeyenlerdir (Evrak No/Poliçe No bulunamadı).
+                                        </span>
+                                        <Button
+                                            size="sm"
+                                            variant="default"
+                                            className="bg-blue-600 hover:bg-blue-700 shrink-0"
+                                            disabled={rematchProcessing || (unmatchedRecordsList?.length ?? 0) === 0}
+                                            onClick={handleRematchUnmatched}
+                                            title="Eşleşmeyen kayıtları mevcut poliçe listesine karşı yeniden tara"
+                                        >
+                                            {rematchProcessing ? "Eşleştiriliyor..." : "Tekrar Eşleştir"}
+                                        </Button>
                                     </div>
                                     <Table>
                                         <TableHeader>
@@ -1962,14 +2068,24 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                         </DialogDescription>
                     </DialogHeader>
                     
-                    <div className="flex gap-2 mb-4">
-                        <Input 
-                            placeholder="Poliçe Ara..." 
+                    <div className="flex gap-2 mb-4 items-center">
+                        <Input
+                            placeholder="Poliçe Ara..."
                             value={matchSearchQuery}
                             onChange={(e) => setMatchSearchQuery(e.target.value)}
+                            className="flex-1"
                         />
+                        <Select value={matchSortBy} onValueChange={(v: any) => setMatchSortBy(v)}>
+                            <SelectTrigger className="w-[180px]">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="sigortali">Sigortalı A-Z</SelectItem>
+                                <SelectItem value="brutPrim">Brüt Prim ↑</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
-                    
+
                     <div className="max-h-[300px] overflow-y-auto border rounded-md">
                         <Table>
                             <TableHeader>
@@ -1981,13 +2097,20 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {storedPolicies?.filter((p: any) => p.dekontDurumu !== 'EVET')
-                                    .filter((p: any) => 
-                                        matchSearchQuery 
+                                {(storedPolicies || [])
+                                    .filter((p: any) => p.dekontDurumu !== 'EVET')
+                                    .filter((p: any) =>
+                                        matchSearchQuery
                                             ? (p.policeNo.includes(matchSearchQuery) || String(p.sigortali).toLowerCase().includes(matchSearchQuery.toLowerCase()))
-                                            : true 
-                                        // Maybe restrict results if query is empty? No, show first few.
+                                            : true
                                     )
+                                    .slice()
+                                    .sort((a: any, b: any) => {
+                                        if (matchSortBy === "brutPrim") {
+                                            return parseFloat(a.brutPrim || "0") - parseFloat(b.brutPrim || "0");
+                                        }
+                                        return String(a.sigortali || "").localeCompare(String(b.sigortali || ""), 'tr');
+                                    })
                                     .slice(0, 50)
                                     .map((p: any) => (
                                     <TableRow key={p.id} className="hover:bg-slate-50 cursor-pointer" onClick={async () => {
