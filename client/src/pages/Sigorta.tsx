@@ -931,6 +931,78 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
         return fallback();
     };
 
+    // ─────────────────────────────────────────────────────────────
+    // Header-tabanlı kolon eşleme
+    // ─────────────────────────────────────────────────────────────
+    // Sigorta firmaları zaman zaman Excel kolon sırasını değiştiriyor.
+    // Sabit indeks (row[0]=Branş, row[4]=Net Prim...) yerine ilk
+    // satırlardaki başlıkları okuyup metinden hangi kolonun ne olduğunu
+    // tespit ediyoruz. Birden fazla başlık satırı (merged title) için
+    // ilk 10 satırı tarıyoruz.
+    const normalizeHeader = (s: any): string => {
+        if (s === null || s === undefined) return "";
+        return String(s)
+            .toLowerCase()
+            .replace(/ş/g, "s").replace(/ı/g, "i").replace(/ğ/g, "g")
+            .replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c")
+            .replace(/[^a-z0-9]/g, ""); // boşluk, nokta, parantez, vs. hepsi atılır
+    };
+
+    // Her field için kabul edilen başlık varyantları (normalize edilmiş hâli)
+    const HEADER_SYNONYMS: Record<string, string[]> = {
+        brans:         ["brans", "branch", "branskodu", "branskod"],
+        policeNo:      ["policeno", "policyno", "policiseno", "polno", "polnumarasi", "polnumara"],
+        sigortali:     ["sigortali", "sigortaliad", "sigortaliunvan", "musteri", "musteriad", "musteriunvan", "insured", "adsoyad", "unvan"],
+        tanzimTarihi:  ["tanzimtarihi", "tanzim", "duzenleme", "duzenlematarihi", "duzenlematar", "tarih", "policetarihi", "baslangictarihi"],
+        netPrim:       ["netprim", "net", "netprimi", "netprimtutari", "primnet"],
+        brutPrim:      ["brutprim", "brut", "brutprimi", "brutprimtutari", "primbrut", "toplamprim", "odemekprim"],
+        komisyon:      ["komisyon", "komisyontutari", "komisyontutar", "commission", "komtutari", "komtutar"],
+        sigortaBedeli: ["sigortabedeli", "sigortabedel", "bedel", "teminat", "teminattutari", "teminatbedeli", "sigortatemini"],
+        dekontDurumu:  ["dekont", "dekontdurumu", "dekontdurum", "dekontevethayir"],
+    };
+
+    type ColumnMap = Partial<Record<keyof typeof HEADER_SYNONYMS, number>>;
+
+    const detectHeader = (rows: any[][]): { headerRowIdx: number; mapping: ColumnMap } | null => {
+        const MAX_SCAN = Math.min(rows.length, 10);
+        for (let r = 0; r < MAX_SCAN; r++) {
+            const row = rows[r];
+            if (!row || row.length < 2) continue;
+
+            const mapping: ColumnMap = {};
+            for (let c = 0; c < row.length; c++) {
+                const norm = normalizeHeader(row[c]);
+                if (!norm) continue;
+                for (const [field, synonyms] of Object.entries(HEADER_SYNONYMS)) {
+                    if ((mapping as any)[field] !== undefined) continue; // İlk eşleşmeyi koru
+                    // Exact match önce, sonra substring fallback
+                    if (synonyms.includes(norm) || synonyms.some(s => norm === s)) {
+                        (mapping as any)[field] = c;
+                        break;
+                    }
+                }
+            }
+            // Bir kez daha gez: exact match'i kaçıran kolonlar için substring fallback
+            for (let c = 0; c < row.length; c++) {
+                const norm = normalizeHeader(row[c]);
+                if (!norm) continue;
+                for (const [field, synonyms] of Object.entries(HEADER_SYNONYMS)) {
+                    if ((mapping as any)[field] !== undefined) continue;
+                    if (synonyms.some(s => norm.includes(s) || s.includes(norm))) {
+                        (mapping as any)[field] = c;
+                        break;
+                    }
+                }
+            }
+
+            // Header sayılması için en az policeNo + (netPrim VEYA brutPrim) bulunmalı
+            if (mapping.policeNo !== undefined && (mapping.netPrim !== undefined || mapping.brutPrim !== undefined)) {
+                return { headerRowIdx: r, mapping };
+            }
+        }
+        return null;
+    };
+
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -945,81 +1017,102 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];
                     const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
-                    
+
+                    // Header tespiti — kolon sırası firmaya göre değişir, başlıktan eşle
+                    const detected = detectHeader(jsonData);
+                    if (!detected) {
+                        const firstRow = jsonData[0] ? JSON.stringify(jsonData[0]).slice(0, 150) : "(boş)";
+                        toast({
+                            variant: "destructive",
+                            title: "Başlık satırı tanınmadı",
+                            description: `Excel'in ilk 10 satırında 'Poliçe No' + 'Net/Brüt Prim' içeren başlık bulunamadı. İlk satır: ${firstRow}`,
+                        });
+                        setProcessing(false);
+                        e.target.value = "";
+                        return;
+                    }
+                    const { headerRowIdx, mapping } = detected;
+                    const colOf = (field: keyof typeof HEADER_SYNONYMS, fallback?: number) =>
+                        (mapping as any)[field] !== undefined ? (mapping as any)[field] : fallback;
+
                     const policiesToSave: any[] = [];
                     const uniqueMap = new Map<string, any>();
-                    // Start from row 1 (exclude header row 0)
-                    for (let i = 1; i < jsonData.length; i++) {
-                        const row = jsonData[i];
-                        if (!row || row.length < 2) continue; // Skip empty rows
 
-                        // Check indispensable fields (e.g. Policy No)
-                        const pNo = row[1]; 
+                    for (let i = headerRowIdx + 1; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || row.length < 2) continue;
+
+                        // Poliçe No zorunlu — yoksa satırı atla
+                        const policeCol = colOf("policeNo");
+                        const pNo = policeCol !== undefined ? row[policeCol] : undefined;
                         if (!pNo) continue;
 
-                        const dateInfo = extractMonthAndYear(row[3]);
-                        
-                        const policy = {
-                            brans: String(row[0] || ""),
-                            policeNo: String(pNo).replace(/[^a-zA-Z0-9]/g, ""),
-                            sigortali: String(row[2] || ""),
-                            tanzimTarihi: formatExcelDate(row[3]), // Use formatter here
-                            netPrim: String(parseAmount(row[4])),
-                            brutPrim: String(parseAmount(row[5])),
-                            komisyon: String(parseAmount(row[6])),
-                            sigortaBedeli: String(parseAmount(row[7])),
-                            sirket: subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY,
-                            dekontDurumu: "", // Initially empty
-                            ay: dateInfo ? dateInfo.ay : "1", // Estimate month from date
-                            yil: dateInfo ? dateInfo.yil : yil // Estimate year from date or use global
+                        const tanzimCol = colOf("tanzimTarihi");
+                        const tanzimRaw = tanzimCol !== undefined ? row[tanzimCol] : undefined;
+                        const dateInfo = extractMonthAndYear(tanzimRaw);
+
+                        const get = (field: keyof typeof HEADER_SYNONYMS) => {
+                            const c = colOf(field);
+                            return c !== undefined ? row[c] : undefined;
                         };
 
-                        // Aggregation key (PolicyNo + Company)
+                        const policy = {
+                            brans: String(get("brans") || ""),
+                            policeNo: String(pNo).replace(/[^a-zA-Z0-9]/g, ""),
+                            sigortali: String(get("sigortali") || ""),
+                            tanzimTarihi: formatExcelDate(tanzimRaw),
+                            netPrim: String(parseAmount(get("netPrim"))),
+                            brutPrim: String(parseAmount(get("brutPrim"))),
+                            komisyon: String(parseAmount(get("komisyon"))),
+                            sigortaBedeli: String(parseAmount(get("sigortaBedeli"))),
+                            sirket: subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY,
+                            dekontDurumu: String(get("dekontDurumu") || ""), // Excel'de yoksa boş — upsert'te eski değer korunur
+                            ay: dateInfo ? dateInfo.ay : "1",
+                            yil: dateInfo ? dateInfo.yil : yil,
+                        };
+
+                        // Zeyilname/iptal birleştirme (aynı policeNo + sirket → tutarları topla)
                         const key = `${policy.policeNo}-${policy.sirket}`;
-                        
                         if (uniqueMap.has(key)) {
-                            // Merge with existing policy (Zeyil/Cancellation logic: Sum amounts)
                             const existing = uniqueMap.get(key);
                             existing.netPrim = String(parseFloat(existing.netPrim) + parseFloat(policy.netPrim));
                             existing.brutPrim = String(parseFloat(existing.brutPrim) + parseFloat(policy.brutPrim));
                             existing.komisyon = String(parseFloat(existing.komisyon) + parseFloat(policy.komisyon));
                             existing.sigortaBedeli = String(parseFloat(existing.sigortaBedeli) + parseFloat(policy.sigortaBedeli));
-                            // Keep other fields (like oldest date?) or just keep existing. 
-                            // Usually Main policy date is preferred. Assuming first occurrence is Main.
                         } else {
                             uniqueMap.set(key, policy);
-                            // policiesToSave array is derived from map later
                         }
                     }
 
-                    // Convert map values to array
                     policiesToSave.push(...Array.from(uniqueMap.values()));
+
+                    // Tanı log'u — kullanıcı toast'tan görünmeyen bilgileri burada çıkartıyoruz
+                    console.log("[Sigorta Upload] header satırı:", headerRowIdx, "kolon eşleme:", mapping, "→", policiesToSave.length, "poliçe");
 
 
                     
                     if (policiesToSave.length > 0) {
-                         // Upsert to DB
-                         console.log("Saving policies:", policiesToSave.length);
-                         const res = await apiRequest("POST", "/api/sigorta/policeler", policiesToSave);
-                         const result = await res.json();
-                         if (result.success) {
-                             toast({ title: "Yükleme Başarılı", description: `${result.count} poliçe işlendi/güncellendi.` });
-                             refetch(); // Refresh the list from DB
-                             queryClient.invalidateQueries({ queryKey: ['sigorta-ozet'] });
-                             queryClient.invalidateQueries({ queryKey: ['sigorta-policeler'] });
-                         }
+                        const res = await apiRequest("POST", "/api/sigorta/policeler", policiesToSave);
+                        const result = await res.json();
+                        if (result.success) {
+                            // Hangi alanlar bulundu / bulunmadı raporu
+                            const expectedFields = ["brans", "policeNo", "sigortali", "tanzimTarihi", "netPrim", "brutPrim", "komisyon", "sigortaBedeli"] as const;
+                            const eksikler = expectedFields.filter(f => (mapping as any)[f] === undefined);
+                            const eksikUyari = eksikler.length > 0 ? ` Bulunmayan kolonlar: ${eksikler.join(", ")}.` : "";
+                            toast({
+                                title: "Yükleme Başarılı",
+                                description: `${result.count} poliçe işlendi/güncellendi. Başlık satırı: ${headerRowIdx + 1}.${eksikUyari}`,
+                            });
+                            refetch();
+                            queryClient.invalidateQueries({ queryKey: ['sigorta-ozet'] });
+                            queryClient.invalidateQueries({ queryKey: ['sigorta-policeler'] });
+                        }
                     } else {
-                         console.warn("No policies found. Scan result:", jsonData.slice(0, 2));
-                         if (jsonData.length > 1) {
-                             const firstRow = jsonData[1];
-                             toast({ 
-                                 variant: "destructive", 
-                                 title: "Veri Eşleşmedi", 
-                                 description: `Excel okundu (${jsonData.length} satır) fakat 'Poliçe No' (B Sütunu) bulunamadı. İlk satır verisi: ${JSON.stringify(firstRow).substring(0, 100)}` 
-                             });
-                         } else {
-                             toast({ variant: "destructive", title: "Dosya Boş", description: "Excel dosyasında veri satırı bulunamadı." });
-                         }
+                        toast({
+                            variant: "destructive",
+                            title: "Veri Eşleşmedi",
+                            description: `Başlık tanındı (satır ${headerRowIdx + 1}) ama hiç geçerli poliçe satırı bulunamadı (Poliçe No boş).`,
+                        });
                     }
 
                 } catch (err) {
