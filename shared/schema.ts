@@ -418,8 +418,8 @@ export const sigortaMuhasebeKayitlari = pgTable("sigorta_muhasebe_kayitlari", {
   borc: decimal("borc", { precision: 15, scale: 2 }),
   alacak: decimal("alacak", { precision: 15, scale: 2 }),
   bakiye: decimal("bakiye", { precision: 15, scale: 2 }),
-  eslestiMi: integer("eslesti_mi").default(0), // 0: Hayır, 1: Evet
-  eslesenPolicyId: text("eslesen_policy_id"),
+  eslestiMi: integer("eslesti_mi").default(0), // 0: Hayır, 1: Evet, 2: Şüpheli
+  eslesenPolicyId: varchar("eslesen_policy_id").references((): any => sigortaPoliceleri.id, { onDelete: "set null" }),
   sirket: text("sirket").notNull(), // Mapfre, Ray Sigorta
   ay: text("ay"),
   yil: integer("yil"),

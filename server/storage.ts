@@ -121,15 +121,16 @@ export interface IStorage {
   getSigortaPoliceleri(sirket?: string, ay?: string, yil?: number): Promise<SigortaPolice[]>;
   insertSigortaPoliceleri(veriler: InsertSigortaPolice[]): Promise<SigortaPolice[]>;
   deleteSigortaPoliceleri(sirket: string, ay?: string, yil?: number): Promise<void>;
-  getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number }[]>;
+  getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; toplamBedel: number; evetSayisi: number; tutarFarkiSayisi: number }[]>;
+  updateSigortaPoliceDekontDurumu(id: string, durum: string): Promise<SigortaPolice | null>;
+  updateSigortaPoliceleriDekontDurumuBulk(ids: string[], durum: string): Promise<number>;
 
   // Sigorta Muhasebe Kayıtları
   getSigortaMuhasebeKayitlari(sirket?: string, ay?: string, yil?: number): Promise<SigortaMuhasebe[]>;
   insertSigortaMuhasebeKayitlari(veriler: InsertSigortaMuhasebe[]): Promise<SigortaMuhasebe[]>;
   deleteSigortaMuhasebeKayitlari(sirket: string, ay?: string, yil?: number): Promise<void>;
-  updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe>;
+  updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe | null>;
   deleteSigortaMuhasebeKaydi(id: string): Promise<void>;
-  deleteMapfreMuhasebe(): Promise<void>;
   
   // RAW SQL EXECUTION
   executeRawSql(query: string): Promise<any[]>;
@@ -1336,13 +1337,13 @@ export class DatabaseStorage implements IStorage {
         .onConflictDoUpdate({
            target: [sigortaPoliceleri.policeNo, sigortaPoliceleri.sirket],
            set: {
-             // Update logic: fields that might change?
-             // Usually reload overwrites, so let's update financials
              netPrim: sql`excluded.net_prim`,
              brutPrim: sql`excluded.brut_prim`,
              komisyon: sql`excluded.komisyon`,
              sigortaBedeli: sql`excluded.sigorta_bedeli`,
-             dekontDurumu: sql`excluded.dekont_durumu`,
+             // Yeniden yüklemede mutabakat sonucu kaybolmasın: gelen değer boşsa mevcut tutulur,
+             // gelen değer doluysa explicit bir update sayılır (UI üzerinden gelen update için gerekli).
+             dekontDurumu: sql`COALESCE(NULLIF(excluded.dekont_durumu, ''), ${sigortaPoliceleri.dekontDurumu})`,
              tanzimTarihi: sql`excluded.tanzim_tarihi`,
              brans: sql`excluded.brans`,
              sigortali: sql`excluded.sigortali`,
@@ -1367,13 +1368,35 @@ export class DatabaseStorage implements IStorage {
      await db.delete(sigortaPoliceleri).where(and(...filters));
   }
 
-  async getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number }[]> {
+  async updateSigortaPoliceDekontDurumu(id: string, durum: string): Promise<SigortaPolice | null> {
+    const [updated] = await db
+      .update(sigortaPoliceleri)
+      .set({ dekontDurumu: durum })
+      .where(eq(sigortaPoliceleri.id, id))
+      .returning();
+    return updated || null;
+  }
+
+  async updateSigortaPoliceleriDekontDurumuBulk(ids: string[], durum: string): Promise<number> {
+    if (ids.length === 0) return 0;
+    const updated = await db
+      .update(sigortaPoliceleri)
+      .set({ dekontDurumu: durum })
+      .where(inArray(sigortaPoliceleri.id, ids))
+      .returning({ id: sigortaPoliceleri.id });
+    return updated.length;
+  }
+
+  async getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; toplamBedel: number; evetSayisi: number; tutarFarkiSayisi: number }[]> {
     const result = await db.select({
       ay: sigortaPoliceleri.ay,
       sirket: sigortaPoliceleri.sirket,
       policeSayisi: sql<number>`count(*)`,
       toplamPrim: sql<string>`sum(${sigortaPoliceleri.netPrim})`,
       toplamKomisyon: sql<string>`sum(${sigortaPoliceleri.komisyon})`,
+      toplamBedel: sql<string>`sum(${sigortaPoliceleri.sigortaBedeli})`,
+      evetSayisi: sql<number>`count(*) filter (where ${sigortaPoliceleri.dekontDurumu} = 'EVET')`,
+      tutarFarkiSayisi: sql<number>`count(*) filter (where ${sigortaPoliceleri.dekontDurumu} = 'TUTAR FARKI')`,
     })
     .from(sigortaPoliceleri)
     .where(eq(sigortaPoliceleri.yil, yil))
@@ -1385,6 +1408,9 @@ export class DatabaseStorage implements IStorage {
       policeSayisi: Number(r.policeSayisi),
       toplamPrim: parseFloat(r.toplamPrim || "0"),
       toplamKomisyon: parseFloat(r.toplamKomisyon || "0"),
+      toplamBedel: parseFloat(r.toplamBedel || "0"),
+      evetSayisi: Number(r.evetSayisi),
+      tutarFarkiSayisi: Number(r.tutarFarkiSayisi),
     }));
   }
 
@@ -1433,23 +1459,17 @@ export class DatabaseStorage implements IStorage {
     await db.delete(sigortaMuhasebeKayitlari).where(and(...filters));
   }
 
-  async updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe> {
+  async updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe | null> {
       const [updated] = await db
       .update(sigortaMuhasebeKayitlari)
       .set(veri)
       .where(eq(sigortaMuhasebeKayitlari.id, id))
       .returning();
-      
-      if (!updated) throw new Error("Muhasebe kaydı bulunamadı");
-      return updated;
+      return updated || null;
   }
 
   async deleteSigortaMuhasebeKaydi(id: string): Promise<void> {
     await db.delete(sigortaMuhasebeKayitlari).where(eq(sigortaMuhasebeKayitlari.id, id));
-  }
-
-  async deleteMapfreMuhasebe(): Promise<void> {
-    await db.delete(sigortaMuhasebeKayitlari).where(eq(sigortaMuhasebeKayitlari.sirket, "Mapfre"));
   }
   async executeRawSql(query: string): Promise<any[]> {
     try {

@@ -109,9 +109,10 @@ export default function Sigorta() {
                 </div>
 
                 <Tabs defaultValue="ozet" value={mainTab} onValueChange={setMainTab} className="w-full">
-                    <TabsList className="grid w-full grid-cols-3 max-w-[600px]">
+                    <TabsList className="grid w-full grid-cols-4 max-w-[760px]">
                         <TabsTrigger value="ozet">Özet</TabsTrigger>
                         <TabsTrigger value="liste">Poliçe Listesi</TabsTrigger>
+                        <TabsTrigger value="aging">Yaşlandırma</TabsTrigger>
                         <TabsTrigger value="yukleme">Veri Yükleme</TabsTrigger>
                     </TabsList>
 
@@ -123,8 +124,12 @@ export default function Sigorta() {
                         <PoliceListesi yil={selectedYear} ay={selectedMonth} />
                     </TabsContent>
 
+                    <TabsContent value="aging" className="mt-6">
+                        <SigortaAging yil={selectedYear} ay={selectedMonth} />
+                    </TabsContent>
+
                     <TabsContent value="yukleme" className="mt-6">
-                        <VeriYukleme yil={selectedYear} />
+                        <VeriYukleme yil={selectedYear} globalAy={selectedMonth} />
                     </TabsContent>
                 </Tabs>
             </div>
@@ -148,23 +153,31 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
     const filteredOzet = ay === 'toplam' ? ozet : ozet?.filter((o: any) => o.ay === ay);
 
     const stats = filteredOzet?.reduce((acc: any, curr: any) => ({
-        toplamPrim: (acc.toplamPrim || 0) + (curr.toplamPrim || 0),
-        toplamKomisyon: (acc.toplamKomisyon || 0) + (curr.toplamKomisyon || 0),
-        policeSayisi: (acc.policeSayisi || 0) + (curr.policeSayisi || 0),
-    }), { toplamPrim: 0, toplamKomisyon: 0, policeSayisi: 0 }) || { toplamPrim: 0, toplamKomisyon: 0, policeSayisi: 0 };
+        toplamPrim: acc.toplamPrim + (curr.toplamPrim || 0),
+        toplamKomisyon: acc.toplamKomisyon + (curr.toplamKomisyon || 0),
+        toplamBedel: acc.toplamBedel + (curr.toplamBedel || 0),
+        policeSayisi: acc.policeSayisi + (curr.policeSayisi || 0),
+        evetSayisi: acc.evetSayisi + (curr.evetSayisi || 0),
+        tutarFarkiSayisi: acc.tutarFarkiSayisi + (curr.tutarFarkiSayisi || 0),
+    }), { toplamPrim: 0, toplamKomisyon: 0, toplamBedel: 0, policeSayisi: 0, evetSayisi: 0, tutarFarkiSayisi: 0 })
+    || { toplamPrim: 0, toplamKomisyon: 0, toplamBedel: 0, policeSayisi: 0, evetSayisi: 0, tutarFarkiSayisi: 0 };
+
+    const dekontOrani = stats.policeSayisi > 0
+        ? ((stats.evetSayisi / stats.policeSayisi) * 100).toFixed(1)
+        : "0.0";
+
+    const fmtPara = (n: number) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(n);
 
     return (
         <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-3">
-                 <Card>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+                <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Toplam Net Prim</CardTitle>
                         <Upload className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">
-                            {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(stats.toplamPrim)}
-                        </div>
+                        <div className="text-2xl font-bold">{fmtPara(stats.toplamPrim)}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -173,9 +186,16 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
                          <Upload className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                         <div className="text-2xl font-bold">
-                            {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(stats.toplamKomisyon)}
-                        </div>
+                         <div className="text-2xl font-bold">{fmtPara(stats.toplamKomisyon)}</div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Sigorta Bedeli (Risk)</CardTitle>
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold">{fmtPara(stats.toplamBedel)}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -185,6 +205,19 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{stats.policeSayisi}</div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                            {stats.evetSayisi} dekont • {stats.tutarFarkiSayisi} tutar farkı
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Dekont Oranı</CardTitle>
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold">% {dekontOrani}</div>
+                        <div className="text-xs text-muted-foreground mt-1">tahsil edilmiş</div>
                     </CardContent>
                 </Card>
             </div>
@@ -204,6 +237,7 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
                                     <TableHead className="text-right">Prim</TableHead>
                                     <TableHead className="text-right">Komisyon</TableHead>
                                     <TableHead className="text-right">Adet</TableHead>
+                                    <TableHead className="text-right">Dekont %</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -213,20 +247,25 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
                                         existing.toplamPrim += curr.toplamPrim;
                                         existing.toplamKomisyon += curr.toplamKomisyon;
                                         existing.policeSayisi += curr.policeSayisi;
+                                        existing.evetSayisi += (curr.evetSayisi || 0);
                                     } else {
-                                        acc.push({...curr});
+                                        acc.push({...curr, evetSayisi: curr.evetSayisi || 0});
                                     }
                                     return acc;
-                                }, []).map((row: any) => (
-                                    <TableRow key={row.sirket}>
-                                        <TableCell className="font-medium">{row.sirket}</TableCell>
-                                        <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(row.toplamPrim)}</TableCell>
-                                        <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(row.toplamKomisyon)}</TableCell>
-                                        <TableCell className="text-right">{row.policeSayisi}</TableCell>
-                                    </TableRow>
-                                ))}
+                                }, []).map((row: any) => {
+                                    const pct = row.policeSayisi > 0 ? ((row.evetSayisi / row.policeSayisi) * 100).toFixed(0) : "0";
+                                    return (
+                                        <TableRow key={row.sirket}>
+                                            <TableCell className="font-medium">{row.sirket}</TableCell>
+                                            <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(row.toplamPrim)}</TableCell>
+                                            <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(row.toplamKomisyon)}</TableCell>
+                                            <TableCell className="text-right">{row.policeSayisi}</TableCell>
+                                            <TableCell className="text-right">% {pct}</TableCell>
+                                        </TableRow>
+                                    );
+                                })}
                                 {(!filteredOzet || filteredOzet.length === 0) && (
-                                     <TableRow><TableCell colSpan={4} className="text-center h-12">Veri yok</TableCell></TableRow>
+                                     <TableRow><TableCell colSpan={5} className="text-center h-12">Veri yok</TableCell></TableRow>
                                 )}
                             </TableBody>
                         </Table>
@@ -247,6 +286,7 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
     // Filters
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [sigortaliFilter, setSigortaliFilter] = useState("");
+    const [bransFilter, setBransFilter] = useState("ALL");
 
     const queryKey = ['sigorta-policeler', subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY, ay, yil];
     
@@ -265,25 +305,27 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
         if (!policeler) return [];
         let sorted = [...policeler];
 
-        // 1. Filter
+        // 1. Filter (statü bazlı)
         if (statusFilter !== "ALL") {
             sorted = sorted.filter((p: any) => {
                 if (statusFilter === "EVET") return p.dekontDurumu === "EVET";
-                if (statusFilter === "HAYIR") return p.dekontDurumu !== "EVET" && p.dekontDurumu !== "TUTAR FARKI"; // Or should HAYIR include null/empty?
-                // Actually 'HAYIR' usually just means not EVET in user's mind, but let's be precise.
-                // In VeriYukleme we used: p.dekontDurumu !== 'EVET' for HAYIR (simplified).
-                // Let's stick to simple logic:
-                if (statusFilter === "HAYIR") return p.dekontDurumu === "HAYIR" || !p.dekontDurumu;
+                if (statusFilter === "TUTAR_FARKI") return p.dekontDurumu === "TUTAR FARKI";
+                // HAYIR → EVET ve TUTAR FARKI dışındaki her şey (null/boş dahil)
+                if (statusFilter === "HAYIR") return p.dekontDurumu !== "EVET" && p.dekontDurumu !== "TUTAR FARKI";
                 return true;
             });
         }
 
         if (sigortaliFilter) {
             const search = sigortaliFilter.toLowerCase();
-            sorted = sorted.filter((p: any) => 
-                p.sigortali?.toLowerCase().includes(search) || 
+            sorted = sorted.filter((p: any) =>
+                p.sigortali?.toLowerCase().includes(search) ||
                 p.policeNo?.includes(search)
             );
+        }
+
+        if (bransFilter !== "ALL") {
+            sorted = sorted.filter((p: any) => (p.brans || "").trim() === bransFilter);
         }
 
         // 2. Sort
@@ -313,7 +355,17 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
             return 0;
         });
         return sorted;
-    }, [policeler, sortConfig, statusFilter, sigortaliFilter]);
+    }, [policeler, sortConfig, statusFilter, sigortaliFilter, bransFilter]);
+
+    const uniqueBranslar = useMemo(() => {
+        if (!policeler) return [];
+        const set = new Set<string>();
+        for (const p of policeler) {
+            const b = (p.brans || "").trim();
+            if (b) set.add(b);
+        }
+        return Array.from(set).sort();
+    }, [policeler]);
 
     const requestSort = (key: string) => {
         let direction: 'asc' | 'desc' = 'asc';
@@ -499,15 +551,15 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
         saveAs(new Blob([buffer]), `${sirketName}_Policeler_${yil}_${ay}.xlsx`);
     };
 
-    // Calculate summary stats
+    // Calculate summary stats (EVET / HAYIR / TUTAR FARKI)
     const stats = useMemo(() => {
-        let evet = 0;
-        let hayir = 0;
+        let evet = 0, hayir = 0, tutarFarki = 0;
         sortedPoliceler.forEach((p: any) => {
             if (p.dekontDurumu === 'EVET') evet++;
+            else if (p.dekontDurumu === 'TUTAR FARKI') tutarFarki++;
             else hayir++;
         });
-        return { evet, hayir };
+        return { evet, hayir, tutarFarki };
     }, [sortedPoliceler]);
 
     return (
@@ -536,6 +588,12 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
                                     <XCircle className="h-3 w-3" />
                                     {stats.hayir} Dekont Edilmeyen
                                 </Badge>
+                                {stats.tutarFarki > 0 && (
+                                    <Badge className="bg-amber-500 hover:bg-amber-600 text-white gap-1">
+                                        <AlertTriangle className="h-3 w-3" />
+                                        {stats.tutarFarki} Tutar Farkı
+                                    </Badge>
+                                )}
                             </div>
                          </div>
                          <Button variant="outline" size="sm" onClick={handleExport}>
@@ -551,18 +609,31 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
                             <span className="text-sm font-medium">Filtrele:</span>
                         </div>
                         <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-[150px] h-9">
+                            <SelectTrigger className="w-[170px] h-9">
                                 <SelectValue placeholder="Dekont Durumu" />
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="ALL">Tümü</SelectItem>
                                 <SelectItem value="EVET">Dekont Evet</SelectItem>
                                 <SelectItem value="HAYIR">Dekont Hayır</SelectItem>
+                                <SelectItem value="TUTAR_FARKI">Tutar Farkı</SelectItem>
                             </SelectContent>
                         </Select>
 
-                        <Input 
-                            placeholder="Sigortalı / Poliçe No Ara..." 
+                        <Select value={bransFilter} onValueChange={setBransFilter}>
+                            <SelectTrigger className="w-[170px] h-9">
+                                <SelectValue placeholder="Branş" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">Tüm Branşlar</SelectItem>
+                                {uniqueBranslar.map((b) => (
+                                    <SelectItem key={b} value={b}>{b}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Input
+                            placeholder="Sigortalı / Poliçe No Ara..."
                             className="w-[250px] h-9"
                             value={sigortaliFilter}
                             onChange={(e) => setSigortaliFilter(e.target.value)}
@@ -605,7 +676,15 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
                                         <TableCell colSpan={9} className="h-24 text-center">Kayıt bulunamadı.</TableCell>
                                     </TableRow>
                                 ) : (
-                                    sortedPoliceler.slice(0, 500).map((p: any) => (
+                                    <>
+                                    {sortedPoliceler.length > 500 && (
+                                        <TableRow>
+                                            <TableCell colSpan={9} className="text-xs text-amber-700 bg-amber-50">
+                                                ⚠ Performans için yalnızca ilk 500 kayıt gösteriliyor. Toplam {sortedPoliceler.length} kayıt — daraltmak için filtre kullanın veya Excel olarak indirin.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                    {sortedPoliceler.slice(0, 500).map((p: any) => (
                                         <TableRow key={p.id}>
                                             <TableCell>{p.brans}</TableCell>
                                             <TableCell className="font-medium">{p.policeNo}</TableCell>
@@ -625,7 +704,8 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
                                                 )}
                                             </TableCell>
                                         </TableRow>
-                                    ))
+                                    ))}
+                                    </>
                                 )}
                             </TableBody>
                         </Table>
@@ -640,10 +720,13 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
 // ---------------------------------------------------------------------------
 // 3. VERİ YÜKLEME TAB COMPONENT
 // ---------------------------------------------------------------------------
-function VeriYukleme({ yil }: { yil: number }) {
+function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [subTab, setSubTab] = useState("mapfre");
+    // "auto" → Excel tarih sütunundan tespit (default davranış).
+    // Belirli bir ay seçilirse, tarih kolonu okunamayan satırlar için fallback olarak kullanılır.
+    const [ayOverride, setAyOverride] = useState<string>(globalAy === "toplam" ? "auto" : globalAy);
 
     // Fetch existing policies from DB for the selected company and year
     // This serves as the "Combined List" mentioned by the user
@@ -753,27 +836,26 @@ function VeriYukleme({ yil }: { yil: number }) {
         setStatusFilter("ALL");
     }, [subTab]);
 
-    // Bulk Update Handler
+    // Bulk Update Handler — race-safe PATCH ile sadece dekontDurumu alanını gönderir.
     const handleBulkUpdate = async () => {
         if (selectedPolicies.length === 0) return;
-        
+
         const confirmUpdate = window.confirm(`${selectedPolicies.length} adet poliçeyi 'EVET' olarak işaretlemek istediğinize emin misiniz?`);
         if (!confirmUpdate) return;
 
         try {
-            const updates = selectedPolicies.map(id => {
-                 const original = storedPolicies.find((p:any) => p.id === id);
-                 if (!original) return null;
-                 return { ...original, dekontDurumu: "EVET" };
-            }).filter(Boolean);
-
-            const res = await apiRequest("POST", "/api/sigorta/policeler", updates);
+            const res = await apiRequest("PATCH", "/api/sigorta/policeler/dekont", {
+                ids: selectedPolicies,
+                dekontDurumu: "EVET",
+            });
             const result = await res.json();
-            
+
             if (result.success) {
-                toast({ title: "Başarılı", description: "Seçilen poliçeler güncellendi." });
+                toast({ title: "Başarılı", description: `${result.count} poliçe güncellendi.` });
                 setSelectedPolicies([]);
                 refetch();
+                queryClient.invalidateQueries({ queryKey: ['sigorta-ozet'] });
+                queryClient.invalidateQueries({ queryKey: ['sigorta-policeler'] });
             }
         } catch (err) {
             console.error(err);
@@ -817,11 +899,14 @@ function VeriYukleme({ yil }: { yil: number }) {
         return String(dateVal);
     };
 
-    // Helper to extract month from dates like "10.01.2025" or Excel serial date
-    const extractMonthAndYear = (dateVal: any): {ay: string, yil: number} | null => {
-        if (!dateVal) return { ay: "1", yil };
+    // Helper to extract month from dates like "10.01.2025" or Excel serial date.
+    // ayOverride !== "auto" ise tarih çözümlemesi başarısız olduğunda override'a düşer.
+    const extractMonthAndYear = (dateVal: any): {ay: string, yil: number} => {
+        const fallback = (): {ay: string, yil: number} =>
+            ayOverride !== "auto" ? { ay: ayOverride, yil } : { ay: "1", yil };
 
-        // If Excel serial number
+        if (!dateVal) return fallback();
+
         if (typeof dateVal === 'number') {
             const date = new Date(Math.round((dateVal - 25569) * 86400 * 1000));
             return { ay: String(date.getMonth() + 1), yil: date.getFullYear() };
@@ -829,15 +914,21 @@ function VeriYukleme({ yil }: { yil: number }) {
 
         const dateStr = String(dateVal).trim();
         let parts = dateStr.split('.');
-        if (parts.length > 1) return { ay: String(parseInt(parts[1])), yil: parseInt(parts[2]) };
-        
-        parts = dateStr.split('-');
-        if (parts.length > 1) return { ay: String(parseInt(parts[1])), yil: parseInt(parts[0].length === 4 ? parts[0] : parts[2]) };
-        
-        parts = dateStr.split('/');
-        if (parts.length > 1) return { ay: String(parseInt(parts[1])), yil: parseInt(parts[2]) };
+        if (parts.length > 1 && parts[1] && parts[2]) {
+            return { ay: String(parseInt(parts[1])), yil: parseInt(parts[2]) };
+        }
 
-        return { ay: "1", yil }; 
+        parts = dateStr.split('-');
+        if (parts.length > 1) {
+            return { ay: String(parseInt(parts[1])), yil: parseInt(parts[0].length === 4 ? parts[0] : parts[2]) };
+        }
+
+        parts = dateStr.split('/');
+        if (parts.length > 1 && parts[1] && parts[2]) {
+            return { ay: String(parseInt(parts[1])), yil: parseInt(parts[2]) };
+        }
+
+        return fallback();
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1046,57 +1137,70 @@ function VeriYukleme({ yil }: { yil: number }) {
                         };
 
                         let matchedPolicy: any = null;
+                        let isSuspicious = false; // Birden fazla aday → ŞÜPHELİ
+                        let amountMismatch = false; // Tutar uyuşmazlığı → TUTAR FARKI
 
                         // ----------------------------------------------------------------
                         // MATCHING ALGORITHM
+                        // Mapfre: önce tam eşleşme, sonra suffix; suffix'te birden çok
+                        // aday varsa tutar yakınlığına göre disambiguate, hâlâ belirsizse
+                        // ŞÜPHELİ olarak işaretle.
+                        // Ray: yalnızca tam eşleşme.
                         // ----------------------------------------------------------------
                         if (subTab === 'mapfre') {
-                            // MAPFRE LOGIC
-                            // 1. Try Exact Match First (Full Number) using accountingPolicyNo
                             if (policyMap.has(accountingPolicyNo)) {
                                 matchedPolicy = policyMap.get(accountingPolicyNo);
-                            } 
-                            // 2. Try Suffix Match
+                            }
                             if (!matchedPolicy && accountingPolicyNo) {
-                                // accountingPolicyNo is likely "259"
-                                const suffixKey = String(parseInt(accountingPolicyNo)); // Normalize to significant digits
+                                const suffixKey = String(parseInt(accountingPolicyNo));
                                 const candidates = mapfreSuffixMap.get(suffixKey);
-                                if (candidates) {
-                                     // Filter by Amount DISABLED as requested
-                                     // matchedPolicy = candidates.find(p => {
-                                     //     const pBrut = parseFloat(p.brutPrim);
-                                     //     return Math.abs(pBrut - accAmount) < 1.0;
-                                     // });
-                                     
-                                     // Just take the first finding for now, or maybe check duplicates?
-                                     // If multiple candidates share the same suffix, this is risky without amount check.
-                                     // But user asked to disable amount check.
-                                     if (candidates.length > 0) {
-                                         matchedPolicy = candidates[0];
-                                         console.log(`Mapfre Fuzzy Match: Acc=${accountingPolicyNo} Suffix=${suffixKey} -> Policy=${matchedPolicy.policeNo}`);
-                                     }
-                                     if (candidates.length > 1) {
-                                         console.warn(`Multiple candidates for suffix ${suffixKey}:`, candidates.map(c => c.policeNo));
-                                     }
+                                if (candidates && candidates.length > 0) {
+                                    if (candidates.length === 1) {
+                                        matchedPolicy = candidates[0];
+                                    } else {
+                                        // Çoklu aday — tutar yakınlığı ile seç (₺1 tolerans)
+                                        const closeByAmount = candidates.filter((p: any) => {
+                                            const pBrut = parseFloat(p.brutPrim);
+                                            return Math.abs(pBrut - accAmount) < 1.0;
+                                        });
+                                        if (closeByAmount.length === 1) {
+                                            matchedPolicy = closeByAmount[0];
+                                        } else {
+                                            // Hâlâ belirsiz — ŞÜPHELİ
+                                            isSuspicious = true;
+                                            console.warn(`Mapfre suffix ${suffixKey} için ${candidates.length} aday var, manuel seçim gerekli:`, candidates.map((c: any) => c.policeNo));
+                                        }
+                                    }
                                 }
                             }
                         } else {
-                            // RAY LOGIC (Status Quo)
+                            // RAY LOGIC — yalnızca tam eşleşme
                             if (accountingPolicyNo && policyMap.has(accountingPolicyNo)) {
                                 matchedPolicy = policyMap.get(accountingPolicyNo);
                             }
                         }
 
-                        // IF MATCH FOUND
+                        // Tutar tutarsızlık kontrolü (sadece eşleşme bulunduysa)
+                        if (matchedPolicy && accAmount > 0) {
+                            const policyBrut = parseFloat(matchedPolicy.brutPrim || "0");
+                            // %1 veya min ₺1 tolerance
+                            const tolerance = Math.max(1, policyBrut * 0.01);
+                            if (Math.abs(policyBrut - accAmount) > tolerance) {
+                                amountMismatch = true;
+                            }
+                        }
+
                         if (matchedPolicy) {
-                             // Update Policy Status
-                             const updatedPolicy = { ...matchedPolicy, dekontDurumu: "EVET" };
-                             policiesToUpdate.set(matchedPolicy.id, updatedPolicy);
-                             
-                             // Update Accounting Record Status
-                             accRecord.eslestiMi = 1;
-                             accRecord.eslesenPolicyId = matchedPolicy.id;
-                             matchCount++;
+                            const newStatus = amountMismatch ? "TUTAR FARKI" : "EVET";
+                            const updatedPolicy = { ...matchedPolicy, dekontDurumu: newStatus };
+                            policiesToUpdate.set(matchedPolicy.id, updatedPolicy);
+                            accRecord.eslestiMi = 1;
+                            accRecord.eslesenPolicyId = matchedPolicy.id;
+                            if (!amountMismatch) matchCount++;
+                        } else if (isSuspicious) {
+                            // ŞÜPHELİ: muhasebe satırı eşleşmedi sayılacak ama log için işaretleyelim
+                            // (DB tarafı henüz "şüpheli" alanına sahip değil — şimdilik aciklama'ya iliştirelim)
+                            accRecord.aciklama = `[ŞÜPHELİ - manuel seçim] ${accRecord.aciklama}`;
                         }
 
                         accountingToSave.push(accRecord);
@@ -1159,10 +1263,26 @@ function VeriYukleme({ yil }: { yil: number }) {
             
             <Card className="mt-4">
                 <CardHeader>
-                    <CardTitle>{subTab === 'mapfre' ? 'Mapfre' : 'Ray'} Veri Yükleme</CardTitle>
-                    <CardDescription>
-                        {yil} yılı poliçe excelini (Kümülatif veya Aylık) buraya yükleyin. Sistem otomatik olarak birleştirecektir.
-                    </CardDescription>
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <CardTitle>{subTab === 'mapfre' ? 'Mapfre' : 'Ray'} Veri Yükleme</CardTitle>
+                            <CardDescription>
+                                {yil} yılı poliçe excelini (Kümülatif veya Aylık) buraya yükleyin. Sistem otomatik olarak birleştirecektir.
+                            </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground">Ay (fallback):</span>
+                            <Select value={ayOverride} onValueChange={setAyOverride}>
+                                <SelectTrigger className="w-[200px] h-9">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="auto">Tarihten otomatik</SelectItem>
+                                    {AYLAR.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
                     {/* Upload Sections - Side by Side */}
@@ -1527,15 +1647,141 @@ function VeriYukleme({ yil }: { yil: number }) {
     );
 }
 
-// Helper components (SigortaOzet, PoliceListesi) remain...
-// Actually wait, SigortaOzet and PoliceListesi are defined ABOVE/OUTSIDE or INSIDE?
-// They were imported or defined in same file. 
-// Ah, looking at lines 134, 138 - they are used. 
-// But the end of file was:
-// 988:         </Tabs>
-// 989:     );
-// 990: };
-// 991: 
-// So the Sigorta function ends at 990.
-// My replacement chunk should replace the closing tags correctly.
+// ---------------------------------------------------------------------------
+// 4. YAŞLANDIRMA (AGING) TAB COMPONENT
+// ---------------------------------------------------------------------------
+// dekontDurumu !== 'EVET' olan poliçeleri tanzim tarihinden bugüne kadar geçen
+// gün sayısına göre kovalara (0-30, 31-60, 61-90, 90+) ayırır.
+// dd.MM.yyyy formatını parse eder; geçersiz tarih = bilinmeyen kovaya gider.
+function SigortaAging({ yil, ay }: { yil: number; ay: string }) {
+    const { data: mapfre } = useQuery({
+        queryKey: ['sigorta-policeler-aging', COMPANIES.MAPFRE, yil, ay],
+        queryFn: async () => {
+            let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(COMPANIES.MAPFRE)}&yil=${yil}`;
+            if (ay !== 'toplam') url += `&ay=${ay}`;
+            const res = await apiRequest("GET", url);
+            return res.json();
+        },
+    });
+    const { data: ray } = useQuery({
+        queryKey: ['sigorta-policeler-aging', COMPANIES.RAY, yil, ay],
+        queryFn: async () => {
+            let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(COMPANIES.RAY)}&yil=${yil}`;
+            if (ay !== 'toplam') url += `&ay=${ay}`;
+            const res = await apiRequest("GET", url);
+            return res.json();
+        },
+    });
+
+    const parseDDMMYYYY = (s: string): Date | null => {
+        if (!s) return null;
+        const parts = s.split('.');
+        if (parts.length !== 3) return null;
+        const d = parseInt(parts[0]), m = parseInt(parts[1]), y = parseInt(parts[2]);
+        if (isNaN(d) || isNaN(m) || isNaN(y)) return null;
+        return new Date(y, m - 1, d);
+    };
+
+    const daysSince = (s: string): number | null => {
+        const dt = parseDDMMYYYY(s);
+        if (!dt) return null;
+        return Math.floor((Date.now() - dt.getTime()) / (1000 * 60 * 60 * 24));
+    };
+
+    const aged = useMemo(() => {
+        const merged = [...(mapfre || []), ...(ray || [])];
+        const tahsilEdilmemis = merged.filter((p: any) => p.dekontDurumu !== 'EVET');
+        const buckets: Record<string, any[]> = { "0-30": [], "31-60": [], "61-90": [], "90+": [], "Bilinmiyor": [] };
+        for (const p of tahsilEdilmemis) {
+            const d = daysSince(p.tanzimTarihi);
+            if (d === null) buckets["Bilinmiyor"].push(p);
+            else if (d <= 30) buckets["0-30"].push(p);
+            else if (d <= 60) buckets["31-60"].push(p);
+            else if (d <= 90) buckets["61-90"].push(p);
+            else buckets["90+"].push(p);
+        }
+        return buckets;
+    }, [mapfre, ray]);
+
+    const bucketColor = (key: string) =>
+        key === "0-30" ? "bg-green-100 text-green-800"
+        : key === "31-60" ? "bg-amber-100 text-amber-800"
+        : key === "61-90" ? "bg-orange-100 text-orange-800"
+        : key === "90+" ? "bg-red-100 text-red-800"
+        : "bg-gray-100 text-gray-800";
+
+    const sumNet = (rows: any[]) => rows.reduce((acc, r) => acc + parseFloat(r.netPrim || "0"), 0);
+    const fmtMoney = (n: number) => new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(n);
+
+    return (
+        <div className="space-y-6">
+            <div className="grid gap-4 md:grid-cols-5">
+                {Object.entries(aged).map(([key, rows]) => (
+                    <Card key={key}>
+                        <CardHeader className="pb-2">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="text-sm font-medium">{key} gün</CardTitle>
+                                <Badge className={bucketColor(key)}>{rows.length}</Badge>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-xl font-bold">{fmtMoney(sumNet(rows))} ₺</div>
+                            <div className="text-xs text-muted-foreground">net prim toplamı</div>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Tahsil Edilmemiş Poliçeler (En Eski Önce)</CardTitle>
+                    <CardDescription>
+                        Mapfre + Ray birlikte. {Object.values(aged).reduce((acc, r) => acc + r.length, 0)} kayıt.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Şirket</TableHead>
+                                <TableHead>Branş</TableHead>
+                                <TableHead>Poliçe No</TableHead>
+                                <TableHead>Sigortalı</TableHead>
+                                <TableHead>Tanzim</TableHead>
+                                <TableHead className="text-right">Gün</TableHead>
+                                <TableHead className="text-right">Net Prim</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {(["90+", "61-90", "31-60", "0-30", "Bilinmiyor"] as const).flatMap(bucket =>
+                                aged[bucket]
+                                    .slice()
+                                    .sort((a: any, b: any) => (daysSince(b.tanzimTarihi) || 0) - (daysSince(a.tanzimTarihi) || 0))
+                                    .map((p: any) => {
+                                        const d = daysSince(p.tanzimTarihi);
+                                        return (
+                                            <TableRow key={p.id}>
+                                                <TableCell>{p.sirket}</TableCell>
+                                                <TableCell>{p.brans}</TableCell>
+                                                <TableCell className="font-medium">{p.policeNo}</TableCell>
+                                                <TableCell className="max-w-[260px] truncate" title={p.sigortali}>{p.sigortali}</TableCell>
+                                                <TableCell>{p.tanzimTarihi}</TableCell>
+                                                <TableCell className="text-right">
+                                                    <Badge className={bucketColor(bucket)}>{d ?? "—"}</Badge>
+                                                </TableCell>
+                                                <TableCell className="text-right">{fmtMoney(parseFloat(p.netPrim || "0"))}</TableCell>
+                                            </TableRow>
+                                        );
+                                    })
+                            )}
+                            {Object.values(aged).every(r => r.length === 0) && (
+                                <TableRow><TableCell colSpan={7} className="text-center h-16">Tahsil edilmemiş poliçe yok 🎉</TableCell></TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
+        </div>
+    );
+}
 

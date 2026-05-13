@@ -759,6 +759,32 @@ export async function registerRoutes(
     }
   });
 
+  // Race-safe nokta atışı dekont durumu güncellemesi (tek poliçe veya toplu).
+  // Body: { id: string, dekontDurumu: string }  veya  { ids: string[], dekontDurumu: string }
+  app.patch("/api/sigorta/policeler/dekont", async (req, res) => {
+    try {
+      const { id, ids, dekontDurumu } = req.body;
+      const ALLOWED = ["EVET", "HAYIR", "TUTAR FARKI", ""];
+      if (!ALLOWED.includes(dekontDurumu)) {
+        return res.status(400).json({ error: "Geçersiz dekontDurumu" });
+      }
+
+      if (Array.isArray(ids) && ids.length > 0) {
+        const count = await storage.updateSigortaPoliceleriDekontDurumuBulk(ids, dekontDurumu);
+        return res.json({ success: true, count });
+      }
+      if (id) {
+        const updated = await storage.updateSigortaPoliceDekontDurumu(id, dekontDurumu);
+        if (!updated) return res.status(404).json({ error: "Bulunamadı" });
+        return res.json({ success: true, policy: updated });
+      }
+      return res.status(400).json({ error: "id veya ids zorunlu" });
+    } catch (err) {
+      console.error("Dekont durumu güncellenirken hata:", err);
+      res.status(500).json({ error: "Güncelleme sırasında hata oluştu" });
+    }
+  });
+
   app.delete("/api/sigorta/policeler", async (req, res) => {
     try {
        const { sirket, ay, yil } = req.query;
@@ -858,6 +884,14 @@ export async function registerRoutes(
               eslestiMi: eslestiMi ? 1 : 0,
               eslesenPolicyId: eslesenPolicyId || null
           });
+          if (!updated) {
+              return res.status(404).json({ error: "Bulunamadı" });
+          }
+          // Eşleştirilen poliçenin dekont durumunu da senkron et.
+          // eslesenPolicyId verildiyse → EVET, eslestiMi=false ise → HAYIR'a düşür.
+          if (eslesenPolicyId) {
+              await storage.updateSigortaPoliceDekontDurumu(eslesenPolicyId, "EVET");
+          }
           res.json(updated);
       } catch (err) {
           console.error("Eşleştirme güncellenirken hata:", err);
@@ -875,15 +909,8 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/sigorta/muhasebe-clear/mapfre", async (req, res) => {
-    try {
-        await storage.deleteMapfreMuhasebe();
-        res.json({ success: true });
-    } catch (err) {
-        console.error("Mapfre temizleme hatası:", err);
-        res.status(500).json({ error: String(err) });
-    }
-  });
+  // NOT: Eski `DELETE /api/sigorta/muhasebe-clear/mapfre` endpoint'i kaldırıldı.
+  // Aynı işi `DELETE /api/sigorta/muhasebe?sirket=Mapfre` zaten yapıyor.
 
   app.get("/api/sigorta/ozet/:yil", async (req, res) => {
     try {
