@@ -1386,19 +1386,22 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                             cutoffSource = "manuel";
                         } else if (nums.length > 0) {
                             const sorted = [...nums].sort((a, b) => a - b);
-                            let largestGap = 0;
-                            let afterGap = sorted[0];
+                            const GAP_THRESHOLD = 1_000_000;
+                            // En SAĞDAKİ anlamlı sıçrama = en yakın yıl sınırı.
+                            // Eski yıllar arasında daha büyük sıçramalar olabilir
+                            // (eski zeyiller arası), bunlar bizim için ilgisiz.
+                            let rightmostAfter: number | null = null;
+                            let rightmostGapSize = 0;
                             for (let i = 1; i < sorted.length; i++) {
                                 const g = sorted[i] - sorted[i - 1];
-                                if (g > largestGap) {
-                                    largestGap = g;
-                                    afterGap = sorted[i];
+                                if (g > GAP_THRESHOLD) {
+                                    rightmostAfter = sorted[i];
+                                    rightmostGapSize = g;
                                 }
                             }
-                            const GAP_THRESHOLD = 1_000_000; // 1M üstü sıçrama = yıl sınırı
-                            if (largestGap > GAP_THRESHOLD) {
-                                rayMinPolicyNo = afterGap;
-                                cutoffSource = `auto-gap (sıçrama=${largestGap.toLocaleString('tr-TR')})`;
+                            if (rightmostAfter !== null) {
+                                rayMinPolicyNo = rightmostAfter;
+                                cutoffSource = `auto-gap rightmost (sıçrama=${rightmostGapSize.toLocaleString('tr-TR')})`;
                             } else {
                                 rayMinPolicyNo = sorted[0];
                                 cutoffSource = "min (anlamlı sıçrama yok)";
