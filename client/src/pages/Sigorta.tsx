@@ -700,7 +700,7 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
                                                 ) : p.dekontDurumu === 'TUTAR FARKI' ? (
                                                     <Badge variant="destructive">FARKLILIK</Badge>
                                                 ) : (
-                                                    <Badge variant="secondary">HAYIR</Badge>
+                                                    <Badge className="bg-red-500 hover:bg-red-600 text-white">HAYIR</Badge>
                                                 )}
                                             </TableCell>
                                         </TableRow>
@@ -1568,7 +1568,7 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                                             ) : p.dekontDurumu === 'TUTAR FARKI' ? (
                                                                 <Badge variant="destructive">FARKLILIK</Badge>
                                                             ) : (
-                                                                <Badge variant="secondary">HAYIR</Badge>
+                                                                <Badge className="bg-red-500 hover:bg-red-600 text-white">HAYIR</Badge>
                                                             )}
                                                         </TableCell>
                                                     </TableRow>
