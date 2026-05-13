@@ -23,6 +23,12 @@ jobs:
 
             BACKUP_DIR="/var/backups/postgres"
 
+            echo "===== 0. VPS saati ve timezone ====="
+            echo "Şu an: $(date '+%Y-%m-%d %H:%M:%S %Z') ($(date -u '+%H:%M UTC'))"
+            timedatectl 2>/dev/null | grep -E "Time zone|Local time|Universal" || cat /etc/timezone
+            echo "Cron 03:00'e kalan: $(date -d 'tomorrow 03:00' '+%s' | xargs -I{} expr {} - $(date '+%s')) saniye (yaklaşık)"
+            echo ""
+
             echo "===== 1. Cron daemon durumu ====="
             systemctl is-active cron && echo "✓ cron servisi aktif" || echo "✗ cron servisi DOWN"
             echo ""
