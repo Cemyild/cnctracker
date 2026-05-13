@@ -1897,9 +1897,12 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                             ) : (
                                                 unmatchedRecordsList.map((rec: any, idx: number) => (
                                                     <TableRow key={rec.id || idx} className="hover:bg-red-50">
-                                                        <TableCell>{rec.tarih}</TableCell> 
+                                                        <TableCell>{rec.tarih}</TableCell>
                                                         <TableCell className="font-bold">{rec.belgeNo}</TableCell>
-                                                        <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(rec.bakiye || '0'))}</TableCell>
+                                                        <TableCell className="text-right">
+                                                            {/* Tutar = ALACAK (= brüt prim). Bakiye değil (kümülatif). */}
+                                                            {new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(rec.alacak || '0'))}
+                                                        </TableCell>
                                                         <TableCell>{rec.aciklama}</TableCell>
                                                         <TableCell className="text-right">
                                                             <div className="flex justify-end gap-2">
@@ -1955,7 +1958,7 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                         <DialogTitle>Manuel Eşleştirme</DialogTitle>
                         <DialogDescription>
                             Muhasebe kaydını eşleştirmek istediğiniz poliçeyi seçin. <br/>
-                            <span className="font-bold text-foreground">Kayıt: {selectedUnmatchedRecord ? `${selectedUnmatchedRecord.belgeNo} - ${new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(parseFloat(selectedUnmatchedRecord.bakiye || '0'))}` : ''}</span>
+                            <span className="font-bold text-foreground">Kayıt: {selectedUnmatchedRecord ? `${selectedUnmatchedRecord.belgeNo} - ${new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(parseFloat(selectedUnmatchedRecord.alacak || '0'))}` : ''}</span>
                         </DialogDescription>
                     </DialogHeader>
                     
