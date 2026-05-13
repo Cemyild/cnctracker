@@ -282,11 +282,23 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
 function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
     const [subTab, setSubTab] = useState("mapfre");
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'policeNo', direction: 'asc' });
-    
+
     // Filters
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [sigortaliFilter, setSigortaliFilter] = useState("");
     const [bransFilter, setBransFilter] = useState("ALL");
+
+    // Tıkla → eşleşen muhasebe kayıtlarını göster
+    const [selectedPolicy, setSelectedPolicy] = useState<any | null>(null);
+    const { data: matchedMuhasebe, isLoading: matchedLoading } = useQuery({
+        queryKey: ['sigorta-muhasebe-by-police', selectedPolicy?.id],
+        queryFn: async () => {
+            if (!selectedPolicy?.id) return [];
+            const res = await apiRequest("GET", `/api/sigorta/muhasebe/by-police/${selectedPolicy.id}`);
+            return res.json();
+        },
+        enabled: !!selectedPolicy?.id,
+    });
 
     const queryKey = ['sigorta-policeler', subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY, ay, yil];
     
@@ -685,7 +697,12 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
                                         </TableRow>
                                     )}
                                     {sortedPoliceler.slice(0, 500).map((p: any) => (
-                                        <TableRow key={p.id}>
+                                        <TableRow
+                                            key={p.id}
+                                            onClick={() => setSelectedPolicy(p)}
+                                            className="cursor-pointer hover:bg-muted/50"
+                                            title="Detay için tıkla"
+                                        >
                                             <TableCell>{p.brans}</TableCell>
                                             <TableCell className="font-medium">{p.policeNo}</TableCell>
                                             <TableCell>{p.sigortali}</TableCell>
@@ -713,7 +730,109 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
                 </CardContent>
             </Card>
 
+            <PoliceMuhasebeDialog
+                policy={selectedPolicy}
+                muhasebe={matchedMuhasebe}
+                loading={matchedLoading}
+                onClose={() => setSelectedPolicy(null)}
+            />
+
         </div>
+    );
+}
+
+// Poliçeye tıklayınca eşleşen muhasebe satırlarını gösteren modal.
+// brut_prim ile borç/alacak farkını görsel olarak vurgular — TUTAR FARKI durumunda
+// kullanıcı manuel teyit yapabilir.
+function PoliceMuhasebeDialog({ policy, muhasebe, loading, onClose }: {
+    policy: any | null;
+    muhasebe: any[] | undefined;
+    loading: boolean;
+    onClose: () => void;
+}) {
+    if (!policy) return null;
+
+    const fmt = (n: number) => new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(n);
+    const policyBrut = parseFloat(policy.brutPrim || "0");
+
+    const muhasebeTotalAmount = (muhasebe || []).reduce((acc, m) => {
+        const b = parseFloat(m.borc || "0");
+        const a = parseFloat(m.alacak || "0");
+        return acc + (b > 0 ? b : a);
+    }, 0);
+    const fark = muhasebeTotalAmount - policyBrut;
+
+    return (
+        <Dialog open={!!policy} onOpenChange={(o) => { if (!o) onClose(); }}>
+            <DialogContent className="max-w-3xl">
+                <DialogHeader>
+                    <DialogTitle>Eşleşen Muhasebe Kayıtları</DialogTitle>
+                    <DialogDescription>
+                        Poliçe <span className="font-mono font-semibold">{policy.policeNo}</span> — {policy.sigortali}
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="grid grid-cols-3 gap-3 mt-2">
+                    <Card>
+                        <CardContent className="pt-4">
+                            <div className="text-xs text-muted-foreground">Poliçe Brüt Primi</div>
+                            <div className="text-lg font-semibold">{fmt(policyBrut)} ₺</div>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardContent className="pt-4">
+                            <div className="text-xs text-muted-foreground">Muhasebe Toplamı</div>
+                            <div className="text-lg font-semibold">{fmt(muhasebeTotalAmount)} ₺</div>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardContent className="pt-4">
+                            <div className="text-xs text-muted-foreground">Fark</div>
+                            <div className={`text-lg font-semibold ${Math.abs(fark) < 1 ? 'text-green-600' : 'text-red-600'}`}>
+                                {fark >= 0 ? '+' : ''}{fmt(fark)} ₺
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                <div className="mt-2">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Tarih</TableHead>
+                                <TableHead>Belge No</TableHead>
+                                <TableHead>Açıklama</TableHead>
+                                <TableHead className="text-right">Borç</TableHead>
+                                <TableHead className="text-right">Alacak</TableHead>
+                                <TableHead className="text-right">Bakiye</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {loading ? (
+                                <TableRow><TableCell colSpan={6} className="text-center h-16">Yükleniyor…</TableCell></TableRow>
+                            ) : (muhasebe || []).length === 0 ? (
+                                <TableRow><TableCell colSpan={6} className="text-center h-16 text-muted-foreground">Bu poliçeyle eşleşmiş muhasebe kaydı yok.</TableCell></TableRow>
+                            ) : (
+                                (muhasebe || []).map((m: any) => (
+                                    <TableRow key={m.id}>
+                                        <TableCell>{m.tarih}</TableCell>
+                                        <TableCell className="font-mono text-xs">{m.belgeNo}</TableCell>
+                                        <TableCell className="max-w-[220px] truncate" title={m.aciklama}>{m.aciklama}</TableCell>
+                                        <TableCell className="text-right">{fmt(parseFloat(m.borc || "0"))}</TableCell>
+                                        <TableCell className="text-right">{fmt(parseFloat(m.alacak || "0"))}</TableCell>
+                                        <TableCell className="text-right">{fmt(parseFloat(m.bakiye || "0"))}</TableCell>
+                                    </TableRow>
+                                ))
+                            )}
+                        </TableBody>
+                    </Table>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Kapat</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -961,43 +1080,70 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
         dekontDurumu:  ["dekont", "dekontdurumu", "dekontdurum", "dekontevethayir"],
     };
 
+    // Muhasebe (hesap ekstresi) Excel'i için ayrı sözlük
+    const MUHASEBE_HEADER_SYNONYMS: Record<string, string[]> = {
+        tarih:    ["tarih", "islemtarihi", "vadetarihi", "hareketkayittarihi", "fistarihi", "operasyontarihi"],
+        belgeNo:  ["belgeno", "belge", "fisno", "policeno", "policyno", "evrakno", "referansno", "referans", "fis", "policeevrakno"],
+        aciklama: ["aciklama", "explanation", "fisaciklama", "hareketaciklama", "detay", "not"],
+        borc:    ["borc", "debit", "tlborc", "borctutari"],
+        alacak:  ["alacak", "credit", "tlalacak", "alacaktutari"],
+        bakiye:  ["bakiye", "balance", "tlbakiye", "kalantutar"],
+    };
+
     type ColumnMap = Partial<Record<keyof typeof HEADER_SYNONYMS, number>>;
 
-    const detectHeader = (rows: any[][]): { headerRowIdx: number; mapping: ColumnMap } | null => {
+    // Generic header tespiti — synonyms sözlüğü ve "minimum gerekli alanlar" listesi alır
+    const detectHeaderGeneric = (
+        rows: any[][],
+        synonyms: Record<string, string[]>,
+        requiredFields: string[],
+    ): { headerRowIdx: number; mapping: Record<string, number> } | null => {
         const MAX_SCAN = Math.min(rows.length, 10);
         for (let r = 0; r < MAX_SCAN; r++) {
             const row = rows[r];
             if (!row || row.length < 2) continue;
 
-            const mapping: ColumnMap = {};
+            const mapping: Record<string, number> = {};
+            // Pass 1: exact match
             for (let c = 0; c < row.length; c++) {
                 const norm = normalizeHeader(row[c]);
                 if (!norm) continue;
-                for (const [field, synonyms] of Object.entries(HEADER_SYNONYMS)) {
-                    if ((mapping as any)[field] !== undefined) continue; // İlk eşleşmeyi koru
-                    // Exact match önce, sonra substring fallback
-                    if (synonyms.includes(norm) || synonyms.some(s => norm === s)) {
-                        (mapping as any)[field] = c;
+                for (const [field, list] of Object.entries(synonyms)) {
+                    if (mapping[field] !== undefined) continue;
+                    if (list.includes(norm)) {
+                        mapping[field] = c;
                         break;
                     }
                 }
             }
-            // Bir kez daha gez: exact match'i kaçıran kolonlar için substring fallback
+            // Pass 2: substring match (exact'in kaçırdıklarını yakalar)
             for (let c = 0; c < row.length; c++) {
                 const norm = normalizeHeader(row[c]);
                 if (!norm) continue;
-                for (const [field, synonyms] of Object.entries(HEADER_SYNONYMS)) {
-                    if ((mapping as any)[field] !== undefined) continue;
-                    if (synonyms.some(s => norm.includes(s) || s.includes(norm))) {
-                        (mapping as any)[field] = c;
+                for (const [field, list] of Object.entries(synonyms)) {
+                    if (mapping[field] !== undefined) continue;
+                    if (list.some(s => norm.includes(s) || s.includes(norm))) {
+                        mapping[field] = c;
                         break;
                     }
                 }
             }
 
-            // Header sayılması için en az policeNo + (netPrim VEYA brutPrim) bulunmalı
-            if (mapping.policeNo !== undefined && (mapping.netPrim !== undefined || mapping.brutPrim !== undefined)) {
-                return { headerRowIdx: r, mapping };
+            const hasRequired = requiredFields.every(f => mapping[f] !== undefined);
+            if (hasRequired) return { headerRowIdx: r, mapping };
+        }
+        return null;
+    };
+
+    const detectHeader = (rows: any[][]): { headerRowIdx: number; mapping: ColumnMap } | null => {
+        // Poliçe için en az policeNo + (netPrim veya brutPrim) — özel "VEYA" mantığı
+        const MAX_SCAN = Math.min(rows.length, 10);
+        for (let r = 0; r < MAX_SCAN; r++) {
+            const detected = detectHeaderGeneric(rows.slice(r, r + 1), HEADER_SYNONYMS, []);
+            if (!detected) continue;
+            const m = detected.mapping;
+            if (m.policeNo !== undefined && (m.netPrim !== undefined || m.brutPrim !== undefined)) {
+                return { headerRowIdx: r, mapping: m as ColumnMap };
             }
         }
         return null;
@@ -1196,35 +1342,57 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                          }
                     });
 
-                    // Start from row 1
-                    for (let i = 1; i < jsonData.length; i++) {
+                    // Header-tabanlı kolon tespiti — muhasebe Excel'i firmaya göre değişiyor
+                    const mDetected = detectHeaderGeneric(jsonData, MUHASEBE_HEADER_SYNONYMS, ["belgeNo"]);
+                    if (!mDetected) {
+                        const firstRow = jsonData[0] ? JSON.stringify(jsonData[0]).slice(0, 150) : "(boş)";
+                        toast({
+                            variant: "destructive",
+                            title: "Muhasebe başlığı tanınmadı",
+                            description: `Başlık satırında 'Belge No / Poliçe No' kolonu bulunamadı. İlk satır: ${firstRow}`,
+                        });
+                        setProcessing(false);
+                        e.target.value = "";
+                        return;
+                    }
+                    const { headerRowIdx: mHeaderIdx, mapping: mMap } = mDetected;
+                    const mCol = (field: string): number | undefined => mMap[field];
+                    const mGet = (row: any[], field: string) => {
+                        const c = mCol(field);
+                        return c !== undefined ? row[c] : undefined;
+                    };
+                    console.log("[Muhasebe Upload] header satırı:", mHeaderIdx, "kolon eşleme:", mMap);
+
+                    for (let i = mHeaderIdx + 1; i < jsonData.length; i++) {
                         const row = jsonData[i];
                         if (!row) continue;
 
-                        const accountingPolicyNo = String(row[1] || "").replace(/[^a-zA-Z0-9]/g, ""); // "259" or "21025...259"
-                        const accAmountStr = row[3] ? row[3] : row[4]; // Borç or Alacak? Usually Borç implies debt to company?
-                        // Actually parsing columns: Borc(3), Alacak(4). 
-                        // Accounting record usually represents a debt for us or them? 
-                        // If it's a payment TO us: Borc? 
-                        // Let's use logic: We just need to match Amount against Policy BrutPrim.
-                        // Calculate absolute mismatch.
-                        const accBorc = parseAmount(row[3]);
-                        const accAlacak = parseAmount(row[4]);
+                        const tarihRaw = mGet(row, "tarih");
+                        const belgeNoRaw = mGet(row, "belgeNo");
+                        const aciklamaRaw = mGet(row, "aciklama");
+                        const borcRaw = mGet(row, "borc");
+                        const alacakRaw = mGet(row, "alacak");
+                        const bakiyeRaw = mGet(row, "bakiye");
+
+                        if (!belgeNoRaw && !aciklamaRaw) continue; // tamamen boş satırları atla
+
+                        const accountingPolicyNo = String(belgeNoRaw || "").replace(/[^a-zA-Z0-9]/g, "");
+                        const accBorc = parseAmount(borcRaw);
+                        const accAlacak = parseAmount(alacakRaw);
                         const accAmount = accBorc > 0 ? accBorc : accAlacak;
 
                         const sirket = subTab === 'mapfre' ? COMPANIES.MAPFRE : COMPANIES.RAY;
 
-                        // Create Accounting Record Object
                         const accRecord = {
-                            tarih: formatExcelDate(row[0]),
-                            belgeNo: String(row[1] || ""),
-                            aciklama: String(row[2] || ""),
+                            tarih: formatExcelDate(tarihRaw),
+                            belgeNo: String(belgeNoRaw || ""),
+                            aciklama: String(aciklamaRaw || ""),
                             borc: String(accBorc),
                             alacak: String(accAlacak),
-                            bakiye: String(parseAmount(row[5])),
+                            bakiye: String(parseAmount(bakiyeRaw)),
                             sirket: sirket,
-                            ay: extractMonthAndYear(row[0])?.ay || "1",
-                            yil: yil, // Current selected year
+                            ay: extractMonthAndYear(tarihRaw)?.ay || "1",
+                            yil: yil,
                             eslestiMi: 0 as 0 | 1,
                             eslesenPolicyId: null as string | null
                         };

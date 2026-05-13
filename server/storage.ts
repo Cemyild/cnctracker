@@ -127,6 +127,7 @@ export interface IStorage {
 
   // Sigorta Muhasebe Kayıtları
   getSigortaMuhasebeKayitlari(sirket?: string, ay?: string, yil?: number): Promise<SigortaMuhasebe[]>;
+  getSigortaMuhasebeByPoliceId(policeId: string): Promise<SigortaMuhasebe[]>;
   insertSigortaMuhasebeKayitlari(veriler: InsertSigortaMuhasebe[]): Promise<SigortaMuhasebe[]>;
   deleteSigortaMuhasebeKayitlari(sirket: string, ay?: string, yil?: number): Promise<void>;
   updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe | null>;
@@ -1429,6 +1430,14 @@ export class DatabaseStorage implements IStorage {
       return await db.select().from(sigortaMuhasebeKayitlari).where(and(...filters)).orderBy(sigortaMuhasebeKayitlari.tarih);
     }
     return await db.select().from(sigortaMuhasebeKayitlari).orderBy(sigortaMuhasebeKayitlari.tarih);
+  }
+
+  async getSigortaMuhasebeByPoliceId(policeId: string): Promise<SigortaMuhasebe[]> {
+    return await db
+      .select()
+      .from(sigortaMuhasebeKayitlari)
+      .where(eq(sigortaMuhasebeKayitlari.eslesenPolicyId, policeId))
+      .orderBy(sigortaMuhasebeKayitlari.tarih);
   }
 
   async insertSigortaMuhasebeKayitlari(veriler: InsertSigortaMuhasebe[]): Promise<SigortaMuhasebe[]> {

@@ -806,6 +806,16 @@ export async function registerRoutes(
   // SİGORTA MUHASEBE API'LERİ
   // ============================================================================
 
+  app.get("/api/sigorta/muhasebe/by-police/:policyId", async (req, res) => {
+    try {
+      const records = await storage.getSigortaMuhasebeByPoliceId(req.params.policyId);
+      res.json(records);
+    } catch (err) {
+      console.error("Poliçeye bağlı muhasebe kayıtları alınırken hata:", err);
+      res.status(500).json({ error: "Kayıtlar alınırken hata oluştu" });
+    }
+  });
+
   app.get("/api/sigorta/muhasebe", async (req, res) => {
     try {
       const { sirket, ay, yil } = req.query;
