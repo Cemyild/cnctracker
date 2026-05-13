@@ -1369,14 +1369,28 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                     // tahsilat). Bu yıla ait poliçe listesinin en küçük numarası
                     // cutoff olarak alınır; muhasebe satırında bundan küçük poliçe
                     // numarası varsa o satır tamamen atlanır (DB'ye yazılmaz).
+                    //
+                    // Önemli: storedPolicies bu yılın poliçeleri olduğu için min
+                    // doğrudan "yılın ilk poliçesi" anlamına gelir. Boşsa = poliçe
+                    // henüz yüklenmemiş → kullanıcıya uyarı veriyoruz.
                     let rayMinPolicyNo = 0;
-                    if (subTab === 'ray' && storedPolicies.length > 0) {
-                        const nums = storedPolicies
+                    if (subTab === 'ray') {
+                        const nums = (storedPolicies || [])
                             .map((p: any) => parseInt(String(p.policeNo).replace(/\D/g, '')))
                             .filter((n: number) => !isNaN(n) && n > 0);
                         if (nums.length > 0) {
                             rayMinPolicyNo = Math.min(...nums);
                             console.log(`[Ray cutoff] minimum poliçe no = ${rayMinPolicyNo} (bundan küçük muhasebe satırları atlanacak)`);
+                        } else {
+                            // Poliçe yüklenmeden muhasebe yüklemesi yapılıyor — uyar
+                            toast({
+                                variant: "destructive",
+                                title: "Önce poliçeleri yükle",
+                                description: `Ray için bu yıl (${yil}) hiç poliçe yok. Cutoff hesaplanamadığı için muhasebe yüklemesi durduruldu — önce poliçe Excel'ini yükle, sonra muhasebeyi.`,
+                            });
+                            setProcessing(false);
+                            e.target.value = "";
+                            return;
                         }
                     }
                     let skippedByCutoff = 0;
@@ -1428,7 +1442,11 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
 
                         const accBorc = parseAmount(borcRaw);
                         const accAlacak = parseAmount(alacakRaw);
-                        const accAmount = accBorc > 0 ? accBorc : accAlacak;
+                        // Poliçe Brüt Primi muhasebe defterinde sigorta şirketinin
+                        // ALACAK kolonuna yazılır (bize olan borcu). Borç ise tahsilat
+                        // satırı olup farklı tutarda olabilir. Karşılaştırma için
+                        // her zaman ALACAK kullanılır.
+                        const accAmount = accAlacak;
 
                         const sirket = subTab === 'mapfre' ? COMPANIES.MAPFRE : COMPANIES.RAY;
 
