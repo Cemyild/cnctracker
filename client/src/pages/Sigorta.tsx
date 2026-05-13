@@ -863,6 +863,9 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
     // "auto" → Excel tarih sütunundan tespit (default davranış).
     // Belirli bir ay seçilirse, tarih kolonu okunamayan satırlar için fallback olarak kullanılır.
     const [ayOverride, setAyOverride] = useState<string>(globalAy === "toplam" ? "auto" : globalAy);
+    // Ray cutoff manuel override — auto-detect (gap detection) çalışmazsa
+    // veya kullanıcı kesin bir sınır biliyorsa buraya yazar (örn. 1494789982).
+    const [rayCutoffOverride, setRayCutoffOverride] = useState<string>("");
 
     // Fetch existing policies from DB for the selected company and year
     // This serves as the "Combined List" mentioned by the user
@@ -1364,34 +1367,53 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                          }
                     });
 
-                    // Ray cutoff: muhasebe Excel'i Ocak ayında bir önceki yılın
-                    // poliçelerini içeriyor olabilir (örn. Aralık 2025 → Ocak 2026
-                    // tahsilat). Bu yıla ait poliçe listesinin en küçük numarası
-                    // cutoff olarak alınır; muhasebe satırında bundan küçük poliçe
-                    // numarası varsa o satır tamamen atlanır (DB'ye yazılmaz).
-                    //
-                    // Önemli: storedPolicies bu yılın poliçeleri olduğu için min
-                    // doğrudan "yılın ilk poliçesi" anlamına gelir. Boşsa = poliçe
-                    // henüz yüklenmemiş → kullanıcıya uyarı veriyoruz.
+                    // Ray cutoff hesaplaması — üç katmanlı strateji:
+                    // 1. Kullanıcı manuel girdi varsa onu kullan (en güvenilir)
+                    // 2. Yoksa: 2025 Aralık zeyilleri 2026'ya aynı eski numara ile
+                    //    geliyor olabilir → sıralı poliçe numaralarında EN BÜYÜK
+                    //    ardışık sıçramayı bul (>1.000.000 ise yıl sınırı say)
+                    // 3. Yoksa: min(numaralar) fallback
                     let rayMinPolicyNo = 0;
+                    let cutoffSource = "";
                     if (subTab === 'ray') {
                         const nums = (storedPolicies || [])
                             .map((p: any) => parseInt(String(p.policeNo).replace(/\D/g, '')))
                             .filter((n: number) => !isNaN(n) && n > 0);
-                        if (nums.length > 0) {
-                            rayMinPolicyNo = Math.min(...nums);
-                            console.log(`[Ray cutoff] minimum poliçe no = ${rayMinPolicyNo} (bundan küçük muhasebe satırları atlanacak)`);
+
+                        const manual = parseInt((rayCutoffOverride || "").replace(/\D/g, ''));
+                        if (!isNaN(manual) && manual > 0) {
+                            rayMinPolicyNo = manual;
+                            cutoffSource = "manuel";
+                        } else if (nums.length > 0) {
+                            const sorted = [...nums].sort((a, b) => a - b);
+                            let largestGap = 0;
+                            let afterGap = sorted[0];
+                            for (let i = 1; i < sorted.length; i++) {
+                                const g = sorted[i] - sorted[i - 1];
+                                if (g > largestGap) {
+                                    largestGap = g;
+                                    afterGap = sorted[i];
+                                }
+                            }
+                            const GAP_THRESHOLD = 1_000_000; // 1M üstü sıçrama = yıl sınırı
+                            if (largestGap > GAP_THRESHOLD) {
+                                rayMinPolicyNo = afterGap;
+                                cutoffSource = `auto-gap (sıçrama=${largestGap.toLocaleString('tr-TR')})`;
+                            } else {
+                                rayMinPolicyNo = sorted[0];
+                                cutoffSource = "min (anlamlı sıçrama yok)";
+                            }
                         } else {
-                            // Poliçe yüklenmeden muhasebe yüklemesi yapılıyor — uyar
                             toast({
                                 variant: "destructive",
                                 title: "Önce poliçeleri yükle",
-                                description: `Ray için bu yıl (${yil}) hiç poliçe yok. Cutoff hesaplanamadığı için muhasebe yüklemesi durduruldu — önce poliçe Excel'ini yükle, sonra muhasebeyi.`,
+                                description: `Ray için bu yıl (${yil}) hiç poliçe yok. Cutoff hesaplanamadığı için muhasebe yüklemesi durduruldu.`,
                             });
                             setProcessing(false);
                             e.target.value = "";
                             return;
                         }
+                        console.log(`[Ray cutoff] ${cutoffSource}: ${rayMinPolicyNo} (bundan küçük muhasebe satırları atlanacak)`);
                     }
                     let skippedByCutoff = 0;
 
@@ -1564,11 +1586,11 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                     if (unmatchedCount > 0) {
                          toast({ variant: "default", title: "Bilgi", description: `${unmatchedCount} adet eşleşmeyen muhasebe kaydı sisteme eklendi.` });
                     }
-                    if (skippedByCutoff > 0) {
+                    if (skippedByCutoff > 0 || (subTab === 'ray' && rayMinPolicyNo > 0)) {
                         toast({
                             variant: "default",
-                            title: "Geçmiş Yıl Atlandı",
-                            description: `${skippedByCutoff} satır, bu yıla ait en küçük poliçe numarasından (${rayMinPolicyNo}) önce geldiği için atlandı.`,
+                            title: skippedByCutoff > 0 ? "Geçmiş Yıl Atlandı" : "Cutoff Bilgisi",
+                            description: `Cutoff: ${rayMinPolicyNo.toLocaleString('tr-TR')} (${cutoffSource}). ${skippedByCutoff} satır bu sınırın altında olduğu için atlandı.`,
                         });
                     }
 
@@ -1668,6 +1690,26 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                         Muhasebe kayıtlarını içeren Excel dosyasını seçin.
                                     </p>
                                 </div>
+
+                                {subTab === 'ray' && (
+                                    <div className="w-full max-w-[280px] mt-1 text-left">
+                                        <label className="text-xs font-medium text-muted-foreground">
+                                            Ray Cutoff (manuel — opsiyonel)
+                                        </label>
+                                        <Input
+                                            type="text"
+                                            inputMode="numeric"
+                                            placeholder="Boş bırak: otomatik tespit"
+                                            value={rayCutoffOverride}
+                                            onChange={(e) => setRayCutoffOverride(e.target.value)}
+                                            className="h-8 text-xs mt-1"
+                                        />
+                                        <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
+                                            Bu rakamdan küçük poliçe numaralı muhasebe satırları (geçen yıl zeyilleri) atlanır.
+                                        </p>
+                                    </div>
+                                )}
+
                                 <div className="relative mt-2">
                                     <Button disabled={processing} className="relative z-0 h-9 text-sm" variant="outline" size="sm">
                                         {processing ? "İşleniyor..." : "Muhasebe Excel Seç"}
