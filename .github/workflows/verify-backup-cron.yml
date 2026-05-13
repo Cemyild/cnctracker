@@ -1,0 +1,90 @@
+name: Verify Backup Cron Status
+
+# Read-only doğrulama — cron çalışıp gece backup almış mı kontrol eder.
+# Hiçbir şey değiştirmez, sadece durum raporu çıkarır.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check backup cron status
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 2m
+          script: |
+            set +e  # Tek bir komut fail ederse durmasın, hepsini çalıştır
+
+            BACKUP_DIR="/var/backups/postgres"
+
+            echo "===== 1. Cron daemon durumu ====="
+            systemctl is-active cron && echo "✓ cron servisi aktif" || echo "✗ cron servisi DOWN"
+            echo ""
+
+            echo "===== 2. Cron entry hâlâ duruyor mu? ====="
+            if [ -f /etc/cron.d/pgdump-cnctracker ]; then
+              echo "✓ /etc/cron.d/pgdump-cnctracker mevcut"
+              cat /etc/cron.d/pgdump-cnctracker
+            else
+              echo "✗ /etc/cron.d/pgdump-cnctracker YOK"
+            fi
+            echo ""
+
+            echo "===== 3. Backup dizininde son 5 dump ====="
+            ls -lht "$BACKUP_DIR"/cnctracker_*.dump 2>/dev/null | head -5 || echo "(dump dosyası yok)"
+            echo ""
+
+            echo "===== 4. Toplam dump sayısı ve disk kullanımı ====="
+            COUNT=$(ls "$BACKUP_DIR"/cnctracker_*.dump 2>/dev/null | wc -l)
+            SIZE=$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1)
+            echo "Toplam: $COUNT dump dosyası, dizin boyutu: $SIZE"
+            echo ""
+
+            echo "===== 5. Bugün backup alındı mı? ====="
+            TODAY=$(date +%Y%m%d)
+            TODAY_DUMPS=$(ls "$BACKUP_DIR"/cnctracker_${TODAY}-*.dump 2>/dev/null | wc -l)
+            if [ "$TODAY_DUMPS" -gt 0 ]; then
+              echo "✓ Bugün ($TODAY) tarihinde $TODAY_DUMPS backup var:"
+              ls -lh "$BACKUP_DIR"/cnctracker_${TODAY}-*.dump
+            else
+              echo "✗ Bugün ($TODAY) tarihinde dump YOK"
+            fi
+            echo ""
+
+            echo "===== 6. pgdump.log son 20 satır ====="
+            if [ -f "$BACKUP_DIR/pgdump.log" ]; then
+              tail -20 "$BACKUP_DIR/pgdump.log"
+            else
+              echo "(log dosyası yok)"
+            fi
+            echo ""
+
+            echo "===== 7. Cron çalıştırma kayıtları (journalctl) ====="
+            journalctl -u cron --since "yesterday" --no-pager 2>/dev/null \
+              | grep -iE "pgdump|cnctracker" \
+              | tail -20 \
+              || echo "(journal'da pgdump-cnctracker kaydı yok)"
+            echo ""
+
+            echo "===== 8. Son backup'ın geçerliliği ====="
+            LATEST=$(ls -t "$BACKUP_DIR"/cnctracker_*.dump 2>/dev/null | head -1)
+            if [ -n "$LATEST" ]; then
+              echo "En son dump: $LATEST"
+              SIZE_BYTES=$(stat -c %s "$LATEST")
+              echo "Boyut: $(du -h "$LATEST" | cut -f1) ($SIZE_BYTES bytes)"
+              TABLE_COUNT=$(sudo -u postgres pg_restore --list "$LATEST" 2>/dev/null | grep -c "TABLE DATA" || echo "0")
+              echo "İçindeki tablo verisi: $TABLE_COUNT tablo"
+              if [ "$TABLE_COUNT" -gt 30 ]; then
+                echo "✓ Dump dosyası geçerli görünüyor"
+              else
+                echo "✗ Dump dosyası kuşkulu (tablo sayısı düşük)"
+              fi
+            else
+              echo "(hiç dump yok)"
+            fi
