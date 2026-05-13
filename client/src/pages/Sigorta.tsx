@@ -51,6 +51,23 @@ const COMPANIES = {
     RAY: 'Ray Sigorta'
 };
 
+// Bu firmalar için kesilen poliçeler 0-değerli olduğundan muhasebede hiç
+// görünmez; otomatik "EVET" sayılırlar. Yeni firma eklemek için sadece
+// alt-kase, TR karaktersiz bir anahtar kelime ekle — substring eşleşir.
+const AUTO_EVET_FIRMS_KEYWORDS = ["feka", "promedis"];
+
+const normalizeFirmName = (s: any): string =>
+    String(s || "")
+        .toLowerCase()
+        .replace(/ş/g, "s").replace(/ı/g, "i").replace(/ğ/g, "g")
+        .replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c")
+        .replace(/[^a-z0-9]/g, "");
+
+const isAutoEvetFirm = (sigortali: any): boolean => {
+    const norm = normalizeFirmName(sigortali);
+    return AUTO_EVET_FIRMS_KEYWORDS.some(k => norm.includes(k));
+};
+
 const AYLAR = [
     { value: "1", label: "Ocak" },
     { value: "2", label: "Şubat" },
@@ -1202,17 +1219,22 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                             return c !== undefined ? row[c] : undefined;
                         };
 
+                        const sigortaliRaw = String(get("sigortali") || "");
+                        // FEKA / PROMEDİS otomatik EVET (0 değerli, muhasebede yer almayan poliçeler)
+                        const excelDekont = String(get("dekontDurumu") || "").trim();
+                        const autoEvet = isAutoEvetFirm(sigortaliRaw);
                         const policy = {
                             brans: String(get("brans") || ""),
                             policeNo: String(pNo).replace(/[^a-zA-Z0-9]/g, ""),
-                            sigortali: String(get("sigortali") || ""),
+                            sigortali: sigortaliRaw,
                             tanzimTarihi: formatExcelDate(tanzimRaw),
                             netPrim: String(parseAmount(get("netPrim"))),
                             brutPrim: String(parseAmount(get("brutPrim"))),
                             komisyon: String(parseAmount(get("komisyon"))),
                             sigortaBedeli: String(parseAmount(get("sigortaBedeli"))),
                             sirket: subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY,
-                            dekontDurumu: String(get("dekontDurumu") || ""), // Excel'de yoksa boş — upsert'te eski değer korunur
+                            // Öncelik: Excel'de açıkça yazılı dekont durumu > auto-EVET > boş (upsert korur)
+                            dekontDurumu: excelDekont !== "" ? excelDekont : (autoEvet ? "EVET" : ""),
                             ay: dateInfo ? dateInfo.ay : "1",
                             yil: dateInfo ? dateInfo.yil : yil,
                         };
@@ -1342,6 +1364,23 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                          }
                     });
 
+                    // Ray cutoff: muhasebe Excel'i Ocak ayında bir önceki yılın
+                    // poliçelerini içeriyor olabilir (örn. Aralık 2025 → Ocak 2026
+                    // tahsilat). Bu yıla ait poliçe listesinin en küçük numarası
+                    // cutoff olarak alınır; muhasebe satırında bundan küçük poliçe
+                    // numarası varsa o satır tamamen atlanır (DB'ye yazılmaz).
+                    let rayMinPolicyNo = 0;
+                    if (subTab === 'ray' && storedPolicies.length > 0) {
+                        const nums = storedPolicies
+                            .map((p: any) => parseInt(String(p.policeNo).replace(/\D/g, '')))
+                            .filter((n: number) => !isNaN(n) && n > 0);
+                        if (nums.length > 0) {
+                            rayMinPolicyNo = Math.min(...nums);
+                            console.log(`[Ray cutoff] minimum poliçe no = ${rayMinPolicyNo} (bundan küçük muhasebe satırları atlanacak)`);
+                        }
+                    }
+                    let skippedByCutoff = 0;
+
                     // Header-tabanlı kolon tespiti — muhasebe Excel'i firmaya göre değişiyor
                     const mDetected = detectHeaderGeneric(jsonData, MUHASEBE_HEADER_SYNONYMS, ["belgeNo"]);
                     if (!mDetected) {
@@ -1377,6 +1416,16 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                         if (!belgeNoRaw && !aciklamaRaw) continue; // tamamen boş satırları atla
 
                         const accountingPolicyNo = String(belgeNoRaw || "").replace(/[^a-zA-Z0-9]/g, "");
+
+                        // Ray cutoff — geçmiş yıl carry-over satırlarını atla
+                        if (rayMinPolicyNo > 0 && accountingPolicyNo) {
+                            const accNum = parseInt(accountingPolicyNo);
+                            if (!isNaN(accNum) && accNum < rayMinPolicyNo) {
+                                skippedByCutoff++;
+                                continue;
+                            }
+                        }
+
                         const accBorc = parseAmount(borcRaw);
                         const accAlacak = parseAmount(alacakRaw);
                         const accAmount = accBorc > 0 ? accBorc : accAlacak;
@@ -1483,12 +1532,26 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                         toast({ title: "Sonuç", description: "Yeni eşleşme bulunamadı, ancak muhasebe kayıtları güncellendi." });
                     }
 
-                    refetch();        // Update Policies List
-                    refetchMuhasebe(); // Update Accounting List
-                    
+                    // Veri Yükleme sekmesinin kendi cache'i + Poliçe Listesi ve Özet
+                    // sekmelerinin cache'i ayrı queryKey'ler kullanıyor; hepsini
+                    // invalidate etmezsek diğer sekmelerde eski durum görünür.
+                    refetch();
+                    refetchMuhasebe();
+                    queryClient.invalidateQueries({ queryKey: ['sigorta-policeler'] });
+                    queryClient.invalidateQueries({ queryKey: ['sigorta-ozet'] });
+                    queryClient.invalidateQueries({ queryKey: ['sigorta-muhasebe'] });
+                    queryClient.invalidateQueries({ queryKey: ['sigorta-policeler-aging'] });
+
                     const unmatchedCount = accountingToSave.filter(r => r.eslestiMi === 0).length;
                     if (unmatchedCount > 0) {
                          toast({ variant: "default", title: "Bilgi", description: `${unmatchedCount} adet eşleşmeyen muhasebe kaydı sisteme eklendi.` });
+                    }
+                    if (skippedByCutoff > 0) {
+                        toast({
+                            variant: "default",
+                            title: "Geçmiş Yıl Atlandı",
+                            description: `${skippedByCutoff} satır, bu yıla ait en küçük poliçe numarasından (${rayMinPolicyNo}) önce geldiği için atlandı.`,
+                        });
                     }
 
                 } catch (err) {
