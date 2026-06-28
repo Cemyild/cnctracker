@@ -9,16 +9,15 @@ import {
     Wallet,
     AlertTriangle,
     CalendarClock,
-    ChevronRight,
+    SlidersHorizontal,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { KPISection } from "@/components/dashboard/KPISection";
 import { TrendChart } from "@/components/dashboard/TrendChart";
 import { ModuleCard, type ModuleAccent } from "@/components/dashboard/ModuleCard";
 import { Sparkline } from "@/components/dashboard/Sparkline";
-import { formatCurrency, formatCurrencyShort, cn } from "@/lib/utils";
+import { formatCurrencyFull, formatCurrencyShort, cn } from "@/lib/utils";
 import type { Arac } from "@shared/schema";
 
 // ----------------- Tipler -----------------
@@ -34,6 +33,12 @@ interface GumrukAylikOzet {
     yil: number;
     toplamSatis: number;
     toplamKdv: number;
+    dosyaSayisi: number;
+}
+
+interface GumrukTopFirma {
+    firmaUnvan: string;
+    tutar: number;
     dosyaSayisi: number;
 }
 
@@ -75,39 +80,40 @@ interface CalisanRow {
     adSoyad: string;
     sube?: string | null;
     statu?: string | null;
+    brutUcret?: string | number | null;
+    netUcret?: string | number | null;
     toplamIsverenMaliyeti: string | number | null;
 }
 
+// Aksiyon Merkezi / header rozetleri için türetilmiş uyarı
+interface DashboardAlert {
+    sev: "kritik" | "uyari";
+    title: string;
+    meta: string;
+}
+
+// Merkezi eşik yapılandırması (öneri 4) — tüm türetmeler bu değerleri kullanır
+interface Thresholds {
+    uyari: number;  // yenileme uyarısı (gün)
+    kritik: number; // kritik eşik (gün)
+    donuk: number;  // donuk alacak (gün)
+}
+const DEFAULT_THRESHOLDS: Thresholds = { uyari: 30, kritik: 7, donuk: 120 };
+
 // ----------------- Modül accent paleti -----------------
 const ACCENTS = {
-    gumruk: {
-        bar: "bg-sky-500",
-        bg: "bg-sky-500/10",
-        text: "text-sky-600 dark:text-sky-400",
-    } satisfies ModuleAccent,
-    tahsilat: {
-        bar: "bg-rose-500",
-        bg: "bg-rose-500/10",
-        text: "text-rose-600 dark:text-rose-400",
-    } satisfies ModuleAccent,
-    calisanlar: {
-        bar: "bg-violet-500",
-        bg: "bg-violet-500/10",
-        text: "text-violet-600 dark:text-violet-400",
-    } satisfies ModuleAccent,
-    sigorta: {
-        bar: "bg-emerald-500",
-        bg: "bg-emerald-500/10",
-        text: "text-emerald-600 dark:text-emerald-400",
-    } satisfies ModuleAccent,
-    araclar: {
-        bar: "bg-amber-500",
-        bg: "bg-amber-500/10",
-        text: "text-amber-600 dark:text-amber-400",
-    } satisfies ModuleAccent,
+    gumruk: { bar: "bg-sky-500", bg: "bg-sky-500/10", text: "text-sky-600 dark:text-sky-400" } satisfies ModuleAccent,
+    tahsilat: { bar: "bg-rose-500", bg: "bg-rose-500/10", text: "text-rose-600 dark:text-rose-400" } satisfies ModuleAccent,
+    calisanlar: { bar: "bg-violet-500", bg: "bg-violet-500/10", text: "text-violet-600 dark:text-violet-400" } satisfies ModuleAccent,
+    sigorta: { bar: "bg-emerald-500", bg: "bg-emerald-500/10", text: "text-emerald-600 dark:text-emerald-400" } satisfies ModuleAccent,
+    araclar: { bar: "bg-amber-500", bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400" } satisfies ModuleAccent,
 };
 
 const AY_SIRA = ["ocak", "subat", "mart", "nisan", "mayis", "haziran", "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"];
+const AY_LABEL: Record<string, string> = {
+    ocak: "Ocak", subat: "Şubat", mart: "Mart", nisan: "Nisan", mayis: "Mayıs", haziran: "Haziran",
+    temmuz: "Temmuz", agustos: "Ağustos", eylul: "Eylül", ekim: "Ekim", kasim: "Kasım", aralik: "Aralık",
+};
 
 // Türkçe tarih parse — schema'da tarihler "YYYY-MM-DD" veya "DD.MM.YYYY" olabilir, ikisini de destekle.
 function parseTarih(s: string | null | undefined): Date | null {
@@ -123,15 +129,37 @@ function gunFarki(target: Date, ref: Date = new Date()): number {
     return Math.round((target.getTime() - ref.getTime()) / 86400000);
 }
 
+// Backend /api/tahsilat/dashboard `riskRengi` yaymıyor — risk rengini `pattern`'den türet.
+// PATTERN_COLOR (shared/tahsilatHesaplari.ts) semantiğiyle uyumlu:
+// DONUK_KAYIP=red → kırmızı, YAVAS_ODEYICI/TAKIP_GEREKEN=orange/yellow → turuncu, diğerleri risk değil.
+function riskRengiFromPattern(pattern: string | undefined): "kirmizi" | "turuncu" | null {
+    if (pattern === "DONUK_KAYIP") return "kirmizi";
+    if (pattern === "YAVAS_ODEYICI" || pattern === "TAKIP_GEREKEN") return "turuncu";
+    return null;
+}
+
+// dd/mm/yyyy — new Date() üzerinden geçmeden (timezone off-by-one riski yok)
+function formatTarihKisa(d: Date): string {
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
 // ----------------- Dashboard -----------------
 export default function Dashboard() {
     const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+    const [thresholds, setThresholds] = useState<Thresholds>(DEFAULT_THRESHOLDS);
+    const [configOpen, setConfigOpen] = useState(false);
+
     const currentYear = new Date().getFullYear();
     const yearOptions = useMemo(() => {
         const yrs: number[] = [];
         for (let y = currentYear + 1; y >= currentYear - 3; y--) yrs.push(y);
         return yrs;
     }, [currentYear]);
+
+    const setTh = (key: keyof Thresholds) => (v: number) =>
+        setThresholds((s) => ({ ...s, [key]: Number.isNaN(v) ? 0 : v }));
 
     // --- Veriler ---
     const summaryQuery = useQuery<OzetSummaryRow[]>({
@@ -157,6 +185,15 @@ export default function Dashboard() {
         queryFn: async () => {
             const res = await fetch(`/api/gumruk/ozet/${selectedYear}`);
             if (!res.ok) throw new Error("Gümrük özet yüklenemedi");
+            return res.json();
+        },
+    });
+
+    const gumrukTopQuery = useQuery<GumrukTopFirma[]>({
+        queryKey: ["gumruk-top-firmalar", selectedYear],
+        queryFn: async () => {
+            const res = await fetch(`/api/dashboard/gumruk-top-firmalar/${selectedYear}`);
+            if (!res.ok) throw new Error("Firma sıralaması yüklenemedi");
             return res.json();
         },
     });
@@ -227,46 +264,55 @@ export default function Dashboard() {
     const prevNetProfit = prevAggregates.totalRevenue - prevAggregates.totalExpenses;
     const prevMargin = prevAggregates.totalRevenue > 0 ? (prevNetProfit / prevAggregates.totalRevenue) * 100 : 0;
     const previousYearKPI = (prevSummaryQuery.data ?? []).length > 0
-        ? {
-            totalRevenue: prevAggregates.totalRevenue,
-            totalExpenses: prevAggregates.totalExpenses,
-            netProfit: prevNetProfit,
-            profitMargin: prevMargin,
-        }
+        ? { totalRevenue: prevAggregates.totalRevenue, totalExpenses: prevAggregates.totalExpenses, netProfit: prevNetProfit, profitMargin: prevMargin }
         : null;
 
-    // --- Chart data (12 ay sıralı, boş ayları doldur) ---
+    // --- Trend chart verisi (12 ay: gelir + gider + geçen yıl gelir) ---
     const chartData = useMemo(() => {
-        const map = new Map((summaryQuery.data ?? []).map((r) => [r.ay, r]));
+        const cur = new Map((summaryQuery.data ?? []).map((r) => [r.ay, r]));
+        const prev = new Map((prevSummaryQuery.data ?? []).map((r) => [r.ay, r]));
         return AY_SIRA.map((ay) => {
-            const row = map.get(ay);
+            const c = cur.get(ay);
+            const p = prev.get(ay);
             return {
                 ay,
-                satisToplam: row?.satisToplam ?? 0,
-                giderToplam: (row?.giderToplam ?? 0) + (row?.calisanMaliyet ?? 0),
+                gelir: c?.satisToplam ?? 0,
+                gider: (c?.giderToplam ?? 0) + (c?.calisanMaliyet ?? 0),
+                prevGelir: p?.satisToplam ?? 0,
             };
         });
-    }, [summaryQuery.data]);
+    }, [summaryQuery.data, prevSummaryQuery.data]);
+
+    // Aylık hedef: geçen yılın aylık ortalaması +%15 büyüme (yoksa bu yılın dolu ay ortalaması)
+    const aylikHedef = useMemo(() => {
+        if (prevAggregates.totalRevenue > 0) return (prevAggregates.totalRevenue / 12) * 1.15;
+        const dolu = chartData.filter((d) => d.gelir > 0);
+        return dolu.length ? dolu.reduce((a, d) => a + d.gelir, 0) / dolu.length : 0;
+    }, [prevAggregates.totalRevenue, chartData]);
 
     // --- Modül kartları için türetilmiş veriler ---
 
-    // GÜMRÜK
+    // GÜMRÜK — yıllık ciro + son dolu ay (primary) + top-5 firma (gövde)
     const gumrukAgg = useMemo(() => {
         const data = gumrukOzetQuery.data ?? [];
         const map = new Map(data.map((r) => [r.ay, r]));
-        const sparkValues = AY_SIRA.map((ay) => map.get(ay)?.toplamSatis ?? 0);
         const dosyaSayisi = data.reduce((a, r) => a + (r.dosyaSayisi || 0), 0);
         const yillikCiro = data.reduce((a, r) => a + (r.toplamSatis || 0), 0);
-        // Son dolu ay
         let sonAy: GumrukAylikOzet | null = null;
         for (let i = AY_SIRA.length - 1; i >= 0; i--) {
             const r = map.get(AY_SIRA[i]);
             if (r && r.dosyaSayisi > 0) { sonAy = r; break; }
         }
-        return { sparkValues, dosyaSayisi, yillikCiro, sonAy };
+        return { dosyaSayisi, yillikCiro, sonAy };
     }, [gumrukOzetQuery.data]);
 
-    // SİGORTA
+    const gumrukTop = useMemo(() => {
+        const data = gumrukTopQuery.data ?? [];
+        const max = data.length ? Math.max(...data.map((f) => f.tutar)) : 0;
+        return data.map((f) => ({ ...f, w: max > 0 ? Math.max(8, Math.round((f.tutar / max) * 100)) : 0 }));
+    }, [gumrukTopQuery.data]);
+
+    // SİGORTA — prim toplamı + spark + lider
     const sigortaAgg = useMemo(() => {
         const data = sigortaOzetQuery.data ?? [];
         const aySpark = new Map<string, number>();
@@ -284,132 +330,193 @@ export default function Dashboard() {
         return { sparkValues, toplamPolice, toplamPrim, topSirket };
     }, [sigortaOzetQuery.data]);
 
-    // ARAÇLAR
-    const aracAgg = useMemo(() => {
-        const data = araclarQuery.data ?? [];
-        const now = new Date();
-        let yakinYenileme = 0;
-        let kritikYenileme = 0; // <= 7 gün
-        let toplamSigortaMaliyet = 0;
-        const subeMap = new Map<string, number>();
-
-        for (const a of data) {
-            for (const tarih of [a.trafikBitisTarihi, a.kaskoBitisTarihi]) {
-                const d = parseTarih(tarih);
-                if (!d) continue;
-                const fark = gunFarki(d, now);
-                if (fark <= 30 && fark >= -7) {
-                    yakinYenileme++;
-                    if (fark <= 7) kritikYenileme++;
-                }
-            }
-            toplamSigortaMaliyet += Number(a.trafikSigortaFiyat || 0) + Number(a.kaskoSigortaFiyat || 0);
-            const sube = a.sube || "Belirtilmemiş";
-            subeMap.set(sube, (subeMap.get(sube) || 0) + 1);
-        }
-        const topSube = Array.from(subeMap.entries()).sort((a, b) => b[1] - a[1])[0];
-
-        return {
-            toplamArac: data.length,
-            yakinYenileme,
-            kritikYenileme,
-            toplamSigortaMaliyet,
-            topSube,
-        };
-    }, [araclarQuery.data]);
-
-    // ÇALIŞANLAR
+    // ÇALIŞANLAR — toplam maliyet + aktif + şube bazında brüt/net (ay=toplam zaten kişi bazında yıllık topluyor)
     const calisanAgg = useMemo(() => {
         const data = calisanlarQuery.data ?? [];
         let toplamMaliyet = 0;
-        const subeMap = new Map<string, number>();
-        const statuMap = new Map<string, number>();
+        let aktif = 0;
+        const subeMap = new Map<string, { sube: string; kisi: number; brut: number; net: number }>();
         for (const c of data) {
             toplamMaliyet += Number(c.toplamIsverenMaliyeti || 0);
+            if ((c.statu ?? "Aktif").toLowerCase() === "aktif") aktif++;
             const sube = c.sube || "Belirtilmemiş";
-            subeMap.set(sube, (subeMap.get(sube) || 0) + 1);
-            const statu = c.statu || "Belirsiz";
-            statuMap.set(statu, (statuMap.get(statu) || 0) + 1);
+            const e = subeMap.get(sube) ?? { sube, kisi: 0, brut: 0, net: 0 };
+            e.kisi++;
+            e.brut += Number(c.brutUcret || 0);
+            e.net += Number(c.netUcret || 0);
+            subeMap.set(sube, e);
+        }
+        const subeler = Array.from(subeMap.values()).sort((a, b) => b.brut - a.brut);
+        return { toplamPersonel: data.length, aktif, toplamMaliyet, subeler };
+    }, [calisanlarQuery.data]);
+
+    // ARAÇLAR — tüm trafik & kasko yenilemeleri, en yakın tarihe göre artan
+    const aracRenewals = useMemo(() => {
+        const now = new Date();
+        const items: Array<{ plaka: string; tip: "Trafik" | "Kasko"; tarih: Date; gunKalan: number; sirket: string | null }> = [];
+        for (const a of araclarQuery.data ?? []) {
+            const t = parseTarih(a.trafikBitisTarihi);
+            if (t) items.push({ plaka: a.plaka, tip: "Trafik", tarih: t, gunKalan: gunFarki(t, now), sirket: a.trafikSigortaSirketi });
+            const k = parseTarih(a.kaskoBitisTarihi);
+            if (k) items.push({ plaka: a.plaka, tip: "Kasko", tarih: k, gunKalan: gunFarki(k, now), sirket: a.kaskoSigortaSirketi });
+        }
+        return items.sort((a, b) => a.gunKalan - b.gunKalan);
+    }, [araclarQuery.data]);
+
+    const aracMeta = useMemo(() => {
+        const data = araclarQuery.data ?? [];
+        const subeMap = new Map<string, number>();
+        for (const a of data) {
+            const s = a.sube || "Belirtilmemiş";
+            subeMap.set(s, (subeMap.get(s) || 0) + 1);
         }
         const topSube = Array.from(subeMap.entries()).sort((a, b) => b[1] - a[1])[0];
-        const aktif = statuMap.get("Aktif") ?? statuMap.get("aktif") ?? data.length;
-        return {
-            toplamPersonel: data.length,
-            aktif,
-            toplamMaliyet,
-            topSube,
-        };
-    }, [calisanlarQuery.data]);
+        return { toplamArac: data.length, topSube };
+    }, [araclarQuery.data]);
+
+    // Kart gövdesi: en yakın 4 yenileme (yakın geçmiş dahil)
+    const aracListe = useMemo(() => aracRenewals.filter((r) => r.gunKalan >= -7).slice(0, 4), [aracRenewals]);
+    // Footer: 60 gün penceresi
+    const yaklasanYenilemeler = useMemo(
+        () => aracRenewals.filter((r) => r.gunKalan >= -7 && r.gunKalan <= 60).slice(0, 5),
+        [aracRenewals]
+    );
 
     // TAHSİLAT
     const tahsilatAgg = useMemo(() => {
         const ozet = tahsilatQuery.data?.ozet;
         const mizan = tahsilatQuery.data?.mizan;
         const musteriler = tahsilatQuery.data?.musteriler ?? [];
-        const kirmiziSayi = musteriler.filter((m) => m.riskRengi === "kirmizi").length;
-        const kirmiziCiro = musteriler.filter((m) => m.riskRengi === "kirmizi").reduce((a, m) => a + m.netBakiye, 0);
-        const turuncuSayi = musteriler.filter((m) => m.riskRengi === "turuncu").length;
+        // pattern → riskRengi türet (backend bu alanı yaymıyor)
+        const renkli = musteriler.map((m) => ({ ...m, riskRengi: riskRengiFromPattern(m.pattern) ?? undefined }));
+        const kirmizi = renkli.filter((m) => m.riskRengi === "kirmizi");
+        const turuncu = renkli.filter((m) => m.riskRengi === "turuncu");
         return {
             mizanTarihi: mizan?.mizanTarihi ?? null,
             toplamNetAlacak: ozet?.toplamNetAlacak ?? 0,
             donukSayisi: ozet?.donukSayisi ?? 0,
             donukCiro: ozet?.donukCiro ?? 0,
-            kirmiziSayi,
-            kirmiziCiro,
-            turuncuSayi,
-            riskliMusteriler: musteriler
+            kirmiziSayi: kirmizi.length,
+            kirmiziCiro: kirmizi.reduce((a, m) => a + m.netBakiye, 0),
+            turuncuSayi: turuncu.length,
+            riskliMusteriler: renkli
                 .filter((m) => m.riskRengi === "kirmizi" || m.riskRengi === "turuncu")
                 .sort((a, b) => b.netBakiye - a.netBakiye)
                 .slice(0, 5),
         };
     }, [tahsilatQuery.data]);
 
-    // Yaklaşan sigorta yenilemeleri (araçlardan)
-    const yaklasanYenilemeler = useMemo(() => {
+    // --- AKSİYON MERKEZİ / HEADER ROZETLERİ: tüm modüllerden türetilen uyarılar ---
+    const alerts = useMemo<DashboardAlert[]>(() => {
+        const list: DashboardAlert[] = [];
         const now = new Date();
-        const items: Array<{ plaka: string; tip: "Trafik" | "Kasko"; tarih: Date; gunKalan: number; sirket: string | null }> = [];
-        for (const a of araclarQuery.data ?? []) {
-            const trafikDate = parseTarih(a.trafikBitisTarihi);
-            if (trafikDate) {
-                const fark = gunFarki(trafikDate, now);
-                if (fark >= -7 && fark <= 60) {
-                    items.push({ plaka: a.plaka, tip: "Trafik", tarih: trafikDate, gunKalan: fark, sirket: a.trafikSigortaSirketi });
-                }
+
+        // 1) Araç sigorta yenilemeleri (eşiklere göre)
+        for (const r of aracRenewals) {
+            if (r.gunKalan < -7 || r.gunKalan > thresholds.uyari) continue;
+            const sev: DashboardAlert["sev"] = r.gunKalan <= thresholds.kritik ? "kritik" : "uyari";
+            const title = r.gunKalan < 0
+                ? `${r.plaka} — ${r.tip} sigortası ${Math.abs(r.gunKalan)} gün önce doldu`
+                : `${r.plaka} — ${r.tip} sigortası ${r.gunKalan} gün içinde doluyor`;
+            list.push({ sev, title, meta: "Araçlar" });
+        }
+
+        // 2) Donuk alacaklar (müşteri bazlı, eşiğe göre)
+        const musteriler = tahsilatQuery.data?.musteriler ?? [];
+        for (const m of musteriler) {
+            if (m.gecikme >= thresholds.donuk && m.netBakiye > 0) {
+                list.push({ sev: "kritik", title: `${m.ad} — ${formatCurrencyShort(m.netBakiye)} donuk alacak · ${m.gecikme} gün`, meta: "Tahsilat" });
             }
-            const kaskoDate = parseTarih(a.kaskoBitisTarihi);
-            if (kaskoDate) {
-                const fark = gunFarki(kaskoDate, now);
-                if (fark >= -7 && fark <= 60) {
-                    items.push({ plaka: a.plaka, tip: "Kasko", tarih: kaskoDate, gunKalan: fark, sirket: a.kaskoSigortaSirketi });
+        }
+
+        // 3) Kırmızı riskli müşteriler (özet uyarı) — pattern'den türetilen renk
+        const kirmizi = musteriler.filter((m) => riskRengiFromPattern(m.pattern) === "kirmizi");
+        if (kirmizi.length > 0) {
+            const ciro = kirmizi.reduce((a, m) => a + m.netBakiye, 0);
+            list.push({ sev: "uyari", title: `${kirmizi.length} kırmızı riskli müşteri · toplam ${formatCurrencyShort(ciro)}`, meta: "Tahsilat" });
+        }
+
+        // 4) Başarısız query'ler
+        if (gumrukOzetQuery.isError || gumrukTopQuery.isError) list.push({ sev: "uyari", title: "Gümrük özeti yüklenemedi — bağlantı hatası", meta: "Gümrük" });
+        if (sigortaOzetQuery.isError) list.push({ sev: "uyari", title: "Sigorta özeti yüklenemedi — bağlantı hatası", meta: "Sigorta" });
+        if (calisanlarQuery.isError) list.push({ sev: "uyari", title: "Çalışan verisi yüklenemedi — bağlantı hatası", meta: "Çalışanlar" });
+        if (araclarQuery.isError) list.push({ sev: "uyari", title: "Araç verisi yüklenemedi — bağlantı hatası", meta: "Araçlar" });
+        if (tahsilatQuery.isError) list.push({ sev: "uyari", title: "Tahsilat verisi yüklenemedi — bağlantı hatası", meta: "Tahsilat" });
+
+        // 5) Eksik aylık gümrük verisi (yalnızca içinde bulunulan yıl + geçmiş aylar)
+        if (selectedYear === currentYear && (gumrukOzetQuery.data?.length ?? 0) > 0) {
+            const dolu = new Set((gumrukOzetQuery.data ?? []).filter((r) => r.dosyaSayisi > 0).map((r) => r.ay));
+            for (let i = 0; i < now.getMonth(); i++) {
+                if (!dolu.has(AY_SIRA[i])) {
+                    list.push({ sev: "uyari", title: `${AY_LABEL[AY_SIRA[i]]} gümrük verisi eksik görünüyor`, meta: "Gümrük" });
+                    break;
                 }
             }
         }
-        return items.sort((a, b) => a.gunKalan - b.gunKalan).slice(0, 5);
-    }, [araclarQuery.data]);
 
+        return list.sort((a, b) => (a.sev === b.sev ? 0 : a.sev === "kritik" ? -1 : 1));
+    }, [
+        aracRenewals, tahsilatQuery.data, thresholds, selectedYear, currentYear,
+        gumrukOzetQuery.data, gumrukOzetQuery.isError, gumrukTopQuery.isError,
+        sigortaOzetQuery.isError, calisanlarQuery.isError, araclarQuery.isError, tahsilatQuery.isError,
+    ]);
+
+    const kritikCount = alerts.filter((a) => a.sev === "kritik").length;
+    const uyariCount = alerts.filter((a) => a.sev === "uyari").length;
     const kpiLoading = summaryQuery.isLoading || prevSummaryQuery.isLoading;
+
+    const gumrukLoading = gumrukOzetQuery.isLoading || gumrukTopQuery.isLoading;
+    const gumrukError = gumrukOzetQuery.isError || gumrukTopQuery.isError;
+    const retryGumruk = () => { gumrukOzetQuery.refetch(); gumrukTopQuery.refetch(); };
 
     return (
         <div className="min-h-screen bg-background text-foreground">
-            <div className="mx-auto max-w-[1400px] space-y-8 p-6 md:p-8">
-                {/* HEADER */}
+            <div className="mx-auto max-w-[1400px] space-y-7 p-6 md:p-8">
+                {/* ===== HEADER ===== */}
                 <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                     <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                             Genel Bakış · {selectedYear}
                         </p>
-                        <h1 className="mt-1 text-3xl font-bold tracking-tight">
-                            Finansal Kontrol Paneli
-                        </h1>
-                        <p className="mt-1.5 text-sm text-muted-foreground">
-                            Tüm modüllerin canlı sinyalleri · {tahsilatAgg.mizanTarihi && (
-                                <span>Tahsilat referans: <span className="tabular-nums">{tahsilatAgg.mizanTarihi.split("-").reverse().join("/")}</span></span>
+                        <h1 className="mt-1.5 text-[30px] font-extrabold leading-none tracking-tight">Finansal Kontrol Paneli</h1>
+                        <p className="mt-1.5 text-[13px] text-muted-foreground">
+                            Tüm modüllerin canlı sinyalleri
+                            {tahsilatAgg.mizanTarihi && (
+                                <> · Tahsilat referans: <span className="tabular-nums">{tahsilatAgg.mizanTarihi.split("-").reverse().join("/")}</span></>
                             )}
                         </p>
                     </div>
-                    <div className="flex items-center gap-3">
+
+                    <div className="flex flex-wrap items-center gap-2.5">
+                        {/* Kritik / uyarı rozetleri (öneri 5) */}
+                        <div className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 dark:border-rose-900/60 dark:bg-rose-950/40">
+                            <span className="h-2 w-2 rounded-full bg-rose-500" />
+                            <span className="text-[13px] font-bold tabular-nums text-rose-700 dark:text-rose-400">{kritikCount}</span>
+                            <span className="text-xs text-rose-600/80 dark:text-rose-400/70">kritik</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 dark:border-amber-900/60 dark:bg-amber-950/40">
+                            <span className="h-2 w-2 rounded-full bg-amber-500" />
+                            <span className="text-[13px] font-bold tabular-nums text-amber-700 dark:text-amber-400">{uyariCount}</span>
+                            <span className="text-xs text-amber-600/80 dark:text-amber-400/70">uyarı</span>
+                        </div>
+
+                        {/* Eşikler (öneri 4) */}
+                        <button
+                            type="button"
+                            onClick={() => setConfigOpen((o) => !o)}
+                            className={cn(
+                                "inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium transition-colors",
+                                configOpen
+                                    ? "border-border bg-accent text-foreground"
+                                    : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
+                            )}
+                        >
+                            <SlidersHorizontal className="h-[15px] w-[15px]" />
+                            Eşikler
+                        </button>
+
                         <Select value={selectedYear.toString()} onValueChange={(val) => setSelectedYear(parseInt(val))}>
-                            <SelectTrigger className="w-[120px]">
+                            <SelectTrigger className="w-[110px]">
                                 <SelectValue placeholder="Yıl" />
                             </SelectTrigger>
                             <SelectContent>
@@ -421,7 +528,24 @@ export default function Dashboard() {
                     </div>
                 </header>
 
-                {/* KPI BAR */}
+                {/* ===== EŞİK PANELİ ===== */}
+                {configOpen && (
+                    <Card className="flex flex-col gap-5 border-border/70 bg-card p-5 sm:flex-row sm:flex-wrap sm:items-end">
+                        <div className="sm:flex-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Uyarı Eşikleri · merkezi yapılandırma
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                Sabit kodlanmış değerler yerine düzenlenebilir eşikler. Tüm modüller ve Aksiyon Merkezi bu değerleri kullanır.
+                            </p>
+                        </div>
+                        <ThresholdInput label="Yenileme uyarısı (gün)" value={thresholds.uyari} onChange={setTh("uyari")} />
+                        <ThresholdInput label="Kritik eşik (gün)" value={thresholds.kritik} onChange={setTh("kritik")} />
+                        <ThresholdInput label="Donuk alacak (gün)" value={thresholds.donuk} onChange={setTh("donuk")} />
+                    </Card>
+                )}
+
+                {/* ===== KPI BAR ===== */}
                 <KPISection
                     totalRevenue={aggregates.totalRevenue}
                     totalExpenses={aggregates.totalExpenses}
@@ -432,16 +556,15 @@ export default function Dashboard() {
                     isLoading={kpiLoading}
                 />
 
-                {/* MODÜL HUB */}
-                <section className="space-y-4">
+                {/* ===== MODÜL HUB ===== */}
+                <section className="space-y-3.5">
                     <div className="flex items-baseline justify-between">
-                        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                            Modüller
-                        </h2>
+                        <h2 className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Modüller</h2>
                         <p className="text-xs text-muted-foreground">tıkla → ilgili sayfaya git</p>
                     </div>
+
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {/* GÜMRÜK */}
+                        {/* GÜMRÜK — top-5 firma (tutar) */}
                         <ModuleCard
                             title="Gümrük"
                             href="/gumruk"
@@ -449,50 +572,55 @@ export default function Dashboard() {
                             accent={ACCENTS.gumruk}
                             primaryLabel={`${selectedYear} yıllık ciro`}
                             primaryValue={formatCurrencyShort(gumrukAgg.yillikCiro)}
-                            primaryHint={gumrukAgg.sonAy ? `Son veri: ${gumrukAgg.sonAy.ay}` : "Veri yok"}
-                            isLoading={gumrukOzetQuery.isLoading}
-                            sparkline={<Sparkline values={gumrukAgg.sparkValues} height={36} />}
-                            stats={[
-                                { label: "Dosya sayısı", value: gumrukAgg.dosyaSayisi.toLocaleString("tr-TR") },
-                                { label: "Son ay dosya", value: (gumrukAgg.sonAy?.dosyaSayisi ?? 0).toLocaleString("tr-TR") },
-                            ]}
-                        />
+                            primaryHint={gumrukAgg.sonAy ? `Son veri: ${AY_LABEL[gumrukAgg.sonAy.ay] ?? gumrukAgg.sonAy.ay}` : "Veri yok"}
+                            isLoading={gumrukLoading}
+                            isError={gumrukError}
+                            onRetry={retryGumruk}
+                            errorMessage="Gümrük özeti yüklenemedi (bağlantı hatası)"
+                        >
+                            <ListHeader label="En çok fatura kesilen (tutar) · top 5" />
+                            {gumrukTop.length === 0 ? (
+                                <EmptyRow text="Bu yıl için firma verisi yok" />
+                            ) : (
+                                <div className="flex flex-col gap-2.5">
+                                    {gumrukTop.map((f) => (
+                                        <div key={f.firmaUnvan} className="flex items-center gap-2.5">
+                                            <span className="w-24 shrink-0 truncate text-[12.5px] font-semibold text-slate-700 dark:text-slate-300" title={f.firmaUnvan}>
+                                                {f.firmaUnvan}
+                                            </span>
+                                            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                                                <span className="block h-full rounded-full bg-sky-500" style={{ width: `${f.w}%` }} />
+                                            </span>
+                                            <span className="shrink-0 text-xs font-bold tabular-nums text-foreground">{formatCurrencyFull(f.tutar)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </ModuleCard>
 
-                        {/* TAHSİLAT */}
+                        {/* TAHSİLAT — her zaman güncel (öneri 2) */}
                         <ModuleCard
                             title="Tahsilat"
                             href="/tahsilat"
                             icon={Wallet}
                             accent={ACCENTS.tahsilat}
+                            badge="her zaman güncel"
                             primaryLabel="Toplam net alacak"
                             primaryValue={formatCurrencyShort(tahsilatAgg.toplamNetAlacak)}
                             primaryHint={tahsilatAgg.mizanTarihi ? "mizana göre" : "mizan yüklenmedi"}
                             isLoading={tahsilatQuery.isLoading}
+                            isError={tahsilatQuery.isError}
+                            onRetry={() => tahsilatQuery.refetch()}
+                            errorMessage="Tahsilat verisi yüklenemedi (bağlantı hatası)"
                             stats={[
-                                {
-                                    label: "Kırmızı risk",
-                                    value: `${tahsilatAgg.kirmiziSayi} müşteri`,
-                                    tone: tahsilatAgg.kirmiziSayi > 0 ? "danger" : "default",
-                                },
-                                {
-                                    label: "Turuncu risk",
-                                    value: `${tahsilatAgg.turuncuSayi} müşteri`,
-                                    tone: tahsilatAgg.turuncuSayi > 0 ? "warning" : "default",
-                                },
-                                {
-                                    label: "Kırmızıdaki ciro",
-                                    value: formatCurrencyShort(tahsilatAgg.kirmiziCiro),
-                                    tone: tahsilatAgg.kirmiziCiro > 0 ? "danger" : "default",
-                                },
-                                {
-                                    label: "Donuk müşteri",
-                                    value: `${tahsilatAgg.donukSayisi}`,
-                                    tone: tahsilatAgg.donukSayisi > 0 ? "warning" : "default",
-                                },
+                                { label: "Kırmızı risk", value: `${tahsilatAgg.kirmiziSayi} müşteri`, tone: tahsilatAgg.kirmiziSayi > 0 ? "danger" : "default" },
+                                { label: "Turuncu risk", value: `${tahsilatAgg.turuncuSayi} müşteri`, tone: tahsilatAgg.turuncuSayi > 0 ? "warning" : "default" },
+                                { label: "Kırmızıdaki ciro", value: formatCurrencyShort(tahsilatAgg.kirmiziCiro), tone: tahsilatAgg.kirmiziCiro > 0 ? "danger" : "default" },
+                                { label: "Donuk müşteri", value: `${tahsilatAgg.donukSayisi}`, tone: tahsilatAgg.donukSayisi > 0 ? "warning" : "default" },
                             ]}
                         />
 
-                        {/* ÇALIŞANLAR */}
+                        {/* ÇALIŞANLAR — şube bazında maaş */}
                         <ModuleCard
                             title="Çalışanlar"
                             href="/calisanlar"
@@ -502,13 +630,35 @@ export default function Dashboard() {
                             primaryValue={formatCurrencyShort(calisanAgg.toplamMaliyet)}
                             primaryHint={`${calisanAgg.aktif} aktif personel`}
                             isLoading={calisanlarQuery.isLoading}
-                            stats={[
-                                { label: "Toplam personel", value: `${calisanAgg.toplamPersonel}` },
-                                { label: "En büyük şube", value: calisanAgg.topSube ? `${calisanAgg.topSube[0]} (${calisanAgg.topSube[1]})` : "—" },
-                            ]}
-                        />
+                            isError={calisanlarQuery.isError}
+                            onRetry={() => calisanlarQuery.refetch()}
+                            errorMessage="Çalışan verisi yüklenemedi (bağlantı hatası)"
+                        >
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                                <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Şube bazında maaş · {selectedYear}</p>
+                                <p className="shrink-0 text-[9.5px] uppercase tracking-wide text-muted-foreground/60">brüt / net</p>
+                            </div>
+                            {calisanAgg.subeler.length === 0 ? (
+                                <EmptyRow text="Bu yıl için maaş verisi yok" />
+                            ) : (
+                                <div className="flex flex-col gap-2">
+                                    {calisanAgg.subeler.slice(0, 4).map((s) => (
+                                        <div key={s.sube} className="flex items-center justify-between gap-2.5">
+                                            <div className="min-w-0 truncate">
+                                                <span className="text-[13px] font-semibold text-slate-700 dark:text-slate-300">{s.sube}</span>
+                                                <span className="text-[11px] text-muted-foreground"> · {s.kisi} kişi</span>
+                                            </div>
+                                            <div className="flex shrink-0 flex-col items-end leading-tight tabular-nums">
+                                                <span className="text-[13px] font-bold text-foreground">{formatCurrencyFull(s.brut)}</span>
+                                                <span className="text-[11.5px] font-semibold text-violet-600 dark:text-violet-400">{formatCurrencyFull(s.net)}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </ModuleCard>
 
-                        {/* SİGORTA */}
+                        {/* SİGORTA — hata / retry örneği (öneri 1) */}
                         <ModuleCard
                             title="Sigorta"
                             href="/sigorta"
@@ -516,186 +666,194 @@ export default function Dashboard() {
                             accent={ACCENTS.sigorta}
                             primaryLabel={`${selectedYear} prim toplamı`}
                             primaryValue={formatCurrencyShort(sigortaAgg.toplamPrim)}
-                            primaryHint={sigortaAgg.topSirket ? `Lider: ${sigortaAgg.topSirket[0]}` : "Veri yok"}
+                            primaryHint={sigortaAgg.topSirket ? `Lider: ${sigortaAgg.topSirket[0]}` : "prim toplamı"}
                             isLoading={sigortaOzetQuery.isLoading}
-                            sparkline={<Sparkline values={sigortaAgg.sparkValues} height={32} />}
+                            isError={sigortaOzetQuery.isError}
+                            onRetry={() => sigortaOzetQuery.refetch()}
+                            errorMessage="Sigorta özeti yüklenemedi (bağlantı hatası)"
+                            sparkline={<Sparkline values={sigortaAgg.sparkValues} height={34} />}
                             stats={[
                                 { label: "Poliçe sayısı", value: sigortaAgg.toplamPolice.toLocaleString("tr-TR") },
-                                { label: "Lider prim", value: sigortaAgg.topSirket ? formatCurrencyShort(sigortaAgg.topSirket[1]) : "—" },
+                                { label: "Lider", value: sigortaAgg.topSirket ? sigortaAgg.topSirket[0] : "—" },
                             ]}
                         />
 
-                        {/* ARAÇLAR */}
+                        {/* ARAÇLAR — en yakın sigorta tarihi · her zaman güncel (öneri 2) */}
                         <ModuleCard
                             title="Araçlar"
                             href="/araclar"
                             icon={Car}
                             accent={ACCENTS.araclar}
+                            badge="her zaman güncel"
                             primaryLabel="Filo büyüklüğü"
-                            primaryValue={`${aracAgg.toplamArac} araç`}
-                            primaryHint={aracAgg.topSube ? `${aracAgg.topSube[0]} en kalabalık` : undefined}
+                            primaryValue={`${aracMeta.toplamArac} araç`}
+                            primaryHint={aracMeta.topSube ? `${aracMeta.topSube[0]} en kalabalık` : undefined}
                             isLoading={araclarQuery.isLoading}
-                            stats={[
-                                {
-                                    label: "Yakın yenileme (30 gün)",
-                                    value: `${aracAgg.yakinYenileme}`,
-                                    tone: aracAgg.yakinYenileme > 0 ? "warning" : "default",
-                                },
-                                {
-                                    label: "Kritik (≤7 gün)",
-                                    value: `${aracAgg.kritikYenileme}`,
-                                    tone: aracAgg.kritikYenileme > 0 ? "danger" : "default",
-                                },
-                                { label: "Yıllık sigorta", value: formatCurrencyShort(aracAgg.toplamSigortaMaliyet) },
-                            ]}
-                        />
+                            isError={araclarQuery.isError}
+                            onRetry={() => araclarQuery.refetch()}
+                            errorMessage="Araç verisi yüklenemedi (bağlantı hatası)"
+                        >
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                                <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">En yakın sigorta tarihi · araç</p>
+                                <p className="shrink-0 text-[9.5px] uppercase tracking-wide text-muted-foreground/60">kalan</p>
+                            </div>
+                            {aracListe.length === 0 ? (
+                                <EmptyRow text="Yakın yenileme yok ✓" />
+                            ) : (
+                                <div className="flex flex-col gap-2">
+                                    {aracListe.map((v, i) => {
+                                        const overdue = v.gunKalan < 0;
+                                        const kritik = !overdue && v.gunKalan <= thresholds.kritik;
+                                        const yaklasan = !overdue && !kritik && v.gunKalan <= thresholds.uyari;
+                                        return (
+                                            <div key={`${v.plaka}-${v.tip}-${i}`} className="flex items-center justify-between gap-2.5">
+                                                <div className="min-w-0 truncate">
+                                                    <span className="text-[13px] font-semibold tabular-nums text-slate-700 dark:text-slate-300">{v.plaka}</span>
+                                                    <span className="text-[11px] text-muted-foreground"> · {v.tip}</span>
+                                                </div>
+                                                <span className={cn(
+                                                    "shrink-0 text-[13px] font-bold tabular-nums",
+                                                    overdue || kritik ? "text-rose-600 dark:text-rose-400"
+                                                        : yaklasan ? "text-amber-600 dark:text-amber-400"
+                                                            : "text-slate-500 dark:text-slate-400"
+                                                )}>
+                                                    {overdue ? `${Math.abs(v.gunKalan)} gün gecikti` : `${v.gunKalan} gün`}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </ModuleCard>
 
-                        {/* Boşluk doldurucu — 6. slot: hızlı yönlendirme paneli */}
-                        <Card className="border-dashed border-border/70 bg-card/40">
-                            <CardContent className="flex h-full flex-col justify-between p-5">
+                        {/* AKSİYON MERKEZİ — filler kart yerine (öneri 3) */}
+                        <div className="relative flex flex-col gap-3 overflow-hidden rounded-[14px] border border-slate-800 bg-gradient-to-b from-slate-900 to-slate-800 p-5 text-white">
+                            <div className="flex items-start justify-between gap-2">
                                 <div>
-                                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Diğer Modüller</p>
-                                    <h3 className="mt-1 text-sm font-semibold">Hızlı erişim</h3>
+                                    <p className="text-[10.5px] uppercase tracking-[0.1em] text-slate-400">Aksiyon Merkezi</p>
+                                    <h3 className="mt-0.5 text-sm font-semibold">Şimdi dikkat gerektirenler</h3>
                                 </div>
-                                <div className="mt-4 flex flex-col gap-1.5">
-                                    <QuickLink href="/nakliye" label="Nakliye" />
-                                    <QuickLink href="/raporlar" label="Raporlar" />
-                                    <QuickLink href="/hesaplamalar" label="Hesaplamalar (Maaş/Vergi)" />
-                                    <QuickLink href="/iso9001" label="ISO 9001 Kalite Yönetimi" />
+                                <div className="flex items-baseline gap-1">
+                                    <span className="text-2xl font-extrabold tabular-nums text-rose-400">{kritikCount}</span>
+                                    <span className="text-[11px] text-slate-400">kritik</span>
                                 </div>
-                            </CardContent>
-                        </Card>
+                            </div>
+
+                            {alerts.length === 0 ? (
+                                <p className="flex-1 py-6 text-center text-xs text-slate-400">Aktif uyarı yok ✓</p>
+                            ) : (
+                                <div className="flex flex-col gap-1.5">
+                                    {alerts.slice(0, 5).map((a, i) => (
+                                        <div key={i} className="flex items-start gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2.5 py-2">
+                                            <span className={cn("mt-[5px] h-[7px] w-[7px] shrink-0 rounded-full", a.sev === "kritik" ? "bg-rose-400" : "bg-amber-400")} />
+                                            <div className="min-w-0">
+                                                <p className="text-xs font-medium leading-snug text-slate-200">{a.title}</p>
+                                                <p className="mt-0.5 text-[10px] uppercase tracking-wide text-slate-500">{a.meta}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {alerts.length > 5 && (
+                                <p className="mt-auto pt-1 text-[11px] text-slate-500">+{alerts.length - 5} olay daha →</p>
+                            )}
+                        </div>
                     </div>
                 </section>
 
-                {/* TREND CHART */}
+                {/* ===== TREND CHART (öneri 6) ===== */}
                 <TrendChart
                     data={chartData}
-                    description={`${selectedYear} aylık gelir/gider eğrisi · Gider = genel + personel maliyeti`}
+                    target={aylikHedef}
+                    description={`${selectedYear} aylık gelir/gider · geçen yıl gelir çizgisi ve aylık hedef ile · Gider = genel + personel maliyeti`}
                 />
 
-                {/* FOOTER LİSTELER */}
+                {/* ===== FOOTER LİSTELER ===== */}
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                     {/* En riskli müşteriler */}
-                    <Card className="border-border/70 bg-card">
-                        <CardHeader className="flex flex-row items-start justify-between space-y-0">
+                    <Card className="border-border/70 bg-card p-5">
+                        <div className="mb-3.5 flex items-start justify-between gap-3">
                             <div>
-                                <CardTitle className="flex items-center gap-2 text-base">
+                                <h3 className="flex items-center gap-2 text-[15px] font-bold tracking-tight">
                                     <AlertTriangle className="h-4 w-4 text-rose-500" />
                                     En Yüksek Riskli Müşteriler
-                                </CardTitle>
-                                <CardDescription className="text-xs">
-                                    Tahsilat modülünden kırmızı + turuncu, ciroya göre top 5
-                                </CardDescription>
+                                </h3>
+                                <p className="mt-1 text-xs text-muted-foreground">Kırmızı + turuncu, ciroya göre top 5</p>
                             </div>
-                            <Link href="/tahsilat" className="text-xs font-medium text-muted-foreground hover:text-foreground">
-                                Tümü →
-                            </Link>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
+                            <Link href="/tahsilat" className="shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground">Tümü →</Link>
+                        </div>
+                        <div className="space-y-2">
                             {tahsilatQuery.isLoading ? (
-                                <div className="space-y-2">
-                                    {[0, 1, 2, 3].map((i) => (
-                                        <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
-                                    ))}
-                                </div>
+                                [0, 1, 2, 3].map((i) => <div key={i} className="h-[52px] animate-pulse rounded-lg bg-muted" />)
                             ) : tahsilatAgg.riskliMusteriler.length === 0 ? (
-                                <p className="py-8 text-center text-sm text-muted-foreground">
-                                    Riskli müşteri yok ✓
-                                </p>
+                                <p className="py-8 text-center text-sm text-muted-foreground">Riskli müşteri yok ✓</p>
                             ) : (
                                 tahsilatAgg.riskliMusteriler.map((m) => (
-                                    <div
-                                        key={m.musteriId}
-                                        className="flex items-center justify-between gap-3 rounded-md border border-border/40 p-3"
-                                    >
+                                    <div key={m.musteriId} className="flex items-center justify-between gap-3 rounded-lg border border-border/50 p-3">
                                         <div className="flex min-w-0 items-center gap-3">
-                                            <span
-                                                className={cn(
-                                                    "h-2 w-2 shrink-0 rounded-full",
-                                                    m.riskRengi === "kirmizi" ? "bg-rose-500" : "bg-amber-500"
-                                                )}
-                                            />
+                                            <span className={cn("h-2 w-2 shrink-0 rounded-full", m.riskRengi === "kirmizi" ? "bg-rose-500" : "bg-amber-500")} />
                                             <div className="min-w-0">
-                                                <p className="truncate text-sm font-medium">{m.ad}</p>
-                                                <p className="truncate text-[11px] text-muted-foreground">
-                                                    {m.sektor || "Sektör belirsiz"} · {m.gecikme} gün gecikme
-                                                </p>
+                                                <p className="truncate text-[13.5px] font-semibold">{m.ad}</p>
+                                                <p className="truncate text-[11px] text-muted-foreground">{m.sektor || "Sektör belirsiz"} · {m.gecikme} gün gecikme</p>
                                             </div>
                                         </div>
-                                        <div className="text-right">
-                                            <p className="text-sm font-semibold tabular-nums">
-                                                {formatCurrency(m.netBakiye)}
-                                            </p>
+                                        <div className="shrink-0 text-right">
+                                            <p className="text-[13.5px] font-bold tabular-nums">{formatCurrencyFull(m.netBakiye)}</p>
                                             {m.vipRozeti && (
-                                                <Badge variant="outline" className="mt-0.5 h-4 px-1.5 text-[9px]">
-                                                    VIP
-                                                </Badge>
+                                                <span className="mt-0.5 inline-block rounded border border-violet-300 px-1.5 py-px text-[9px] font-semibold tracking-wide text-violet-600 dark:border-violet-700 dark:text-violet-400">VIP</span>
                                             )}
                                         </div>
                                     </div>
                                 ))
                             )}
-                        </CardContent>
+                        </div>
                     </Card>
 
                     {/* Yaklaşan sigorta yenilemeleri */}
-                    <Card className="border-border/70 bg-card">
-                        <CardHeader className="flex flex-row items-start justify-between space-y-0">
+                    <Card className="border-border/70 bg-card p-5">
+                        <div className="mb-3.5 flex items-start justify-between gap-3">
                             <div>
-                                <CardTitle className="flex items-center gap-2 text-base">
+                                <h3 className="flex items-center gap-2 text-[15px] font-bold tracking-tight">
                                     <CalendarClock className="h-4 w-4 text-amber-500" />
                                     Yaklaşan Sigorta Yenilemeleri
-                                </CardTitle>
-                                <CardDescription className="text-xs">
-                                    Trafik & kasko · 60 gün içinde dolan + 7 gün geçmiş
-                                </CardDescription>
+                                </h3>
+                                <p className="mt-1 text-xs text-muted-foreground">Trafik & kasko · 60 gün içinde dolan + 7 gün geçmiş</p>
                             </div>
-                            <Link href="/araclar" className="text-xs font-medium text-muted-foreground hover:text-foreground">
-                                Tümü →
-                            </Link>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
+                            <Link href="/araclar" className="shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground">Tümü →</Link>
+                        </div>
+                        <div className="space-y-2">
                             {araclarQuery.isLoading ? (
-                                <div className="space-y-2">
-                                    {[0, 1, 2, 3].map((i) => (
-                                        <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
-                                    ))}
-                                </div>
+                                [0, 1, 2, 3].map((i) => <div key={i} className="h-[52px] animate-pulse rounded-lg bg-muted" />)
                             ) : yaklasanYenilemeler.length === 0 ? (
-                                <p className="py-8 text-center text-sm text-muted-foreground">
-                                    Yakın zamanda yenilenecek poliçe yok ✓
-                                </p>
+                                <p className="py-8 text-center text-sm text-muted-foreground">Yakın zamanda yenilenecek poliçe yok ✓</p>
                             ) : (
                                 yaklasanYenilemeler.map((y, i) => {
                                     const overdue = y.gunKalan < 0;
-                                    const critical = y.gunKalan >= 0 && y.gunKalan <= 7;
+                                    const kritik = !overdue && y.gunKalan <= thresholds.kritik;
+                                    const yaklasan = !overdue && !kritik && y.gunKalan <= thresholds.uyari;
                                     return (
-                                        <div key={i} className="flex items-center justify-between gap-3 rounded-md border border-border/40 p-3">
+                                        <div key={`${y.plaka}-${y.tip}-${i}`} className="flex items-center justify-between gap-3 rounded-lg border border-border/50 p-3">
                                             <div className="min-w-0">
-                                                <p className="truncate text-sm font-medium tabular-nums">{y.plaka}</p>
-                                                <p className="truncate text-[11px] text-muted-foreground">
-                                                    {y.tip} · {y.sirket || "şirket belirsiz"}
-                                                </p>
+                                                <p className="truncate text-[13.5px] font-semibold tabular-nums">{y.plaka}</p>
+                                                <p className="truncate text-[11px] text-muted-foreground">{y.tip} · {y.sirket || "şirket belirsiz"}</p>
                                             </div>
-                                            <div className="text-right">
+                                            <div className="shrink-0 text-right">
                                                 <p className={cn(
-                                                    "text-sm font-semibold tabular-nums",
-                                                    overdue ? "text-rose-600 dark:text-rose-400" :
-                                                        critical ? "text-amber-600 dark:text-amber-400" :
-                                                            "text-foreground"
+                                                    "text-[13px] font-bold tabular-nums",
+                                                    overdue || kritik ? "text-rose-600 dark:text-rose-400"
+                                                        : yaklasan ? "text-amber-600 dark:text-amber-400"
+                                                            : "text-foreground"
                                                 )}>
                                                     {overdue ? `${Math.abs(y.gunKalan)} gün gecikti` : `${y.gunKalan} gün`}
                                                 </p>
-                                                <p className="text-[10px] text-muted-foreground tabular-nums">
-                                                    {y.tarih.toLocaleDateString("tr-TR")}
-                                                </p>
+                                                <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">{formatTarihKisa(y.tarih)}</p>
                                             </div>
                                         </div>
                                     );
                                 })
                             )}
-                        </CardContent>
+                        </div>
                     </Card>
                 </div>
             </div>
@@ -703,13 +861,26 @@ export default function Dashboard() {
     );
 }
 
-function QuickLink({ href, label }: { href: string; label: string }) {
+// ----------------- Yardımcı bileşenler -----------------
+function ThresholdInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
     return (
-        <Link href={href}>
-            <div className="group flex items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent">
-                <span className="text-foreground/80 group-hover:text-foreground">{label}</span>
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-            </div>
-        </Link>
+        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+            {label}
+            <input
+                type="number"
+                value={value}
+                min={0}
+                onChange={(e) => onChange(parseInt(e.target.value))}
+                className="w-24 rounded-lg border border-border bg-background px-2.5 py-1.5 text-[13px] tabular-nums text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+        </label>
     );
+}
+
+function ListHeader({ label }: { label: string }) {
+    return <p className="mb-2 text-[10.5px] uppercase tracking-wide text-muted-foreground">{label}</p>;
+}
+
+function EmptyRow({ text }: { text: string }) {
+    return <p className="py-2 text-[12px] text-muted-foreground">{text}</p>;
 }

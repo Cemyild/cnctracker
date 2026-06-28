@@ -1,6 +1,6 @@
 import { TrendingUp, TrendingDown, Minus, DollarSign, Wallet, ArrowDownToLine, Percent } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatCurrency, formatCurrencyShort, cn } from "@/lib/utils";
+import { formatCurrencyFull, formatCurrencyShort, cn } from "@/lib/utils";
 
 interface KPISectionProps {
     totalRevenue: number;
@@ -66,28 +66,28 @@ export function KPISection({
     const items: KPIItem[] = [
         {
             label: "Toplam Gelir",
-            value: formatCurrency(totalRevenue),
+            value: formatCurrencyFull(totalRevenue),
             delta: previousYear ? pctDelta(totalRevenue, previousYear.totalRevenue) : null,
             icon: DollarSign,
             accent: "text-emerald-600 dark:text-emerald-400",
         },
         {
             label: "Toplam Gider",
-            value: formatCurrency(totalExpenses),
+            value: formatCurrencyFull(totalExpenses),
             delta: previousYear ? pctDelta(totalExpenses, previousYear.totalExpenses) : null,
             invertColor: true, // gider artması iyi değil
             icon: Wallet,
             accent: "text-rose-600 dark:text-rose-400",
         },
         {
-            label: "Net Kar",
-            value: formatCurrency(netProfit),
+            label: "Net Kâr",
+            value: formatCurrencyFull(netProfit),
             delta: previousYear ? pctDelta(netProfit, previousYear.netProfit) : null,
             icon: ArrowDownToLine,
             accent: netProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400",
         },
         {
-            label: "Kar Marjı",
+            label: "Kâr Marjı",
             value: `%${profitMargin.toFixed(1)}`,
             delta: previousYear && previousYear.profitMargin !== 0 ? profitMargin - previousYear.profitMargin : null,
             icon: Percent,
@@ -116,7 +116,7 @@ export function KPISection({
                         <div className="mt-3 flex items-center justify-between">
                             {isLoading ? (
                                 <div className="h-4 w-32 animate-pulse rounded bg-muted" />
-                            ) : it.label === "Kar Marjı" && it.delta !== null ? (
+                            ) : it.label === "Kâr Marjı" && it.delta !== null ? (
                                 <span className={cn(
                                     "inline-flex items-center gap-1 text-[11px] font-medium tabular-nums",
                                     it.delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"

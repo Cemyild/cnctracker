@@ -53,6 +53,8 @@ export interface IStorage {
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
   getExistingKompozitKeysByAyYillar(pairs: { ay: string; yil: number }[]): Promise<Set<string>>;
   getAylikOzet(yil: number): Promise<{ ay: string; yil: number; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
+  // Dashboard: firma bazında fatura tutarına göre ilk N (DB tarafında GROUP BY + LIMIT)
+  getGumrukTopFirmalar(yil: number, limit?: number): Promise<{ firmaUnvan: string; tutar: number; dosyaSayisi: number }[]>;
   getFirmalar(yil: number): Promise<string[]>;
   getAllUniqueFirmalar(): Promise<string[]>;
   getFirmaAylikOzet(yil: number, firma: string): Promise<{ ay: string; toplamSatis: number; toplamKdv: number; dosyaSayisi: number }[]>;
@@ -591,6 +593,30 @@ export class DatabaseStorage implements IStorage {
     }, {});
 
     return Object.values(grouped);
+  }
+
+  async getGumrukTopFirmalar(yil: number, limit: number = 5): Promise<{ firmaUnvan: string; tutar: number; dosyaSayisi: number }[]> {
+    // Fatura tutarı = malBedeli (KDV'siz) — kartın "yıllık ciro" başlığıyla aynı temel.
+    // Böylece firma barlarının toplamı yıllık ciroyla tutarlı kalır.
+    const result = await db
+      .select({
+        firmaUnvan: gumrukVerileri.firmaUnvan,
+        tutar: sql<string>`coalesce(sum(${gumrukVerileri.malBedeli}), 0)`,
+        dosyaSayisi: sql<number>`count(*)::int`,
+      })
+      .from(gumrukVerileri)
+      .where(and(eq(gumrukVerileri.yil, yil), isNotNull(gumrukVerileri.firmaUnvan)))
+      .groupBy(gumrukVerileri.firmaUnvan)
+      .orderBy(sql`sum(${gumrukVerileri.malBedeli}) desc nulls last`)
+      .limit(limit);
+
+    return result
+      .map((r) => ({
+        firmaUnvan: (r.firmaUnvan ?? "Bilinmeyen").trim() || "Bilinmeyen",
+        tutar: Number(r.tutar),
+        dosyaSayisi: Number(r.dosyaSayisi),
+      }))
+      .filter((r) => r.tutar > 0);
   }
 
   async getAllUniqueFirmalar(): Promise<string[]> {

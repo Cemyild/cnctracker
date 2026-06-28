@@ -2590,6 +2590,19 @@ export async function registerRoutes(
     }
   });
 
+  // Dashboard: en çok fatura kesilen firmalar (tutar bazlı top-N)
+  app.get("/api/dashboard/gumruk-top-firmalar/:yil", async (req, res) => {
+    try {
+      const { yil } = req.params;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 5;
+      const firmalar = await storage.getGumrukTopFirmalar(parseInt(yil), limit);
+      res.json(firmalar);
+    } catch (error) {
+      console.error("Gümrük top firmalar hatası:", error);
+      res.status(500).json({ error: "Firma sıralaması alınamadı" });
+    }
+  });
+
   // Firma listesi getir (spesifik route - önce tanımlanmalı)
   app.get("/api/gumruk/firmalar/:yil", async (req, res) => {
     try {
