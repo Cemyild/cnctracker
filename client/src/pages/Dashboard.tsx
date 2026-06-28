@@ -23,9 +23,10 @@ import type { Arac } from "@shared/schema";
 // ----------------- Tipler -----------------
 interface OzetSummaryRow {
     ay: string;
-    satisToplam: number;
-    giderToplam: number;
-    calisanMaliyet: number;
+    // KPI'lar Gümrük Özet sayfasıyla (FinancialOverview.tsx) birebir aynı: ciro & gider KDV HARİÇ.
+    satisKdvHaric: number;   // ciro (KDV hariç)
+    giderKdvHaric: number;   // mal/hizmet gideri (KDV hariç)
+    calisanMaliyet: number;  // personel maliyeti (tüm şubeler)
 }
 
 interface GumrukAylikOzet {
@@ -239,9 +240,9 @@ export default function Dashboard() {
         const data = summaryQuery.data ?? [];
         return data.reduce(
             (acc, c) => ({
-                totalRevenue: acc.totalRevenue + (c.satisToplam || 0),
-                totalExpenses: acc.totalExpenses + (c.giderToplam || 0) + (c.calisanMaliyet || 0),
-                generalExpenses: acc.generalExpenses + (c.giderToplam || 0),
+                totalRevenue: acc.totalRevenue + (c.satisKdvHaric || 0),
+                totalExpenses: acc.totalExpenses + (c.giderKdvHaric || 0) + (c.calisanMaliyet || 0),
+                generalExpenses: acc.generalExpenses + (c.giderKdvHaric || 0),
                 personnelExpenses: acc.personnelExpenses + (c.calisanMaliyet || 0),
             }),
             { totalRevenue: 0, totalExpenses: 0, generalExpenses: 0, personnelExpenses: 0 }
@@ -252,8 +253,8 @@ export default function Dashboard() {
         const data = prevSummaryQuery.data ?? [];
         return data.reduce(
             (acc, c) => ({
-                totalRevenue: acc.totalRevenue + (c.satisToplam || 0),
-                totalExpenses: acc.totalExpenses + (c.giderToplam || 0) + (c.calisanMaliyet || 0),
+                totalRevenue: acc.totalRevenue + (c.satisKdvHaric || 0),
+                totalExpenses: acc.totalExpenses + (c.giderKdvHaric || 0) + (c.calisanMaliyet || 0),
             }),
             { totalRevenue: 0, totalExpenses: 0 }
         );
@@ -276,9 +277,9 @@ export default function Dashboard() {
             const p = prev.get(ay);
             return {
                 ay,
-                gelir: c?.satisToplam ?? 0,
-                gider: (c?.giderToplam ?? 0) + (c?.calisanMaliyet ?? 0),
-                prevGelir: p?.satisToplam ?? 0,
+                gelir: c?.satisKdvHaric ?? 0,
+                gider: (c?.giderKdvHaric ?? 0) + (c?.calisanMaliyet ?? 0),
+                prevGelir: p?.satisKdvHaric ?? 0,
             };
         });
     }, [summaryQuery.data, prevSummaryQuery.data]);
@@ -766,7 +767,7 @@ export default function Dashboard() {
                 <TrendChart
                     data={chartData}
                     target={aylikHedef}
-                    description={`${selectedYear} aylık gelir/gider · geçen yıl gelir çizgisi ve aylık hedef ile · Gider = genel + personel maliyeti`}
+                    description={`${selectedYear} aylık ciro/gider (KDV hariç) · geçen yıl ciro çizgisi ve aylık hedef ile · Gider = mal/hizmet + personel maliyeti`}
                 />
 
                 {/* ===== FOOTER LİSTELER ===== */}
