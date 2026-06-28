@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { type Calisan, type Gider, type GumrukVerisi, subeler } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+import { formatCurrency, formatCurrencyFull, formatCurrencyShort, cn } from "@/lib/utils";
 import {
   TrendingUp,
   FileSpreadsheet,
@@ -46,6 +47,16 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Download as DownloadIcon, X as XIcon } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -59,13 +70,13 @@ import {
   XAxis, 
   YAxis, 
   CartesianGrid, 
-  Tooltip, 
+  Tooltip,
   ComposedChart,
-  Cell
+  Cell,
+  LabelList
 } from "recharts";
 import { ExcelUploadModal } from "@/components/ExcelUploadModal";
 import { FinancialOverview } from "@/components/FinancialOverview";
-import { BackgroundPaths } from "@/components/BackgroundPaths";
 import { AdvancedChart } from "@/components/AdvancedChart";
 import { AnalysisTab } from "@/components/AnalysisTab";
 import { AIChat } from "@/components/AIChat";
@@ -88,25 +99,6 @@ import { AIChat } from "@/components/AIChat";
         const currentYear = new Date().getFullYear();
         // Şu anki yıldan 1 yıl ileri ve 3 yıl geriye giden yıllar (örn: 2027, 2026, 2025, 2024, 2023)
         const yillar = Array.from({length: 5 }, (_, i) => currentYear + 1 - i);
-
-        function formatCurrency(value: string | number | null): string {
-  if (value === null || value === undefined) return "₺0,00";
-        const num = typeof value === "string" ? parseFloat(value) : value;
-        return new Intl.NumberFormat("tr-TR", {
-          style: "currency",
-        currency: "TRY",
-  }).format(num);
-}
-
-        function formatCurrencyShort(value: number): string {
-  if (value >= 1000000) {
-    return `₺${(value / 1000000).toFixed(1)}M`;
-  }
-  if (value >= 1000) {
-    return `₺${(value / 1000).toFixed(0)}K`;
-  }
-        return `₺${value.toFixed(0)}`;
-}
 
         function getAyLabel(value: string): string {
   return aylar.find((a) => a.value === value)?.label || value;
@@ -142,6 +134,21 @@ function formatTarihDisplay(value: string | null | undefined): string {
         dosyaSayisi: number;
 };
 
+        type OzetSummaryRow = {
+          ay: string;
+        satisKdvHaric: number;
+        satisKdv: number;
+        satisToplam: number;
+        giderKdvHaric: number;
+        giderKdv: number;
+        giderToplam: number;
+        calisanBrut: number;
+        calisanNet: number;
+        calisanIsverenSgk: number;
+        calisanMaliyet: number;
+        yonetimNetUcret?: number;
+};
+
         const chartMetricOptions = [
         {value: "satis", label: "Aylık Satış (KDV Hariç)" },
         {value: "dosya", label: "Dosya Sayısı" },
@@ -165,7 +172,8 @@ type Arac = {
 
         export default function Gumruk() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-        const [selectedAy, setSelectedAy] = useState<string>("");
+        const [selectedAy, setSelectedAy] = useState<string>(""); // Satışlar "Ay Bazlı Detay" filtresi
+          const [selectedOzetAy, setSelectedOzetAy] = useState<string>("tum_yil"); // Özet tab ay filtresi (ayrı — Satışlar'a sızmasın)
           const [selectedYil, setSelectedYil] = useState<string>(String(currentYear));
             const [chartMetric, setChartMetric] = useState<ChartMetric>("satis");
               const [selectedFirma, setSelectedFirma] = useState<string>("");
@@ -177,6 +185,8 @@ type Arac = {
                     const [sortConfig, setSortConfig] = useState<{ key: keyof Gider | 'tryTutar' | null; direction: 'asc' | 'desc' }>({key: 'tarih', direction: 'desc' });
                     const [editingGider, setEditingGider] = useState<Gider | null>(null);
                     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+                    const [clearMonthOpen, setClearMonthOpen] = useState(false);
+                    const [undoTarget, setUndoTarget] = useState<{ id: string; filename: string; kayitSayisi: number } | null>(null);
                     const { toast } = useToast();
 
                     const { data: categories } = useQuery<{id: string, name: string}[]>({
@@ -291,20 +301,13 @@ type Arac = {
   });
 
                     // Özet Summary Data
-                    const {data: ozetSummary, isLoading: ozetSummaryLoading } = useQuery<{
-    ay: string;
-                    satisKdvHaric: number;
-                    satisKdv: number;
-                    satisToplam: number;
-                    giderKdvHaric: number;
-                    giderKdv: number;
-                    giderToplam: number;
-                    calisanBrut: number;
-                    calisanNet: number;
-                    calisanIsverenSgk: number;
-                    calisanMaliyet: number;
-  }[]>({
+                    const {data: ozetSummary, isLoading: ozetSummaryLoading } = useQuery<OzetSummaryRow[]>({
                       queryKey: [`/api/gumruk/ozet-summary/${selectedYil}`],
+  });
+
+                    // Geçen yıl ozet-summary — Özet KPI YoY delta'ları için
+                    const {data: prevOzetSummary } = useQuery<OzetSummaryRow[]>({
+                      queryKey: [`/api/gumruk/ozet-summary/${Number(selectedYil) - 1}`],
   });
 
                     // Yükleme geçmişi (Upload history)
@@ -499,6 +502,20 @@ type Arac = {
       .sort((a, b) => b[1] - a[1])
                     : [];
 
+                    // Çalışan (giriş elemanı) bazında kesilen fatura tutarı (seçili ay için)
+                    // veriler zaten girisElemani + topFaturaTutar içeriyor → ekstra backend sorgusuna gerek yok.
+                    const calisanFaturalari = veriler
+                    ? Object.entries(
+      veriler.reduce((acc, v) => {
+        const calisan = v.girisElemani || "Bilinmeyen";
+                    acc[calisan] = (acc[calisan] || 0) + parseFloat(v.topFaturaTutar || "0");
+                    return acc;
+      }, { } as Record<string, number>)
+                    )
+      .sort((a, b) => b[1] - a[1])
+                    .slice(0, 5)
+                    : [];
+
                     // Gider ay listesi (Yıllık toplama ek olarak)
                     const giderAylar = [{value: "toplam", label: "Yıllık Toplam" }, ...aylar];
 
@@ -574,11 +591,9 @@ type Arac = {
 
 
                     return (
-                    <div className="relative min-h-full">
-                      <BackgroundPaths />
-
-                      <div className="relative z-10 p-6 lg:p-8 space-y-6">
-                        <Tabs defaultValue="satis" className="w-full">
+                    <div className="min-h-full bg-slate-50 dark:bg-background">
+                      <div className="p-6 lg:p-8 space-y-6">
+                        <Tabs defaultValue="ozet" className="w-full">
                           <TabsList className="mb-4">
                             <TabsTrigger value="ozet">Özet</TabsTrigger>
                             <TabsTrigger value="satis">Satışlar</TabsTrigger>
@@ -616,39 +631,34 @@ type Arac = {
 
 
                           <TabsContent value="ozet" className="space-y-6">
-                            {/* Filter Selectors */}
-                            <div className="flex items-center gap-4">
-                              <div className="flex items-center gap-2">
-                                <label className="text-sm font-medium">Yıl:</label>
-                                <Select value={selectedYil} onValueChange={setSelectedYil}>
-                                  <SelectTrigger className="w-[120px]">
-                                    <SelectValue placeholder="Yıl" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {yillar.map((yil) => (
-                                      <SelectItem key={yil} value={String(yil)}>
-                                        {yil}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                <label className="text-sm font-medium">Ay:</label>
-                                <Select value={selectedAy} onValueChange={setSelectedAy}>
-                                  <SelectTrigger className="w-[140px]">
-                                    <SelectValue placeholder="Tüm Yıl" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="tum_yil">Tüm Yıl</SelectItem>
-                                    {aylar.map((ay) => (
-                                      <SelectItem key={ay.value} value={ay.value}>
-                                        {ay.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                            {/* Sticky filtre barı */}
+                            <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-2 border-b border-border/70 bg-slate-50/85 px-6 py-4 backdrop-blur dark:bg-background/85 lg:-mx-8 lg:px-8">
+                              <div className="flex flex-wrap items-end justify-between gap-4">
+                                <div>
+                                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Gümrük · Özet · {selectedYil}</p>
+                                  <h2 className="mt-1 text-2xl font-extrabold tracking-tight">Finansal Özet</h2>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium text-muted-foreground">Yıl</span>
+                                    <Select value={selectedYil} onValueChange={setSelectedYil}>
+                                      <SelectTrigger className="w-[110px]"><SelectValue placeholder="Yıl" /></SelectTrigger>
+                                      <SelectContent>
+                                        {yillar.map((yil) => (<SelectItem key={yil} value={String(yil)}>{yil}</SelectItem>))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium text-muted-foreground">Ay</span>
+                                    <Select value={selectedOzetAy} onValueChange={setSelectedOzetAy}>
+                                      <SelectTrigger className="w-[130px]"><SelectValue placeholder="Tüm Yıl" /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="tum_yil">Tüm Yıl</SelectItem>
+                                        {aylar.map((ay) => (<SelectItem key={ay.value} value={ay.value}>{ay.label}</SelectItem>))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
                               </div>
                             </div>
 
@@ -662,15 +672,16 @@ type Arac = {
                                 {/* Financial Overview Visualization */}
                                 <FinancialOverview
                                   data={ozetSummary}
+                                  prevData={prevOzetSummary}
                                   year={selectedYil}
-                                  selectedMonth={selectedAy === "tum_yil" || selectedAy === "" ? undefined : selectedAy}
+                                  selectedMonth={selectedOzetAy === "tum_yil" || selectedOzetAy === "" ? undefined : selectedOzetAy}
                                 />
 
                                 {/* Satışlar Section */}
                                 <Card>
                                   <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                      <TrendingUp className="w-5 h-5" />
+                                    <CardTitle className="flex items-center gap-2 text-[15px] font-bold">
+                                      <span className="h-2 w-2 rounded-[2px]" style={{ background: "#059669" }} />
                                       Satışlar
                                     </CardTitle>
                                   </CardHeader>
@@ -688,9 +699,9 @@ type Arac = {
                                         {ozetSummary.map((item) => (
                                           <TableRow key={item.ay}>
                                             <TableCell className="font-medium">{getAyLabel(item.ay)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(item.satisKdvHaric)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(item.satisKdv)}</TableCell>
-                                            <TableCell className="text-right font-bold">{formatCurrency(item.satisToplam)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrencyFull(item.satisKdvHaric)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrencyFull(item.satisKdv)}</TableCell>
+                                            <TableCell className="text-right font-bold">{formatCurrencyFull(item.satisToplam)}</TableCell>
                                           </TableRow>
                                         ))}
                                       </TableBody>
@@ -698,13 +709,13 @@ type Arac = {
                                         <TableRow>
                                           <TableCell className="font-bold">TOPLAM</TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.satisKdvHaric, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.satisKdvHaric, 0))}
                                           </TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.satisKdv, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.satisKdv, 0))}
                                           </TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.satisToplam, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.satisToplam, 0))}
                                           </TableCell>
                                         </TableRow>
                                       </TableFooter>
@@ -715,8 +726,8 @@ type Arac = {
                                 {/* Giderler Section */}
                                 <Card>
                                   <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                      <FileSpreadsheet className="w-5 h-5" />
+                                    <CardTitle className="flex items-center gap-2 text-[15px] font-bold">
+                                      <span className="h-2 w-2 rounded-[2px]" style={{ background: "#e11d48" }} />
                                       Giderler
                                     </CardTitle>
                                   </CardHeader>
@@ -734,9 +745,9 @@ type Arac = {
                                         {ozetSummary.map((item) => (
                                           <TableRow key={item.ay}>
                                             <TableCell className="font-medium">{getAyLabel(item.ay)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(item.giderKdvHaric)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(item.giderKdv)}</TableCell>
-                                            <TableCell className="text-right font-bold">{formatCurrency(item.giderToplam)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrencyFull(item.giderKdvHaric)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrencyFull(item.giderKdv)}</TableCell>
+                                            <TableCell className="text-right font-bold">{formatCurrencyFull(item.giderToplam)}</TableCell>
                                           </TableRow>
                                         ))}
                                       </TableBody>
@@ -744,13 +755,13 @@ type Arac = {
                                         <TableRow>
                                           <TableCell className="font-bold">TOPLAM</TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.giderKdvHaric, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.giderKdvHaric, 0))}
                                           </TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.giderKdv, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.giderKdv, 0))}
                                           </TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.giderToplam, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.giderToplam, 0))}
                                           </TableCell>
                                         </TableRow>
                                       </TableFooter>
@@ -761,8 +772,8 @@ type Arac = {
                                 {/* Çalışanlar Section */}
                                 <Card>
                                   <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                      <Users className="w-5 h-5" />
+                                    <CardTitle className="flex items-center gap-2 text-[15px] font-bold">
+                                      <span className="h-2 w-2 rounded-[2px]" style={{ background: "#7c3aed" }} />
                                       Çalışan Masrafları
                                     </CardTitle>
                                   </CardHeader>
@@ -781,10 +792,10 @@ type Arac = {
                                         {ozetSummary.map((item) => (
                                           <TableRow key={item.ay}>
                                             <TableCell className="font-medium">{getAyLabel(item.ay)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(item.calisanBrut)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(item.calisanNet)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(item.calisanIsverenSgk)}</TableCell>
-                                            <TableCell className="text-right font-bold">{formatCurrency(item.calisanMaliyet)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrencyFull(item.calisanBrut)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrencyFull(item.calisanNet)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrencyFull(item.calisanIsverenSgk)}</TableCell>
+                                            <TableCell className="text-right font-bold">{formatCurrencyFull(item.calisanMaliyet)}</TableCell>
                                           </TableRow>
                                         ))}
                                       </TableBody>
@@ -792,16 +803,16 @@ type Arac = {
                                         <TableRow>
                                           <TableCell className="font-bold">TOPLAM</TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.calisanBrut, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.calisanBrut, 0))}
                                           </TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.calisanNet, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.calisanNet, 0))}
                                           </TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.calisanIsverenSgk, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.calisanIsverenSgk, 0))}
                                           </TableCell>
                                           <TableCell className="text-right font-bold">
-                                            {formatCurrency(ozetSummary.reduce((sum, item) => sum + item.calisanMaliyet, 0))}
+                                            {formatCurrencyFull(ozetSummary.reduce((sum, item) => sum + item.calisanMaliyet, 0))}
                                           </TableCell>
                                         </TableRow>
                                       </TableFooter>
@@ -818,121 +829,24 @@ type Arac = {
                           </TabsContent>
 
                           <TabsContent value="satis" className="space-y-6">
-                            {/* Üst Bar - Sadece Excel Yükle butonu */}
-                            <div className="flex justify-end">
-                              <Button onClick={() => setIsUploadModalOpen(true)} data-testid="button-open-upload">
-                                <Upload className="w-4 h-4 mr-2" />
-                                Excel Yükle
-                              </Button>
-                            </div>
-
                             <ExcelUploadModal
                               open={isUploadModalOpen}
                               onOpenChange={setIsUploadModalOpen}
                               onSuccess={handleUploadSuccess}
                             />
 
-
-                            {/* Genel İstatistik Kartları */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                              <Card>
-                                <CardHeader className="pb-2">
-                                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                                    <TrendingUp className="w-4 h-4" />
-                                    {selectedYil} Toplam Satış
-                                  </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                  <p className="text-2xl font-bold" data-testid="text-yillik-satis">
-                                    {ozetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(genelStats?.toplamSatis || 0)}
+                            {/* Sticky Filtre Barı */}
+                            <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-2 border-b border-border/70 bg-slate-50/85 px-6 py-4 backdrop-blur dark:bg-background/85 lg:-mx-8 lg:px-8">
+                              <div className="flex flex-wrap items-end justify-between gap-4">
+                                <div>
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    Gümrük · Satışlar · {selectedYil}
                                   </p>
-                                </CardContent>
-                              </Card>
-
-                              <Card>
-                                <CardHeader className="pb-2">
-                                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                                    <TrendingUp className="w-4 h-4" />
-                                    {selectedYil} Toplam KDV
-                                  </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                  <p className="text-2xl font-bold" data-testid="text-yillik-kdv">
-                                    {ozetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(genelStats?.toplamKdv || 0)}
-                                  </p>
-                                </CardContent>
-                              </Card>
-
-                              <Card>
-                                <CardHeader className="pb-2">
-                                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                                    <FileSpreadsheet className="w-4 h-4" />
-                                    {selectedYil} Toplam Dosya
-                                  </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                  <p className="text-2xl font-bold" data-testid="text-yillik-dosya">
-                                    {ozetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : genelStats?.toplamDosya || 0}
-                                  </p>
-                                </CardContent>
-                              </Card>
-
-                              <Card>
-                                <CardHeader className="pb-2">
-                                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                                    <BarChart3 className="w-4 h-4" />
-                                    Aylık Ortalama
-                                  </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                  <p className="text-2xl font-bold" data-testid="text-aylik-ortalama">
-                                    {ozetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(genelStats?.aylikOrtalama || 0)}
-                                  </p>
-                                </CardContent>
-                              </Card>
-                            </div>
-
-                            {/* Dinamik Grafik */}
-                            <Card>
-                              <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap">
-                                <CardTitle className="flex items-center gap-2">
-                                  <BarChart3 className="w-5 h-5" />
-                                  {getChartTitle()}
-                                </CardTitle>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <Select value={chartMetric} onValueChange={(v) => {
-                                    setChartMetric(v as ChartMetric);
-                                    if (v !== "firma") setSelectedFirma("");
-                                  }}>
-                                    <SelectTrigger className="w-[180px]" data-testid="select-chart-metric">
-                                      <SelectValue placeholder="Metrik seçin" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {chartMetricOptions.map((option) => (
-                                        <SelectItem key={option.value} value={option.value}>
-                                          {option.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-
-                                  {chartMetric === "firma" && (
-                                    <Select value={selectedFirma} onValueChange={setSelectedFirma}>
-                                      <SelectTrigger className="w-[250px]" data-testid="select-firma">
-                                        <SelectValue placeholder="Firma seçin" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {firmalar?.map((firma) => (
-                                          <SelectItem key={firma} value={firma}>
-                                            {firma.length > 35 ? `${firma.substring(0, 35)}...` : firma}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  )}
-
+                                  <h2 className="mt-1 text-2xl font-extrabold tracking-tight">Satış Performansı</h2>
+                                </div>
+                                <div className="flex items-center gap-2.5">
                                   <Select value={selectedYil} onValueChange={setSelectedYil}>
-                                    <SelectTrigger className="w-[100px]" data-testid="select-grafik-yil">
+                                    <SelectTrigger className="w-[110px]" data-testid="select-satis-yil">
                                       <SelectValue placeholder="Yıl" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -943,190 +857,157 @@ type Arac = {
                                       ))}
                                     </SelectContent>
                                   </Select>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsUploadModalOpen(true)}
+                                    className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+                                    data-testid="button-open-upload"
+                                  >
+                                    <Upload className="h-4 w-4" />
+                                    Excel Yükle
+                                  </button>
                                 </div>
-                              </CardHeader>
-                              <CardContent>
-                                {isChartLoading ? (
-                                  <div className="flex items-center justify-center h-[300px]">
-                                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                                  </div>
-                                ) : chartMetric === "firma" && !selectedFirma ? (
-                                  <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
-                                    <Building2 className="w-12 h-12 mb-2" />
-                                    <p>Grafik görüntülemek için firma seçin</p>
-                                  </div>
-                                ) : chartData.length > 0 ? (
-                                  <ResponsiveContainer width="100%" height={(chartMetric === "eleman" || chartMetric === "gumrukBazli") ? 400 : 300}>
-                                    {chartMetric === "dosya" ? (
-                                      <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                                        <XAxis
-                                          dataKey="ay"
-                                          className="text-xs fill-muted-foreground"
-                                          tick={{ fontSize: 12 }}
-                                        />
-                                        <YAxis
-                                          className="text-xs fill-muted-foreground"
-                                          tickFormatter={getYAxisFormatter}
-                                          tick={{ fontSize: 11 }}
-                                          width={50}
-                                        />
-                                        <Tooltip
-                                          formatter={(value: number) => getTooltipFormatter(value)}
-                                          labelStyle={{ color: "var(--foreground)" }}
-                                          contentStyle={{
-                                            backgroundColor: "hsl(var(--card))",
-                                            border: "1px solid hsl(var(--border))",
-                                            borderRadius: "var(--radius)"
-                                          }}
-                                        />
-                                        <Line
-                                          type="monotone"
-                                          dataKey="deger"
-                                          stroke="hsl(var(--primary))"
-                                          strokeWidth={2}
-                                          dot={{ fill: "hsl(var(--primary))", strokeWidth: 2, r: 4 }}
-                                          activeDot={{ r: 6, strokeWidth: 0 }}
-                                        />
-                                      </LineChart>
-                                    ) : chartMetric === "eleman" || chartMetric === "gumrukBazli" ? (
-                                      <BarChart
-                                        data={chartData}
-                                        layout="vertical"
-                                        margin={{ top: 10, right: 30, left: 120, bottom: 0 }}
-                                      >
-                                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                                        <XAxis
-                                          type="number"
-                                          className="text-xs fill-muted-foreground"
-                                          tickFormatter={getYAxisFormatter}
-                                          tick={{ fontSize: 11 }}
-                                        />
-                                        <YAxis
-                                          type="category"
-                                          dataKey="isim"
-                                          className="text-xs fill-muted-foreground"
-                                          tick={{ fontSize: 11 }}
-                                          width={115}
-                                        />
-                                        <Tooltip
-                                          formatter={(value: number) => getTooltipFormatter(value)}
-                                          labelStyle={{ color: "var(--foreground)" }}
-                                          contentStyle={{
-                                            backgroundColor: "hsl(var(--card))",
-                                            border: "1px solid hsl(var(--border))",
-                                            borderRadius: "var(--radius)"
-                                          }}
-                                        />
-                                        <Bar
-                                          dataKey="deger"
-                                          fill={chartMetric === "gumrukBazli" ? "hsl(var(--chart-4))" : "hsl(var(--chart-3))"}
-                                          radius={[0, 4, 4, 0]}
-                                        />
-                                      </BarChart>
-                                    ) : (
-                                      <ComposedChart
-                                        data={chartData}
-                                        margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                      >
-                                        <defs>
-                                          {chartData.map((entry, index) => {
-                                            const values = chartData.map(d => d.deger);
-                                            const maxVal = Math.max(...values);
-                                            const minVal = Math.min(...values);
+                              </div>
+                            </div>
 
-                                            let color = "hsl(var(--primary))";
+                            {/* KPI Bar */}
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                              {[
+                                { label: "Yıllık Toplam Satış", accent: "#0ea5e9", value: formatCurrencyFull(genelStats?.toplamSatis ?? 0), hint: "KDV dahil", testid: "text-yillik-satis" },
+                                { label: "Yıllık Toplam KDV", accent: "#d97706", value: formatCurrencyFull(genelStats?.toplamKdv ?? 0), hint: "indirilecek", testid: "text-yillik-kdv" },
+                                { label: "Toplam Dosya", accent: "#7c3aed", value: (genelStats?.toplamDosya ?? 0).toLocaleString("tr-TR"), hint: "işlem adedi", testid: "text-yillik-dosya" },
+                                { label: "Aylık Ortalama", accent: "#059669", value: formatCurrencyFull(genelStats?.aylikOrtalama ?? 0), hint: "satış", testid: "text-aylik-ortalama" },
+                              ].map((kpi) => (
+                                <div
+                                  key={kpi.label}
+                                  className="relative overflow-hidden rounded-[14px] border bg-card p-5"
+                                >
+                                  <div
+                                    className="absolute left-0 top-0 h-full w-[3px]"
+                                    style={{ background: kpi.accent }}
+                                  />
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    {kpi.label}
+                                  </p>
+                                  <p className="mt-2.5 text-[26px] font-extrabold tabular-nums leading-tight" data-testid={kpi.testid}>
+                                    {ozetLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : kpi.value}
+                                  </p>
+                                  <p className="mt-2 text-[11px] font-medium text-muted-foreground">{kpi.hint}</p>
+                                </div>
+                              ))}
+                            </div>
 
-                                            if (chartMetric === "satis" || chartMetric === "kdv") {
-                                              if (maxVal === minVal) {
-                                                color = "hsl(120, 80%, 45%)";
-                                              } else {
-                                                const ratio = (entry.deger - minVal) / (maxVal - minVal);
-                                                const hue = ratio * 120;
-                                                color = `hsl(${hue}, 80%, 45%)`;
-                                              }
-                                            }
+                            {/* Dinamik Grafik */}
+                            <div className="rounded-[14px] border bg-card p-5">
+                              <div className="mb-3.5 flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <h3 className="text-[15px] font-bold">
+                                    {chartMetric === "satis"
+                                      ? "Aylık Satış (KDV Hariç)"
+                                      : chartMetric === "kdv"
+                                        ? "Aylık Toplam KDV"
+                                        : "Aylık Dosya Sayısı"}
+                                  </h3>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {selectedYil} · {chartMetric === "dosya" ? "işlem adedi" : "değerler ₺M"}
+                                  </p>
+                                </div>
+                                {/* Segmented control */}
+                                <div className="inline-flex rounded-lg bg-muted p-1">
+                                  {[
+                                    { key: "satis", label: "Satış" },
+                                    { key: "kdv", label: "KDV" },
+                                    { key: "dosya", label: "Dosya" },
+                                  ].map((m) => (
+                                    <button
+                                      key={m.key}
+                                      type="button"
+                                      onClick={() => {
+                                        setChartMetric(m.key as ChartMetric);
+                                        setSelectedFirma("");
+                                      }}
+                                      className={cn(
+                                        "rounded-md px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors",
+                                        chartMetric === m.key
+                                          ? "bg-white text-foreground shadow-sm dark:bg-background"
+                                          : "text-muted-foreground hover:text-foreground"
+                                      )}
+                                      data-testid={`button-metric-${m.key}`}
+                                    >
+                                      {m.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              {ozetLoading ? (
+                                <div className="flex h-[300px] items-center justify-center">
+                                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                </div>
+                              ) : chartData.length > 0 ? (
+                                <ResponsiveContainer width="100%" height={320}>
+                                  <BarChart data={chartData} margin={{ top: 24, right: 16, left: 0, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted" />
+                                    <XAxis
+                                      dataKey="ay"
+                                      tickFormatter={(v: string) => String(v).slice(0, 3)}
+                                      className="fill-muted-foreground text-xs"
+                                      tick={{ fontSize: 11 }}
+                                      tickLine={false}
+                                      axisLine={false}
+                                    />
+                                    <YAxis
+                                      tickFormatter={(v: number) =>
+                                        chartMetric === "dosya" ? String(v) : formatCurrencyShort(v)
+                                      }
+                                      className="fill-muted-foreground text-xs"
+                                      tick={{ fontSize: 11 }}
+                                      width={56}
+                                      tickLine={false}
+                                      axisLine={false}
+                                    />
+                                    <Tooltip
+                                      formatter={(value: number) =>
+                                        chartMetric === "dosya"
+                                          ? [value, "Dosya"]
+                                          : [formatCurrencyFull(value), chartMetric === "kdv" ? "KDV" : "Satış"]
+                                      }
+                                      labelStyle={{ color: "var(--foreground)" }}
+                                      contentStyle={{
+                                        backgroundColor: "hsl(var(--card))",
+                                        border: "1px solid hsl(var(--border))",
+                                        borderRadius: "var(--radius)",
+                                      }}
+                                      cursor={{ fill: "rgba(0,0,0,0.05)" }}
+                                    />
+                                    <Bar dataKey="deger" fill="#0ea5e9" radius={[3, 3, 0, 0]} maxBarSize={28}>
+                                      <LabelList
+                                        dataKey="deger"
+                                        position="top"
+                                        formatter={(value: number) =>
+                                          chartMetric === "dosya" ? String(value) : formatCurrencyShort(value)
+                                        }
+                                        style={{ fontSize: 10.5, fontWeight: 700, fill: "#0369a1" }}
+                                      />
+                                    </Bar>
+                                  </BarChart>
+                                </ResponsiveContainer>
+                              ) : (
+                                <div className="flex h-[300px] flex-col items-center justify-center text-muted-foreground">
+                                  <BarChart3 className="mb-2 h-12 w-12" />
+                                  <p>{selectedYil} yılına ait veri bulunamadı</p>
+                                </div>
+                              )}
+                            </div>
 
-                                            return (
-                                              <linearGradient key={`grad-${index}`} id={`grad-${index}`} x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor={color} stopOpacity={1} />
-                                                <stop offset="100%" stopColor={color} stopOpacity={0.3} />
-                                              </linearGradient>
-                                            );
-                                          })}
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                                        <XAxis
-                                          dataKey="ay"
-                                          className="text-xs fill-muted-foreground"
-                                          tick={{ fontSize: 12 }}
-                                        />
-                                        <YAxis
-                                          yAxisId="left"
-                                          className="text-xs fill-muted-foreground"
-                                          tickFormatter={getYAxisFormatter}
-                                          tick={{ fontSize: 11 }}
-                                          width={70}
-                                        />
-                                        <YAxis
-                                          yAxisId="right"
-                                          orientation="right"
-                                          className="text-xs fill-muted-foreground"
-                                          tick={{ fontSize: 11 }}
-                                          width={40}
-                                          label={{ value: 'Dosya', angle: -90, position: 'insideRight' }}
-                                        />
-                                        <Tooltip
-                                          formatter={(value: number, name: string) => {
-                                            if (name === "dosyaSayisi") return [value, "Dosya Sayısı"];
-                                            return getTooltipFormatter(value);
-                                          }}
-                                          labelStyle={{ color: "var(--foreground)" }}
-                                          contentStyle={{
-                                            backgroundColor: "hsl(var(--card))",
-                                            border: "1px solid hsl(var(--border))",
-                                            borderRadius: "var(--radius)"
-                                          }}
-                                          cursor={{ fill: 'rgba(0,0,0,0.05)' }}
-                                        />
-                                        <Bar dataKey="deger" yAxisId="left" radius={[4, 4, 0, 0]}>
-                                          {chartData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={`url(#grad-${index})`} />
-                                          ))}
-                                        </Bar>
-                                        <Line
-                                          yAxisId="right"
-                                          type="monotone"
-                                          dataKey="dosyaSayisi"
-                                          stroke="#ff7300"
-                                          strokeWidth={3}
-                                          dot={{ r: 4, fill: "#ff7300" }}
-                                        />
-                                      </ComposedChart>
-                                    )}
-                                  </ResponsiveContainer>
-                                ) : (
-                                  <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
-                                    <BarChart3 className="w-12 h-12 mb-2" />
-                                    <p>{selectedYil} yılına ait veri bulunamadı</p>
-                                  </div>
-                                )}
-                              </CardContent>
-                            </Card>
-
-                            {/* Gelişmiş Grafik Analizi */}
+                            {/* Gelişmiş Grafik Analizi (mevcut AdvancedChart — README kart #4: çok-serili, çift eksenli) */}
                             <AdvancedChart selectedYil={selectedYil} />
 
-                            {/* Ay Bazlı Detay Bölümü */}
-                            <Card>
-                              <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                  <FileSpreadsheet className="w-5 h-5" />
-                                  Ay Bazlı Detay
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent className="space-y-4">
-                                <div className="flex items-center gap-4">
+                            {/* Ay Bazlı Detay */}
+                            <div className="rounded-[14px] border bg-card p-5">
+                              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                                <h3 className="text-[15px] font-bold">Ay Bazlı Detay</h3>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-medium text-muted-foreground">Ay</span>
                                   <Select value={selectedAy} onValueChange={setSelectedAy}>
                                     <SelectTrigger className="w-[140px]" data-testid="select-filter-ay">
                                       <SelectValue placeholder="Ay seçin" />
@@ -1139,193 +1020,165 @@ type Arac = {
                                       ))}
                                     </SelectContent>
                                   </Select>
-
-                                  <Select value={selectedYil} onValueChange={setSelectedYil}>
-                                    <SelectTrigger className="w-[100px]" data-testid="select-filter-yil">
-                                      <SelectValue placeholder="Yıl" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {yillar.map((yil) => (
-                                        <SelectItem key={yil} value={String(yil)}>
-                                          {yil}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-
-                                  {selectedAy && yukluAylar && (
-                                    <span className="text-sm text-muted-foreground">
-                                      {yukluAylar.find(a => a.ay === selectedAy && a.yil === parseInt(selectedYil))
-                                        ? `${yukluAylar.find(a => a.ay === selectedAy && a.yil === parseInt(selectedYil))?.kayitSayisi} kayıt`
-                                        : "Veri yok"}
-                                    </span>
-                                  )}
                                 </div>
+                              </div>
 
-                                {!selectedAy ? (
-                                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                                    <FileSpreadsheet className="w-12 h-12 mb-2" />
-                                    <p>Detay görüntülemek için ay seçin</p>
+                              {!ayStats ? (
+                                <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                                  <FileSpreadsheet className="mb-2 h-12 w-12" />
+                                  <p>Detay için ay seçin</p>
+                                </div>
+                              ) : (
+                                <>
+                                  {/* 4 mini-stat */}
+                                  <div className="mb-5 grid grid-cols-2 gap-3.5 md:grid-cols-4">
+                                    {[
+                                      { label: "Toplam Fatura", value: formatCurrencyFull(ayStats?.toplamFatura ?? 0), testid: "text-toplam-fatura" },
+                                      { label: "Toplam KDV", value: formatCurrencyFull(ayStats?.toplamKdv ?? 0), testid: "text-toplam-kdv" },
+                                      { label: "Dosya Sayısı", value: (ayStats?.dosyaSayisi ?? 0).toLocaleString("tr-TR"), testid: "text-dosya-sayisi" },
+                                      { label: "Müşteri Sayısı", value: (ayStats?.musteriSayisi ?? 0).toLocaleString("tr-TR"), testid: "text-musteri-sayisi" },
+                                    ].map((s) => (
+                                      <div key={s.label} className="rounded-xl border bg-slate-50 p-3.5 dark:bg-muted/40">
+                                        <p className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                          {s.label}
+                                        </p>
+                                        <p className="mt-1.5 text-xl font-extrabold tabular-nums" data-testid={s.testid}>
+                                          {s.value}
+                                        </p>
+                                      </div>
+                                    ))}
                                   </div>
-                                ) : verilerLoading ? (
-                                  <div className="flex items-center justify-center py-8">
-                                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                                  </div>
-                                ) : veriler && veriler.length > 0 ? (
-                                  <>
-                                    {/* Ay İstatistik Kartları */}
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                                      <Card>
-                                        <CardHeader className="pb-2">
-                                          <CardTitle className="text-sm font-medium text-muted-foreground">
-                                            Toplam Fatura
-                                          </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                          <p className="text-xl font-bold" data-testid="text-toplam-fatura">
-                                            {formatCurrency(ayStats?.toplamFatura || 0)}
-                                          </p>
-                                        </CardContent>
-                                      </Card>
 
-                                      <Card>
-                                        <CardHeader className="pb-2">
-                                          <CardTitle className="text-sm font-medium text-muted-foreground">
-                                            Toplam KDV
-                                          </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                          <p className="text-xl font-bold" data-testid="text-toplam-kdv">
-                                            {formatCurrency(ayStats?.toplamKdv || 0)}
-                                          </p>
-                                        </CardContent>
-                                      </Card>
-
-                                      <Card>
-                                        <CardHeader className="pb-2">
-                                          <CardTitle className="text-sm font-medium text-muted-foreground">
-                                            Dosya Sayısı
-                                          </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                          <p className="text-xl font-bold" data-testid="text-dosya-sayisi">
-                                            {ayStats?.dosyaSayisi || 0}
-                                          </p>
-                                        </CardContent>
-                                      </Card>
-
-                                      <Card>
-                                        <CardHeader className="pb-2">
-                                          <CardTitle className="text-sm font-medium text-muted-foreground">
-                                            Müşteri Sayısı
-                                          </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                          <p className="text-xl font-bold" data-testid="text-musteri-sayisi">
-                                            {ayStats?.musteriSayisi || 0}
-                                          </p>
-                                        </CardContent>
-                                      </Card>
+                                  {/* 3 bar-listesi */}
+                                  <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+                                    {/* En Çok Ciro Yapan Müşteriler */}
+                                    <div>
+                                      <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                        En Çok Ciro Yapan Müşteriler
+                                      </p>
+                                      <div className="flex flex-col gap-2.5">
+                                        {musteriCirolari.length === 0 ? (
+                                          <p className="text-xs text-muted-foreground">Veri yok</p>
+                                        ) : (
+                                          (() => {
+                                            const maxV = Math.max(...musteriCirolari.map(([, v]) => v), 1);
+                                            return musteriCirolari.map(([ad, tutar], i) => (
+                                              <div key={`${ad}-${i}`} className="flex items-center gap-2.5">
+                                                <span className="w-24 flex-none truncate text-[12.5px] font-semibold text-slate-700 dark:text-foreground" title={ad}>
+                                                  {ad}
+                                                </span>
+                                                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                                                  <span
+                                                    className="block h-full rounded-full bg-sky-500"
+                                                    style={{ width: `${Math.max((tutar / maxV) * 100, 8)}%` }}
+                                                  />
+                                                </span>
+                                                <span className="flex-none text-[12.5px] font-bold tabular-nums">
+                                                  {formatCurrencyFull(tutar)}
+                                                </span>
+                                              </div>
+                                            ));
+                                          })()
+                                        )}
+                                      </div>
                                     </div>
 
-                                    {/* Alt Kartlar */}
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-                                      {/* En Çok Ciro Yapan Müşteriler */}
-                                      <Card>
-                                        <CardHeader>
-                                          <CardTitle className="flex items-center gap-2 text-base">
-                                            <Building2 className="w-4 h-4" />
-                                            En Çok Ciro Yapan Müşteriler
-                                          </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                          <Table>
-                                            <TableHeader>
-                                              <TableRow>
-                                                <TableHead>Müşteri</TableHead>
-                                                <TableHead className="text-right">Ciro</TableHead>
-                                              </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                              {musteriCirolari.map(([musteri, ciro], index) => (
-                                                <TableRow key={musteri} data-testid={`row-musteri-${index}`}>
-                                                  <TableCell className="font-medium">{musteri}</TableCell>
-                                                  <TableCell className="text-right">
-                                                    {formatCurrency(ciro)}
-                                                  </TableCell>
-                                                </TableRow>
-                                              ))}
-                                            </TableBody>
-                                          </Table>
-                                        </CardContent>
-                                      </Card>
-
-                                      {/* Çalışan Bazında Dosya Sayıları */}
-                                      <Card>
-                                        <CardHeader>
-                                          <CardTitle className="flex items-center gap-2 text-base">
-                                            <Users className="w-4 h-4" />
-                                            Çalışan Bazında Dosya Sayıları
-                                          </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                          <Table>
-                                            <TableHeader>
-                                              <TableRow>
-                                                <TableHead>Çalışan</TableHead>
-                                                <TableHead className="text-right">Dosya Sayısı</TableHead>
-                                              </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                              {calisanDosyalari.map(([calisan, sayi], index) => (
-                                                <TableRow key={calisan} data-testid={`row-calisan-${index}`}>
-                                                  <TableCell className="font-medium">{calisan}</TableCell>
-                                                  <TableCell className="text-right">{sayi}</TableCell>
-                                                </TableRow>
-                                              ))}
-                                            </TableBody>
-                                          </Table>
-                                        </CardContent>
-                                      </Card>
+                                    {/* Çalışan Bazında Dosya Sayıları */}
+                                    <div>
+                                      <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Çalışan Bazında Dosya Sayıları
+                                      </p>
+                                      <div className="flex flex-col gap-2.5">
+                                        {calisanDosyalari.length === 0 ? (
+                                          <p className="text-xs text-muted-foreground">Veri yok</p>
+                                        ) : (
+                                          (() => {
+                                            const list = calisanDosyalari.slice(0, 5);
+                                            const maxV = Math.max(...list.map(([, v]) => v), 1);
+                                            return list.map(([ad, adet], i) => (
+                                              <div key={`${ad}-${i}`} className="flex items-center gap-2.5">
+                                                <span className="w-24 flex-none truncate text-[12.5px] font-semibold text-slate-700 dark:text-foreground" title={ad}>
+                                                  {ad}
+                                                </span>
+                                                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                                                  <span
+                                                    className="block h-full rounded-full bg-violet-500"
+                                                    style={{ width: `${Math.max((adet / maxV) * 100, 8)}%` }}
+                                                  />
+                                                </span>
+                                                <span className="flex-none text-[12.5px] font-bold tabular-nums">
+                                                  {adet}
+                                                </span>
+                                              </div>
+                                            ));
+                                          })()
+                                        )}
+                                      </div>
                                     </div>
-                                  </>
-                                ) : (
-                                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                                    <FileSpreadsheet className="w-12 h-12 mb-2" />
-                                    <p>{getAyLabel(selectedAy)} {selectedYil} için kayıtlı veri bulunmuyor</p>
+
+                                    {/* Çalışan Bazında Kesilen Fatura */}
+                                    <div>
+                                      <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Çalışan Bazında Kesilen Fatura
+                                      </p>
+                                      <div className="flex flex-col gap-2.5">
+                                        {calisanFaturalari.length === 0 ? (
+                                          <p className="text-xs text-muted-foreground">Veri yok</p>
+                                        ) : (
+                                          (() => {
+                                            const maxV = Math.max(...calisanFaturalari.map(([, v]) => v), 1);
+                                            return calisanFaturalari.map(([ad, tutar], i) => (
+                                              <div key={`${ad}-${i}`} className="flex items-center gap-2.5">
+                                                <span className="w-24 flex-none truncate text-[12.5px] font-semibold text-slate-700 dark:text-foreground" title={ad}>
+                                                  {ad}
+                                                </span>
+                                                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                                                  <span
+                                                    className="block h-full rounded-full bg-amber-500"
+                                                    style={{ width: `${Math.max((tutar / maxV) * 100, 8)}%` }}
+                                                  />
+                                                </span>
+                                                <span className="flex-none text-[12.5px] font-bold tabular-nums">
+                                                  {formatCurrencyFull(tutar)}
+                                                </span>
+                                              </div>
+                                            ));
+                                          })()
+                                        )}
+                                      </div>
+                                    </div>
                                   </div>
-                                )}
-                              </CardContent>
-                            </Card>
+                                </>
+                              )}
+                            </div>
 
                             {/* Yükleme Geçmişi */}
-                            <Card>
-                              <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                  <History className="w-5 h-5" />
-                                  Yükleme Geçmişi
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                {dosyalar?.length === 0 ? (
-                                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                                    <History className="w-12 h-12 mb-2" />
-                                    <p>Henüz yükleme yok</p>
-                                  </div>
-                                ) : (
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableHead>Tarih</TableHead>
-                                        <TableHead>Dosya Adı</TableHead>
-                                        <TableHead>Dönem</TableHead>
-                                        <TableHead className="text-right">Boyut</TableHead>
-                                        <TableHead className="text-right">Kayıt</TableHead>
-                                        <TableHead className="text-right">İşlem</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {dosyalar?.map((d) => {
+                            <div className="rounded-[14px] border bg-card p-5">
+                              <h3 className="mb-3.5 flex items-center gap-2 text-[15px] font-bold">
+                                <History className="h-4 w-4 text-muted-foreground" />
+                                Yükleme Geçmişi
+                              </h3>
+                              <div className="overflow-x-auto">
+                                <table className="w-full border-collapse text-[13px]">
+                                  <thead>
+                                    <tr className="border-b">
+                                      <th className="px-2.5 py-2 text-left text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Tarih</th>
+                                      <th className="px-2.5 py-2 text-left text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Dosya Adı</th>
+                                      <th className="px-2.5 py-2 text-left text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Dönem</th>
+                                      <th className="px-2.5 py-2 text-right text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Boyut</th>
+                                      <th className="px-2.5 py-2 text-right text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Kayıt</th>
+                                      <th className="px-2.5 py-2 text-right text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">İşlem</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {!dosyalar || dosyalar.length === 0 ? (
+                                      <tr>
+                                        <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                                          Henüz yükleme yok
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      dosyalar.map((d) => {
                                         const tarih = d.uploadDate
                                           ? (() => {
                                               const dt = new Date(d.uploadDate);
@@ -1368,320 +1221,284 @@ type Arac = {
                                           queryClient.invalidateQueries({ queryKey: [`/api/gumruk/ozet-summary/${selectedYil}`] });
                                         };
                                         return (
-                                          <TableRow key={d.id} data-testid={`row-dosya-${d.id}`}>
-                                            <TableCell>{tarih}</TableCell>
-                                            <TableCell title={d.filename}>{fname}</TableCell>
-                                            <TableCell>{donem}</TableCell>
-                                            <TableCell className="text-right">{boyut}</TableCell>
-                                            <TableCell className="text-right">{d.kayitSayisi}</TableCell>
-                                            <TableCell className="text-right">
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="text-destructive hover:text-destructive"
+                                          <tr key={d.id} className="border-b border-border/60" data-testid={`row-dosya-${d.id}`}>
+                                            <td className="px-2.5 py-2.5 tabular-nums text-muted-foreground">{tarih}</td>
+                                            <td className="px-2.5 py-2.5 font-medium" title={d.filename}>{fname}</td>
+                                            <td className="px-2.5 py-2.5 text-muted-foreground">{donem}</td>
+                                            <td className="px-2.5 py-2.5 text-right tabular-nums text-muted-foreground">{boyut}</td>
+                                            <td className="px-2.5 py-2.5 text-right tabular-nums">{d.kayitSayisi}</td>
+                                            <td className="px-2.5 py-2.5 text-right">
+                                              <button
+                                                type="button"
                                                 onClick={onGeriAl}
+                                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700"
                                                 data-testid={`button-geri-al-${d.id}`}
                                               >
-                                                <Trash2 className="w-4 h-4 mr-1" />
+                                                <Trash2 className="h-3.5 w-3.5" />
                                                 Geri Al
-                                              </Button>
-                                            </TableCell>
-                                          </TableRow>
+                                              </button>
+                                            </td>
+                                          </tr>
                                         );
-                                      })}
-                                    </TableBody>
-                                  </Table>
-                                )}
-                              </CardContent>
-                            </Card>
+                                      })
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
                           </TabsContent>
 
                           <TabsContent value="giderler" className="space-y-6">
                             <div className="flex flex-col gap-6">
 
-                              {/* Header & Filters */}
-                              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                <div className="flex items-center gap-4">
-                                  <Select value={selectedGiderAy} onValueChange={setSelectedGiderAy}>
-                                    <SelectTrigger className="w-[180px]" data-testid="select-gider-ay">
-                                      <SelectValue placeholder="Dönem seçin" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {giderAylar.map((ay) => (
-                                        <SelectItem key={ay.value} value={ay.value}>
-                                          {ay.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+                              {/* Sticky Filtre Barı */}
+                              <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-2 border-b border-border/70 bg-slate-50/85 px-6 py-4 backdrop-blur dark:bg-background/85 lg:-mx-8 lg:px-8">
+                                <div className="flex flex-wrap items-end justify-between gap-4">
+                                  <div>
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                      Gümrük · Giderler · {selectedGiderYil}
+                                    </p>
+                                    <h2 className="mt-1 text-2xl font-extrabold tracking-tight">Gider Yönetimi</h2>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2.5">
+                                    <Select value={selectedGiderAy} onValueChange={setSelectedGiderAy}>
+                                      <SelectTrigger className="w-[160px]" data-testid="select-gider-ay">
+                                        <SelectValue placeholder="Dönem seçin" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {giderAylar.map((ay) => (
+                                          <SelectItem key={ay.value} value={ay.value}>
+                                            {ay.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
 
-                                  <Select value={selectedGiderYil} onValueChange={setSelectedGiderYil}>
-                                    <SelectTrigger className="w-[120px]" data-testid="select-gider-yil">
-                                      <SelectValue placeholder="Yıl" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {yillar.map((yil) => (
-                                        <SelectItem key={yil} value={String(yil)}>
-                                          {yil}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+                                    <Select value={selectedGiderYil} onValueChange={setSelectedGiderYil}>
+                                      <SelectTrigger className="w-[110px]" data-testid="select-gider-yil">
+                                        <SelectValue placeholder="Yıl" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {yillar.map((yil) => (
+                                          <SelectItem key={yil} value={String(yil)}>
+                                            {yil}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+
+                                    {selectedGiderAy !== "toplam" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setClearMonthOpen(true)}
+                                        className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-[12.5px] font-semibold text-rose-600 transition-colors hover:bg-rose-50 dark:border-rose-900/60 dark:bg-transparent dark:hover:bg-rose-950/30"
+                                        data-testid="button-gider-temizle"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        Bu Ay'ı Temizle
+                                      </button>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsGiderUploadModalOpen(true)}
+                                      className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+                                      data-testid="button-gider-upload"
+                                    >
+                                      <Upload className="h-4 w-4" />
+                                      Gider Excel Yükle
+                                    </button>
+                                  </div>
                                 </div>
+                              </div>
 
-                                {selectedGiderAy !== "toplam" && (
-                                  <Button
-                                    variant="destructive"
-                                    onClick={async () => {
-                                      const ayLabel = aylar.find(a => a.value === selectedGiderAy)?.label || selectedGiderAy;
-                                      if (!window.confirm(`${ayLabel} ${selectedGiderYil} ayına ait TÜM gider kayıtları silinecek. Emin misiniz?`)) return;
-                                      try {
-                                        const r = await fetch(`/api/giderler?ay=${selectedGiderAy}&yil=${selectedGiderYil}`, {
-                                          method: "DELETE",
-                                          credentials: "include",
-                                        });
-                                        if (!r.ok) {
-                                          toast({ title: "Hata", description: "Silinemedi", variant: "destructive" });
-                                          return;
-                                        }
-                                        toast({ title: "Başarılı", description: `${ayLabel} ${selectedGiderYil} kayıtları silindi` });
-                                        refetchGiderler();
-                                        refetchGiderStats();
-                                      } catch {
-                                        toast({ title: "Hata", description: "Bağlantı hatası", variant: "destructive" });
-                                      }
-                                    }}
-                                    data-testid="button-gider-temizle"
+                              {/* KPI Bar */}
+                              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                                {[
+                                  { label: "Toplam Fatura Adet", accent: "#7c3aed", value: (giderStats?.toplamCount ?? 0).toLocaleString("tr-TR"), hint: "kayıt", testid: "text-gider-count" },
+                                  { label: "Mal Bedeli (KDV Hariç)", accent: "#0ea5e9", value: formatCurrencyFull(giderStats?.toplamMalBedeli ?? 0), hint: "döviz TRY'ye çevrilmeden", testid: "text-gider-malbedeli" },
+                                  { label: "Toplam KDV", accent: "#d97706", value: formatCurrencyFull(giderStats?.toplamKdv ?? 0), hint: "indirilecek", testid: "text-gider-kdv" },
+                                  { label: "Toplam Tutar (TRY)", accent: "#e11d48", value: formatCurrencyFull(giderStats?.toplamTryTutar ?? 0), hint: "döviz dahil TRY karşılığı", testid: "text-gider-try" },
+                                ].map((kpi) => (
+                                  <div
+                                    key={kpi.label}
+                                    className="relative overflow-hidden rounded-[14px] border bg-card p-5"
                                   >
-                                    <Trash2 className="w-4 h-4 mr-2" />
-                                    Bu Ay'ı Temizle
-                                  </Button>
-                                )}
-
-                                <Button onClick={() => setIsGiderUploadModalOpen(true)} variant="secondary" data-testid="button-gider-upload">
-                                  <Upload className="w-4 h-4 mr-2" />
-                                  Gider Excel Yükle
-                                </Button>
+                                    <div
+                                      className="absolute left-0 top-0 h-full w-[3px]"
+                                      style={{ background: kpi.accent }}
+                                    />
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                      {kpi.label}
+                                    </p>
+                                    <p className="mt-2.5 text-[26px] font-extrabold tabular-nums leading-tight" data-testid={kpi.testid}>
+                                      {giderStatsLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : kpi.value}
+                                    </p>
+                                    <p className="mt-2 text-[11px] font-medium text-muted-foreground">{kpi.hint}</p>
+                                  </div>
+                                ))}
                               </div>
 
-                              {/* Stats Cards */}
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <Card>
-                                  <CardHeader className="pb-2">
-                                    <CardTitle className="text-sm font-medium text-muted-foreground">Toplam Fatura Adet</CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <p className="text-2xl font-bold">
-                                      {giderStatsLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : giderStats?.toplamCount || 0}
-                                    </p>
-                                  </CardContent>
-                                </Card>
-                                <Card>
-                                  <CardHeader className="pb-2">
-                                    <CardTitle className="text-sm font-medium text-muted-foreground">Toplam Mal Bedeli (KDV Hariç)</CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <p className="text-2xl font-bold">
-                                      {giderStatsLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(giderStats?.toplamMalBedeli || 0)}
-                                    </p>
-                                  </CardContent>
-                                </Card>
-                                <Card>
-                                  <CardHeader className="pb-2">
-                                    <CardTitle className="text-sm font-medium text-muted-foreground">Toplam KDV</CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <p className="text-2xl font-bold">
-                                      {giderStatsLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(giderStats?.toplamKdv || 0)}
-                                    </p>
-                                  </CardContent>
-                                </Card>
-                                <Card>
-                                  <CardHeader className="pb-2">
-                                    <CardTitle className="text-sm font-medium text-muted-foreground">Toplam Tutar (TRY)</CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <p className="text-2xl font-bold">
-                                      {giderStatsLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : formatCurrency(giderStats?.toplamTryTutar || 0)}
-                                    </p>
-                                  </CardContent>
-                                </Card>
-                              </div>
-
-                              {/* Data Table */}
-                              <Card>
-                                <CardHeader className="flex flex-row items-center justify-between">
-                                  <CardTitle>Gider Listesi</CardTitle>
-                                  <span className="text-sm text-muted-foreground tabular-nums">
+                              {/* Gider Listesi */}
+                              <div className="overflow-hidden rounded-[14px] border bg-card">
+                                <div className="flex items-center justify-between border-b px-5 py-4">
+                                  <h3 className="text-[15px] font-bold">Gider Listesi</h3>
+                                  <span className="text-[12.5px] tabular-nums text-muted-foreground">
                                     {sortedGiderler?.length ?? 0} kayıt
                                   </span>
-                                </CardHeader>
-                                <CardContent>
-                                  <div className="rounded-md border bg-card w-full overflow-hidden">
-                                    <div className="max-h-[70vh] overflow-y-auto overflow-x-hidden">
-                                      <Table className="text-xs w-full">
-                                        <TableHeader className="sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                                          <TableRow className="hover:bg-transparent border-b">
-                                            <TableHead onClick={() => handleSort('tarih')} className="cursor-pointer select-none whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[92px]">
-                                              <div className="flex items-center">Tarih <SortIcon column="tarih" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('firma')} className="cursor-pointer select-none font-semibold text-foreground hover:bg-muted h-9 px-2">
-                                              <div className="flex items-center">Firma <SortIcon column="firma" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('faturaNo')} className="cursor-pointer select-none font-semibold text-foreground hover:bg-muted h-9 px-2 w-[110px]">
-                                              <div className="flex items-center">Fatura No <SortIcon column="faturaNo" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('malBedeli')} className="cursor-pointer select-none text-right whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[110px]">
-                                              <div className="flex items-center justify-end">Mal Bedeli <SortIcon column="malBedeli" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('kdvTutari')} className="cursor-pointer select-none text-right whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[100px]">
-                                              <div className="flex items-center justify-end">KDV <SortIcon column="kdvTutari" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('toplamTutar')} className="cursor-pointer select-none text-right whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[110px]">
-                                              <div className="flex items-center justify-end">Toplam <SortIcon column="toplamTutar" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('paraBirimi')} className="cursor-pointer select-none whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[60px]">
-                                              <div className="flex items-center">Brm <SortIcon column="paraBirimi" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('tryTutar')} className="cursor-pointer select-none text-right whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[120px]">
-                                              <div className="flex items-center justify-end">TRY Tutar <SortIcon column="tryTutar" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('sube')} className="cursor-pointer select-none whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[125px]">
-                                              <div className="flex items-center">Şube <SortIcon column="sube" /></div>
-                                            </TableHead>
-                                            <TableHead onClick={() => handleSort('kategori')} className="cursor-pointer select-none whitespace-nowrap font-semibold text-foreground hover:bg-muted h-9 px-2 w-[140px]">
-                                              <div className="flex items-center">Kategori <SortIcon column="kategori" /></div>
-                                            </TableHead>
-                                            <TableHead className="font-semibold text-foreground h-9 px-2 w-[110px]">Plaka</TableHead>
-                                            <TableHead className="h-9 px-1 w-[40px]"></TableHead>
-                                          </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                          {giderlerLoading ? (
-                                            <TableRow>
-                                              <TableCell colSpan={12} className="text-center py-12">
-                                                <Loader2 className="w-8 h-8 animate-spin mx-auto text-muted-foreground" />
-                                              </TableCell>
-                                            </TableRow>
-                                          ) : giderlerError ? (
-                                            <TableRow>
-                                              <TableCell colSpan={12} className="text-center py-12 text-destructive">
-                                                Veriler yüklenirken hata oluştu. <button className="underline" onClick={() => refetchGiderler()}>Tekrar dene</button>
-                                              </TableCell>
-                                            </TableRow>
-                                          ) : sortedGiderler?.length === 0 ? (
-                                            <TableRow>
-                                              <TableCell colSpan={12} className="text-center py-12 text-muted-foreground">
-                                                Kayıt bulunamadı
-                                              </TableCell>
-                                            </TableRow>
-                                          ) : (
-                                            sortedGiderler?.map((gider, idx) => (
-                                              <TableRow
-                                                key={gider.id}
-                                                className={`${idx % 2 === 0 ? 'bg-background' : 'bg-muted/30'} hover:bg-accent/50 transition-colors`}
+                                </div>
+                                <div className="max-h-[70vh] overflow-x-auto">
+                                  <Table className="w-full whitespace-nowrap text-[12.5px]">
+                                    <TableHeader className="sticky top-0 z-[5] bg-slate-50 dark:bg-muted">
+                                      <TableRow className="border-b hover:bg-transparent">
+                                        <TableHead onClick={() => handleSort('tarih')} className="h-9 cursor-pointer select-none px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
+                                          <div className="flex items-center">Tarih <SortIcon column="tarih" /></div>
+                                        </TableHead>
+                                        <TableHead onClick={() => handleSort('firma')} className="h-9 cursor-pointer select-none px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
+                                          <div className="flex items-center">Firma <SortIcon column="firma" /></div>
+                                        </TableHead>
+                                        <TableHead onClick={() => handleSort('faturaNo')} className="h-9 cursor-pointer select-none px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
+                                          <div className="flex items-center">Fatura No <SortIcon column="faturaNo" /></div>
+                                        </TableHead>
+                                        <TableHead onClick={() => handleSort('malBedeli')} className="h-9 cursor-pointer select-none px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
+                                          <div className="flex items-center justify-end">Mal Bedeli <SortIcon column="malBedeli" /></div>
+                                        </TableHead>
+                                        <TableHead onClick={() => handleSort('kdvTutari')} className="h-9 cursor-pointer select-none px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
+                                          <div className="flex items-center justify-end">KDV <SortIcon column="kdvTutari" /></div>
+                                        </TableHead>
+                                        <TableHead onClick={() => handleSort('toplamTutar')} className="h-9 cursor-pointer select-none px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
+                                          <div className="flex items-center justify-end">Toplam <SortIcon column="toplamTutar" /></div>
+                                        </TableHead>
+                                        <TableHead onClick={() => handleSort('paraBirimi')} className="h-9 cursor-pointer select-none px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
+                                          <div className="flex items-center">Brm <SortIcon column="paraBirimi" /></div>
+                                        </TableHead>
+                                        <TableHead onClick={() => handleSort('tryTutar')} className="h-9 cursor-pointer select-none px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
+                                          <div className="flex items-center justify-end">TRY Tutar <SortIcon column="tryTutar" /></div>
+                                        </TableHead>
+                                        <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Şube</TableHead>
+                                        <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Kategori</TableHead>
+                                        <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Plaka</TableHead>
+                                        <TableHead className="h-9 w-[40px] px-1.5"></TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {giderlerLoading ? (
+                                        <TableRow>
+                                          <TableCell colSpan={12} className="py-12 text-center">
+                                            <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" />
+                                          </TableCell>
+                                        </TableRow>
+                                      ) : giderlerError ? (
+                                        <TableRow>
+                                          <TableCell colSpan={12} className="py-12 text-center text-destructive">
+                                            Veriler yüklenirken hata oluştu. <button className="underline" onClick={() => refetchGiderler()}>Tekrar dene</button>
+                                          </TableCell>
+                                        </TableRow>
+                                      ) : sortedGiderler?.length === 0 ? (
+                                        <TableRow>
+                                          <TableCell colSpan={12} className="py-12 text-center text-muted-foreground">
+                                            Kayıt bulunamadı
+                                          </TableCell>
+                                        </TableRow>
+                                      ) : (
+                                        sortedGiderler?.map((gider, idx) => (
+                                          <TableRow
+                                            key={gider.id}
+                                            className={`${idx % 2 === 0 ? 'bg-white dark:bg-background' : 'bg-slate-50 dark:bg-muted/30'} border-b transition-colors hover:bg-accent/50`}
+                                          >
+                                            <TableCell className="px-2.5 py-1.5 font-medium tabular-nums">{formatTarihDisplay(gider.tarih)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 font-medium" title={gider.firma ?? undefined}>{gider.firma}</TableCell>
+                                            <TableCell className="max-w-[140px] truncate px-2.5 py-1.5 text-muted-foreground" title={gider.faturaNo ?? undefined}>{gider.faturaNo}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right tabular-nums text-muted-foreground">{formatCurrencyFull(gider.malBedeli)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right tabular-nums text-muted-foreground">{formatCurrencyFull(gider.kdvTutari)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right tabular-nums">{formatCurrencyFull(gider.toplamTutar)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-muted-foreground">{gider.paraBirimi}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right font-bold tabular-nums">{formatCurrencyFull(gider.tryTutar)}</TableCell>
+                                            <TableCell className="px-1.5 py-1">
+                                              <Select
+                                                value={gider.sube ?? ""}
+                                                onValueChange={(val) => handleInlineUpdate(gider.id, 'sube', val)}
                                               >
-                                                <TableCell className="whitespace-nowrap tabular-nums font-medium px-2 py-1.5">{formatTarihDisplay(gider.tarih)}</TableCell>
-                                                <TableCell className="font-medium px-2 py-1.5 break-words" title={gider.firma ?? undefined}>{gider.firma}</TableCell>
-                                                <TableCell className="text-muted-foreground px-2 py-1.5 truncate max-w-[110px]" title={gider.faturaNo ?? undefined}>{gider.faturaNo}</TableCell>
-                                                <TableCell className="text-right tabular-nums whitespace-nowrap px-2 py-1.5">{formatCurrency(gider.malBedeli)}</TableCell>
-                                                <TableCell className="text-right tabular-nums whitespace-nowrap px-2 py-1.5">{formatCurrency(gider.kdvTutari)}</TableCell>
-                                                <TableCell className="text-right tabular-nums whitespace-nowrap px-2 py-1.5">{formatCurrency(gider.toplamTutar)}</TableCell>
-                                                <TableCell className="whitespace-nowrap px-2 py-1.5">{gider.paraBirimi}</TableCell>
-                                                <TableCell className="text-right tabular-nums whitespace-nowrap font-semibold text-foreground px-2 py-1.5">{formatCurrency(gider.tryTutar)}</TableCell>
-                                                <TableCell className="px-1 py-1">
-                                                  <Select
-                                                    defaultValue={gider.sube || ""}
-                                                    onValueChange={(val) => handleInlineUpdate(gider.id, 'sube', val)}
-                                                  >
-                                                    <SelectTrigger className="h-7 w-full text-xs px-2">
-                                                      <SelectValue placeholder="Seçiniz" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                      {subeler.map((s) => (
-                                                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                                                      ))}
-                                                    </SelectContent>
-                                                  </Select>
-                                                </TableCell>
-                                                <TableCell className="px-1 py-1">
-                                                  <Select
-                                                    defaultValue={gider.kategori || ""}
-                                                    onValueChange={(val) => {
-                                                      handleInlineUpdate(gider.id, 'kategori', val);
-                                                      if (!ARAC_KATEGORILERI.includes(val)) {
-                                                        handleInlineUpdate(gider.id, 'plaka', null);
-                                                      }
-                                                    }}
-                                                  >
-                                                    <SelectTrigger className="h-7 w-full text-xs px-2">
-                                                      <SelectValue placeholder="Seçiniz" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                      {categories?.map((c) => (
-                                                        <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
-                                                      ))}
-                                                    </SelectContent>
-                                                  </Select>
-                                                </TableCell>
-                                                <TableCell className="px-1 py-1">
-                                                  {ARAC_KATEGORILERI.includes(gider.kategori || "") ? (
-                                                    <Select
-                                                      defaultValue={gider.plaka || ""}
-                                                      onValueChange={(val) => handleInlineUpdate(gider.id, 'plaka', val)}
-                                                    >
-                                                      <SelectTrigger className="h-7 w-full text-xs px-2">
-                                                        <SelectValue placeholder="Plaka" />
-                                                      </SelectTrigger>
-                                                      <SelectContent>
-                                                        {araclar?.map((a) => (
-                                                          <SelectItem key={a.id} value={a.plaka}>{a.plaka}</SelectItem>
-                                                        ))}
-                                                      </SelectContent>
-                                                    </Select>
-                                                  ) : (
-                                                    <span className="text-muted-foreground text-xs">-</span>
-                                                  )}
-                                                </TableCell>
-                                                <TableCell className="px-1 py-1">
-                                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditingGider(gider); setIsEditModalOpen(true); }}>
-                                                    <Pencil className="w-3.5 h-3.5" />
-                                                  </Button>
-                                                </TableCell>
-                                              </TableRow>
-                                            ))
-                                          )}
-                                        </TableBody>
-                                      </Table>
-                                    </div>
-                                  </div>
-                                </CardContent>
-                              </Card>
+                                                <SelectTrigger className="h-7 w-full max-w-[120px] px-2 text-[11.5px]">
+                                                  <SelectValue placeholder="Seçiniz" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  {subeler.map((s) => (
+                                                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                            </TableCell>
+                                            <TableCell className="px-1.5 py-1">
+                                              <Select
+                                                value={gider.kategori ?? ""}
+                                                onValueChange={(val) => {
+                                                  handleInlineUpdate(gider.id, 'kategori', val);
+                                                  if (!ARAC_KATEGORILERI.includes(val)) {
+                                                    handleInlineUpdate(gider.id, 'plaka', null);
+                                                  }
+                                                }}
+                                              >
+                                                <SelectTrigger className="h-7 w-full max-w-[140px] px-2 text-[11.5px]">
+                                                  <SelectValue placeholder="Seçiniz" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  {categories?.map((c) => (
+                                                    <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                            </TableCell>
+                                            <TableCell className="px-1.5 py-1">
+                                              {ARAC_KATEGORILERI.includes(gider.kategori || "") ? (
+                                                <Select
+                                                  value={gider.plaka ?? ""}
+                                                  onValueChange={(val) => handleInlineUpdate(gider.id, 'plaka', val)}
+                                                >
+                                                  <SelectTrigger className="h-7 w-full px-2 text-[11.5px]">
+                                                    <SelectValue placeholder="Plaka" />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    {araclar?.map((a) => (
+                                                      <SelectItem key={a.id} value={a.plaka}>{a.plaka}</SelectItem>
+                                                    ))}
+                                                  </SelectContent>
+                                                </Select>
+                                              ) : (
+                                                <span className="text-muted-foreground">—</span>
+                                              )}
+                                            </TableCell>
+                                            <TableCell className="px-1.5 py-1 text-center">
+                                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditingGider(gider); setIsEditModalOpen(true); }} data-testid={`button-gider-edit-${gider.id}`}>
+                                                <Pencil className="h-3.5 w-3.5" />
+                                              </Button>
+                                            </TableCell>
+                                          </TableRow>
+                                        ))
+                                      )}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              </div>
 
-                              {/* Gider Yükleme Geçmişi */}
-                              <Card>
-                                <CardHeader>
-                                  <CardTitle className="flex items-center gap-2">
-                                    <History className="w-5 h-5" />
-                                    Yükleme Geçmişi
-                                  </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                  {giderDosyalar?.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                                      <History className="w-12 h-12 mb-2" />
-                                      <p>Henüz gider yüklemesi yok</p>
-                                    </div>
-                                  ) : (
+                              {/* Yükleme Geçmişi */}
+                              <div className="rounded-[14px] border bg-card p-5">
+                                <h3 className="mb-3.5 flex items-center gap-2 text-[15px] font-bold">
+                                  <History className="h-4 w-4 text-muted-foreground" />
+                                  Yükleme Geçmişi
+                                </h3>
+                                {giderDosyalar?.length === 0 ? (
+                                  <p className="py-8 text-center text-sm text-muted-foreground">Henüz yükleme yok</p>
+                                ) : (
+                                  <div className="overflow-x-auto">
                                     <Table>
                                       <TableHeader>
-                                        <TableRow>
-                                          <TableHead>Tarih</TableHead>
-                                          <TableHead>Dosya Adı</TableHead>
-                                          <TableHead>Dönem</TableHead>
-                                          <TableHead className="text-right">Boyut</TableHead>
-                                          <TableHead className="text-right">Kayıt</TableHead>
-                                          <TableHead className="text-right">İşlem</TableHead>
+                                        <TableRow className="border-b hover:bg-transparent">
+                                          <TableHead className="px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Tarih</TableHead>
+                                          <TableHead className="px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Dosya Adı</TableHead>
+                                          <TableHead className="px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Dönem</TableHead>
+                                          <TableHead className="px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground">Kayıt</TableHead>
+                                          <TableHead className="px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground">İşlem</TableHead>
                                         </TableRow>
                                       </TableHeader>
                                       <TableBody>
@@ -1707,54 +1524,105 @@ type Arac = {
                                             : tekYil
                                               ? `${ayLabels} ${tekYil}`
                                               : "Çoklu";
-                                          const boyut = d.sizeBytes == null
-                                            ? "-"
-                                            : d.sizeBytes < 1024 * 1024
-                                              ? `${(d.sizeBytes / 1024).toFixed(0)} KB`
-                                              : `${(d.sizeBytes / 1024 / 1024).toFixed(2)} MB`;
-                                          const onGeriAl = async () => {
-                                            if (!window.confirm(`Bu yükleme silindiğinde ${d.kayitSayisi} satır gider kaydı da silinecek. Emin misiniz?`)) {
-                                              return;
-                                            }
-                                            const r = await fetch(`/api/giderler/dosyalar/${d.id}`, { method: "DELETE", credentials: "include" });
-                                            if (!r.ok) {
-                                              toast({ title: "Hata", description: "Silinemedi", variant: "destructive" });
-                                              return;
-                                            }
-                                            toast({ title: "Başarılı", description: "Yükleme geri alındı" });
-                                            refetchGiderDosyalar();
-                                            refetchGiderler();
-                                            refetchGiderStats();
-                                          };
                                           return (
-                                            <TableRow key={d.id} data-testid={`row-gider-dosya-${d.id}`}>
-                                              <TableCell>{tarih}</TableCell>
-                                              <TableCell title={d.filename}>{fname}</TableCell>
-                                              <TableCell>{donem}</TableCell>
-                                              <TableCell className="text-right">{boyut}</TableCell>
-                                              <TableCell className="text-right">{d.kayitSayisi}</TableCell>
-                                              <TableCell className="text-right">
-                                                <Button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="text-destructive hover:text-destructive"
-                                                  onClick={onGeriAl}
+                                            <TableRow key={d.id} className="border-b" data-testid={`row-gider-dosya-${d.id}`}>
+                                              <TableCell className="px-2.5 tabular-nums text-muted-foreground">{tarih}</TableCell>
+                                              <TableCell className="px-2.5 font-medium" title={d.filename}>{fname}</TableCell>
+                                              <TableCell className="px-2.5 text-muted-foreground">{donem}</TableCell>
+                                              <TableCell className="px-2.5 text-right tabular-nums">{d.kayitSayisi}</TableCell>
+                                              <TableCell className="px-2.5 text-right">
+                                                <button
+                                                  type="button"
+                                                  className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-rose-600 transition-colors hover:text-rose-700"
+                                                  onClick={() => setUndoTarget({ id: d.id, filename: d.filename, kayitSayisi: d.kayitSayisi })}
                                                   data-testid={`button-gider-geri-al-${d.id}`}
                                                 >
-                                                  <Trash2 className="w-4 h-4 mr-1" />
+                                                  <Trash2 className="h-3.5 w-3.5" />
                                                   Geri Al
-                                                </Button>
+                                                </button>
                                               </TableCell>
                                             </TableRow>
                                           );
                                         })}
                                       </TableBody>
                                     </Table>
-                                  )}
-                                </CardContent>
-                              </Card>
+                                  </div>
+                                )}
+                              </div>
 
                             </div>
+
+                            {/* Bu Ay'ı Temizle onayı */}
+                            <AlertDialog open={clearMonthOpen} onOpenChange={setClearMonthOpen}>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Bu Ay'ı Temizle</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    {`${aylar.find(a => a.value === selectedGiderAy)?.label || selectedGiderAy} ${selectedGiderYil} ayına ait TÜM gider kayıtları silinecek. Bu işlem geri alınamaz.`}
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>İptal</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    className="bg-rose-600 text-white hover:bg-rose-700"
+                                    onClick={async () => {
+                                      const ayLabel = aylar.find(a => a.value === selectedGiderAy)?.label || selectedGiderAy;
+                                      try {
+                                        const r = await fetch(`/api/giderler?ay=${selectedGiderAy}&yil=${selectedGiderYil}`, {
+                                          method: "DELETE",
+                                          credentials: "include",
+                                        });
+                                        if (!r.ok) {
+                                          toast({ title: "Hata", description: "Silinemedi", variant: "destructive" });
+                                          return;
+                                        }
+                                        toast({ title: "Başarılı", description: `${ayLabel} ${selectedGiderYil} kayıtları silindi` });
+                                        refetchGiderler();
+                                        refetchGiderStats();
+                                      } catch {
+                                        toast({ title: "Hata", description: "Bağlantı hatası", variant: "destructive" });
+                                      }
+                                    }}
+                                    data-testid="button-gider-temizle-onay"
+                                  >
+                                    Temizle
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+
+                            {/* Geri Al onayı */}
+                            <AlertDialog open={undoTarget !== null} onOpenChange={(open) => { if (!open) setUndoTarget(null); }}>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Yüklemeyi Geri Al</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    {undoTarget ? `Bu yükleme silindiğinde ${undoTarget.kayitSayisi} satır gider kaydı da silinecek. Emin misiniz?` : ""}
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>İptal</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    className="bg-rose-600 text-white hover:bg-rose-700"
+                                    onClick={async () => {
+                                      if (!undoTarget) return;
+                                      const r = await fetch(`/api/giderler/dosyalar/${undoTarget.id}`, { method: "DELETE", credentials: "include" });
+                                      if (!r.ok) {
+                                        toast({ title: "Hata", description: "Silinemedi", variant: "destructive" });
+                                        return;
+                                      }
+                                      toast({ title: "Başarılı", description: "Yükleme geri alındı" });
+                                      refetchGiderDosyalar();
+                                      refetchGiderler();
+                                      refetchGiderStats();
+                                    }}
+                                    data-testid="button-gider-geri-al-onay"
+                                  >
+                                    Geri Al
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
 
 
                             <ExcelUploadModal

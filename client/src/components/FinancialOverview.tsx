@@ -3,13 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
-    TrendingUp,
-    TrendingDown,
-    Wallet,
-    Banknote,
-    Scale
-} from "lucide-react";
-import {
     BarChart,
     Bar,
     XAxis,
@@ -24,76 +17,114 @@ import {
     Cell,
     Legend
 } from "recharts";
-import { formatCurrency, formatCurrencyShort } from "@/lib/utils";
+import { formatCurrencyFull, formatCurrencyShort } from "@/lib/utils";
+
+type OzetRow = {
+    ay: string;
+    satisKdvHaric: number;
+    satisKdv: number;
+    giderKdvHaric: number;
+    giderKdv: number;
+    calisanMaliyet: number;
+    yonetimNetUcret?: number;
+};
 
 type FinancialOverviewProps = {
-    data: {
-        ay: string;
-        satisKdvHaric: number;
-        satisKdv: number;
-        giderKdvHaric: number;
-        giderKdv: number;
-        calisanMaliyet: number;
-        yonetimNetUcret?: number;
-    }[];
+    data: OzetRow[];
+    /** Geçen yıl ozet-summary — KPI YoY delta'ları için (opsiyonel) */
+    prevData?: OzetRow[];
     year: string;
     selectedMonth?: string;
 };
 
-export function FinancialOverview({ data, year, selectedMonth }: FinancialOverviewProps) {
+// Tek yıl için KPI agregatları — Gümrük Özet (kanonik) mantığı, KDV hariç.
+function computeStats(rows: OzetRow[], excludeManagement: boolean) {
+    const totalRevenue = rows.reduce((sum, item) => sum + item.satisKdvHaric, 0);
+    const totalExpenses = rows.reduce((sum, item) => sum + item.giderKdvHaric, 0);
+    let totalLabor = rows.reduce((sum, item) => sum + item.calisanMaliyet, 0);
+    if (excludeManagement) {
+        // Yalnız yönetimin NET ücreti düşülür; SGK/vergi maliyet olarak kalır.
+        totalLabor -= rows.reduce((sum, item) => sum + (item.yonetimNetUcret || 0), 0);
+    }
+    const totalCosts = totalExpenses + totalLabor;
+    const netProfit = totalRevenue - totalCosts;
+    const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+    const salesVAT = rows.reduce((sum, item) => sum + item.satisKdv, 0);
+    const purchaseVAT = rows.reduce((sum, item) => sum + item.giderKdv, 0);
+    const netVAT = salesVAT - purchaseVAT;
+    return { totalRevenue, totalExpenses, totalLabor, totalCosts, netProfit, profitMargin, salesVAT, purchaseVAT, netVAT };
+}
+
+function pctDelta(curr: number, prev: number): number | null {
+    if (!prev) return null;
+    return ((curr - prev) / Math.abs(prev)) * 100;
+}
+
+// Accent-bar KPI kartı — Dashboard görsel sistemiyle aynı
+function KpiCard({
+    label,
+    value,
+    accent,
+    valueColor,
+    deltaPct,
+    deltaSub,
+    invert = false,
+    neutralDelta,
+}: {
+    label: string;
+    value: string;
+    accent: string;
+    valueColor?: string;
+    deltaPct?: number | null;
+    deltaSub?: string;
+    invert?: boolean;
+    neutralDelta?: string;
+}) {
+    const hasPct = typeof deltaPct === "number" && Number.isFinite(deltaPct);
+    const positive = hasPct && (deltaPct as number) >= 0;
+    const good = invert ? !positive : positive;
+    const deltaColor = neutralDelta ? "#64748b" : !hasPct ? "#94a3b8" : good ? "#059669" : "#e11d48";
+    const icon = neutralDelta || !hasPct ? "" : positive ? "▲" : "▼";
+    const deltaText = neutralDelta
+        ?? (hasPct ? `${positive ? "+" : ""}${(deltaPct as number).toFixed(1).replace(".", ",")}%` : "geçen yıl yok");
+    return (
+        <div className="relative overflow-hidden rounded-[14px] border border-border/70 bg-card p-5">
+            <span className="absolute left-0 top-0 h-full w-[3px]" style={{ background: accent }} aria-hidden="true" />
+            <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                <span className="text-sm" style={{ color: accent }}>▮</span>
+            </div>
+            <p className="mt-2.5 text-[27px] font-extrabold leading-none tracking-tight tabular-nums" style={valueColor ? { color: valueColor } : undefined}>
+                {value}
+            </p>
+            <p className="mt-2.5 text-[11px] font-semibold tabular-nums" style={{ color: deltaColor }}>
+                {icon} {deltaText} {deltaSub && <span className="font-normal text-muted-foreground">{deltaSub}</span>}
+            </p>
+        </div>
+    );
+}
+
+export function FinancialOverview({ data, prevData, year, selectedMonth }: FinancialOverviewProps) {
     const [excludeManagement, setExcludeManagement] = useState(false);
 
     const stats = useMemo(() => {
-        // Filter data if a month is selected
-        const activeData = selectedMonth
-            ? data.filter(d => d.ay === selectedMonth)
-            : data;
-
-        const totalRevenue = activeData.reduce((sum, item) => sum + item.satisKdvHaric, 0);
-        const totalExpenses = activeData.reduce((sum, item) => sum + item.giderKdvHaric, 0);
-        
-        // Calculate Total Labor
-        let totalLabor = activeData.reduce((sum, item) => sum + item.calisanMaliyet, 0);
-
-        // If exclusion is active, subtract management NET salaries
-        // Note: We only subtract the NET component. SGK/Tax remains as a cost.
-        if (excludeManagement) {
-            const managementReduction = activeData.reduce((sum, item) => sum + (item.yonetimNetUcret || 0), 0);
-            totalLabor -= managementReduction;
-        }
-
-        // Total Costs (Expenses + Labor)
-        const totalCosts = totalExpenses + totalLabor;
-
-        // Net Profit (Revenue - Costs)
-        const netProfit = totalRevenue - totalCosts;
-
-        // Profit Margin
-        const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
-
-        // VAT Data
-        const salesVAT = activeData.reduce((sum, item) => sum + item.satisKdv, 0);
-        const purchaseVAT = activeData.reduce((sum, item) => sum + item.giderKdv, 0);
-        const netVAT = salesVAT - purchaseVAT;
-
-        // Distribution for Donut Chart (Always positive for pie chart)
+        const activeData = selectedMonth ? data.filter(d => d.ay === selectedMonth) : data;
+        const base = computeStats(activeData, excludeManagement);
         const costDistribution = [
-            { name: "Mal/Hizmet Giderleri", value: totalExpenses, color: "#ef4444" }, // Red-500
-            { name: "Personel Maliyeti", value: totalLabor, color: "#f97316" }, // Orange-500
-            { name: "Net Kar", value: Math.max(0, netProfit), color: "#10b981" }, // Emerald-500
+            { name: "Mal/Hizmet Gideri", value: base.totalExpenses, color: "#e11d48" }, // rose
+            { name: "Personel Maliyeti", value: base.totalLabor, color: "#7c3aed" }, // violet
+            { name: "Net Kâr", value: Math.max(0, base.netProfit), color: "#059669" }, // emerald
         ].filter(item => item.value > 0);
-
-        return {
-            totalRevenue,
-            totalCosts,
-            netProfit,
-            profitMargin,
-            salesVAT,
-            purchaseVAT,
-            netVAT,
-            costDistribution
-        };
+        return { ...base, costDistribution };
     }, [data, selectedMonth, excludeManagement]);
+
+    // YoY — geçen yılı cari ay filtresiyle HİZALA (ay seçiliyse o ay vs geçen yılın aynı ayı; değilse yıl vs yıl)
+    const prevStats = useMemo(() => {
+        if (!prevData || prevData.length === 0) return null;
+        const prevActive = selectedMonth ? prevData.filter(d => d.ay === selectedMonth) : prevData;
+        if (prevActive.length === 0) return null;
+        return computeStats(prevActive, excludeManagement);
+    }, [prevData, selectedMonth, excludeManagement]);
 
     const monthLabels = {
         "ocak": "Oca", "subat": "Şub", "mart": "Mar", "nisan": "Nis",
@@ -135,73 +166,37 @@ export function FinancialOverview({ data, year, selectedMonth }: FinancialOvervi
                 </Label>
             </div>
 
-            {/* Top Level Key Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Net Profit Card */}
-                <Card className={stats.netProfit >= 0 ? "border-l-4 border-l-emerald-500" : "border-l-4 border-l-red-500"}>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                            {selectedMonth ? `${monthLabels[selectedMonth as keyof typeof monthLabels] || selectedMonth} Net Kar / Zarar` : "Yıllık Net Kar / Zarar"}
-                        </CardTitle>
-                        {stats.netProfit >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-red-500" />}
-                    </CardHeader>
-                    <CardContent>
-                        <div className={`text-2xl font-bold ${stats.netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                            {formatCurrency(stats.netProfit)}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            %{(stats.profitMargin).toFixed(1)} Kar Marjı
-                        </p>
-                    </CardContent>
-                </Card>
-
-                {/* Total Revenue */}
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                            {selectedMonth ? "Aylık Ciro" : "Toplam Ciro"}
-                        </CardTitle>
-                        <Wallet className="h-4 w-4 text-blue-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{formatCurrency(stats.totalRevenue)}</div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            KDV Hariç
-                        </p>
-                    </CardContent>
-                </Card>
-
-                {/* Total Costs */}
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                            {selectedMonth ? "Aylık Maliyet" : "Toplam Maliyet"}
-                        </CardTitle>
-                        <Scale className="h-4 w-4 text-orange-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{formatCurrency(stats.totalCosts)}</div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            Personel + Giderler
-                        </p>
-                    </CardContent>
-                </Card>
-
-                {/* VAT Position */}
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                            {selectedMonth ? "Aylık KDV Durumu" : "KDV Durumu"}
-                        </CardTitle>
-                        <Banknote className="h-4 w-4 text-purple-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{formatCurrency(stats.netVAT)}</div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            {stats.netVAT > 0 ? "Ödenecek KDV" : "Devreden KDV"}
-                        </p>
-                    </CardContent>
-                </Card>
+            {/* Top Level Key Metrics — accent bar + YoY delta (Dashboard ile aynı sistem) */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <KpiCard
+                    label={selectedMonth ? `${monthLabels[selectedMonth as keyof typeof monthLabels] || selectedMonth} Net Kâr / Zarar` : "Yıllık Net Kâr / Zarar"}
+                    value={formatCurrencyFull(stats.netProfit)}
+                    valueColor={stats.netProfit >= 0 ? "#047857" : "#e11d48"}
+                    accent={stats.netProfit >= 0 ? "#059669" : "#e11d48"}
+                    deltaPct={prevStats ? pctDelta(stats.netProfit, prevStats.netProfit) : null}
+                    deltaSub={`· %${stats.profitMargin.toFixed(1).replace(".", ",")} marj`}
+                />
+                <KpiCard
+                    label={selectedMonth ? "Aylık Ciro" : "Toplam Ciro"}
+                    value={formatCurrencyFull(stats.totalRevenue)}
+                    accent="#0ea5e9"
+                    deltaPct={prevStats ? pctDelta(stats.totalRevenue, prevStats.totalRevenue) : null}
+                    deltaSub="· KDV hariç"
+                />
+                <KpiCard
+                    label={selectedMonth ? "Aylık Maliyet" : "Toplam Maliyet"}
+                    value={formatCurrencyFull(stats.totalCosts)}
+                    accent="#d97706"
+                    deltaPct={prevStats ? pctDelta(stats.totalCosts, prevStats.totalCosts) : null}
+                    deltaSub="· personel + gider"
+                    invert
+                />
+                <KpiCard
+                    label={selectedMonth ? "Aylık KDV Durumu" : "KDV Durumu"}
+                    value={formatCurrencyFull(stats.netVAT)}
+                    accent="#7c3aed"
+                    neutralDelta={stats.netVAT >= 0 ? "Ödenecek KDV" : "Devreden KDV"}
+                />
             </div>
 
             {/* Charts Section */}
@@ -229,13 +224,13 @@ export function FinancialOverview({ data, year, selectedMonth }: FinancialOvervi
                                         axisLine={false}
                                     />
                                     <Tooltip
-                                        formatter={(value: number) => formatCurrency(value)}
+                                        formatter={(value: number) => formatCurrencyFull(value)}
                                         contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
                                     />
                                     <Legend />
-                                    <Bar dataKey="gelir" name="Gelir" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                                    <Bar dataKey="gider" name="Gider" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                                    <Line type="monotone" dataKey="kar" name="Net Kar" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} />
+                                    <Bar dataKey="gelir" name="Gelir" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                    <Bar dataKey="gider" name="Gider" fill="#e11d48" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                    <Line type="monotone" dataKey="kar" name="Net Kâr" stroke="#0284c7" strokeWidth={3} dot={{ r: 4 }} />
                                 </ComposedChart>
                             </ResponsiveContainer>
                         </div>
@@ -265,7 +260,7 @@ export function FinancialOverview({ data, year, selectedMonth }: FinancialOvervi
                                         ))}
                                     </Pie>
                                     <Tooltip
-                                        formatter={(value: number) => formatCurrency(value)}
+                                        formatter={(value: number) => formatCurrencyFull(value)}
                                         contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
                                     />
                                     <Legend verticalAlign="bottom" height={36} />
@@ -277,8 +272,8 @@ export function FinancialOverview({ data, year, selectedMonth }: FinancialOvervi
                                 <div className="text-xs font-medium text-muted-foreground">
                                     Kar Marjı
                                 </div>
-                                <div className={`text-xl font-bold ${stats.profitMargin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                                    %{stats.profitMargin.toFixed(1)}
+                                <div className="text-2xl font-extrabold tabular-nums" style={{ color: "#059669" }}>
+                                    %{stats.profitMargin.toFixed(1).replace(".", ",")}
                                 </div>
                             </div>
                         </div>
@@ -300,11 +295,11 @@ export function FinancialOverview({ data, year, selectedMonth }: FinancialOvervi
                                 <YAxis className="text-xs" tickFormatter={formatCurrencyShort} tickLine={false} axisLine={false} />
                                 <Tooltip
                                     cursor={{ fill: 'transparent' }}
-                                    formatter={(value: number) => formatCurrency(value)}
+                                    formatter={(value: number) => formatCurrencyFull(value)}
                                     contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
                                 />
                                 <Legend />
-                                <Bar dataKey="kdvOdenecek" name="Hesaplanan KDV (Satış)" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                                <Bar dataKey="kdvOdenecek" name="Hesaplanan KDV (Satış)" fill="#d97706" radius={[4, 4, 0, 0]} maxBarSize={50} />
                                 <Bar dataKey="kdvIndirilecek" name="İndirilecek KDV (Gider)" fill="#0ea5e9" radius={[4, 4, 0, 0]} maxBarSize={50} />
                             </BarChart>
                         </ResponsiveContainer>

@@ -46,12 +46,13 @@ type GroupBy = "month" | "employee" | "company" | "customs" | "issuer" | "tip";
 type ChartType = "bar" | "line";
 
 // Available metrics to display
+// Disiplinli palet (README kart #4) — rainbow yerine her metrik kendi sabit renginde
 const metricOptions = [
-    { id: "malBedeli", label: "Mal Bedeli (KDV Hariç)", color: "hsl(var(--chart-1))" },
-    { id: "topKdvTutar", label: "KDV Tutarı", color: "hsl(var(--chart-2))" },
-    { id: "topFaturaTutar", label: "Toplam Fatura (KDV Dahil)", color: "hsl(var(--chart-3))" },
-    { id: "topIskonto", label: "Toplam İskonto", color: "hsl(var(--chart-4))" },
-    { id: "dosyaSayisi", label: "Dosya Sayısı (Sağ Eksen)", color: "#ff0000", isCount: true },
+    { id: "malBedeli", label: "Mal Bedeli (KDV Hariç)", color: "#7c3aed" },      // violet
+    { id: "topKdvTutar", label: "KDV Tutarı", color: "#0ea5e9" },                // sky
+    { id: "topFaturaTutar", label: "Toplam Fatura (KDV Dahil)", color: "#059669" }, // emerald
+    { id: "topIskonto", label: "Toplam İskonto", color: "#d97706" },             // amber
+    { id: "dosyaSayisi", label: "Dosya Sayısı (Sağ Eksen)", color: "#e11d48", isCount: true }, // rose
 ];
 
 const groupByOptions = [
