@@ -108,7 +108,7 @@ export default function Sigorta() {
 
     return (
         <div className="min-h-full bg-slate-50 dark:bg-background">
-            <div className="mx-auto max-w-[1200px] px-6 pb-12">
+            <div className="px-6 pb-12 lg:px-8">
                 <Tabs value={mainTab} onValueChange={setMainTab} className="w-full">
                     {/* ===== STICKY HEADER + TABS ===== */}
                     <div className="sticky top-0 z-20 border-b border-border/70 bg-slate-50/90 pt-5 backdrop-blur dark:bg-background/90">

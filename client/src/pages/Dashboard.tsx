@@ -472,7 +472,7 @@ export default function Dashboard() {
 
     return (
         <div className="min-h-screen bg-background text-foreground">
-            <div className="mx-auto max-w-[1400px] space-y-7 p-6 md:p-8">
+            <div className="space-y-7 p-6 lg:p-8">
                 {/* ===== HEADER ===== */}
                 <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                     <div>
