@@ -24,6 +24,30 @@ const ruhsatStorage = multer.diskStorage({
 });
 const uploadRuhsat = multer({ storage: ruhsatStorage });
 
+const trafikPoliceStorage = multer.diskStorage({
+  destination: function (_req, _file, cb) {
+    const dir = "uploads/trafik-police";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (_req, file, cb) {
+    cb(null, `trafik-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`);
+  },
+});
+const uploadTrafikPolice = multer({ storage: trafikPoliceStorage });
+
+const kaskoPoliceStorage = multer.diskStorage({
+  destination: function (_req, _file, cb) {
+    const dir = "uploads/kasko-police";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (_req, file, cb) {
+    cb(null, `kasko-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`);
+  },
+});
+const uploadKaskoPolice = multer({ storage: kaskoPoliceStorage });
+
 const dufStorage = multer.diskStorage({
   destination: function (_req, _file, cb) {
     const dir = "uploads/duf";
@@ -123,6 +147,7 @@ import { inArray } from "drizzle-orm";
 import { PDFParse } from "pdf-parse";
 import { getTCMBExchangeRate, normalizeCurrencyCode } from "./currency"; // Helper added
 import { processUserQuery, generateNaturalLanguageResponse } from "./lib/openai";
+import { extractPolicyFields } from "./lib/policeOcr";
 
 
 // Row hash oluştur - satırı benzersiz tanımlamak için
@@ -185,15 +210,79 @@ export async function registerRoutes(
       if (!req.file) {
         return res.status(400).json({ error: "Dosya yüklenemedi." });
       }
-      
+
       const fileUrl = `/uploads/ruhsat/${req.file.filename}`;
-      
+
       await storage.updateArac(req.params.id, { ruhsatDosyasi: fileUrl });
-      
+
       res.json({ message: "Ruhsat yüklendi", url: fileUrl });
     } catch (err) {
       console.error("Ruhsat yükleme hatası:", err);
       res.status(500).json({ error: "Ruhsat yüklenirken bir hata oluştu" });
+    }
+  });
+
+  app.post("/api/araclar/:id/trafik-police", uploadTrafikPolice.single('police'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Dosya yüklenemedi." });
+      }
+      const fileUrl = `/uploads/trafik-police/${req.file.filename}`;
+      const updated = await storage.updateArac(req.params.id, { trafikPoliceDosyasi: fileUrl });
+      if (!updated) return res.status(404).json({ error: "Bulunamadı" });
+
+      // OCR (best-effort): poliçeden alanları çıkar; yalnızca BOŞ alanları doldur (mevcut veriyi ezme)
+      let extracted = null;
+      try {
+        extracted = await extractPolicyFields(req.file.path, "trafik");
+        if (extracted) {
+          const patch: any = {};
+          if (extracted.sirket && !updated.trafikSigortaSirketi) patch.trafikSigortaSirketi = extracted.sirket;
+          if (extracted.policeNo && !updated.trafikPoliceNo) patch.trafikPoliceNo = extracted.policeNo;
+          if (extracted.bitisTarihi && !updated.trafikBitisTarihi) patch.trafikBitisTarihi = extracted.bitisTarihi;
+          if (extracted.fiyat && (!updated.trafikSigortaFiyat || Number(updated.trafikSigortaFiyat) === 0)) patch.trafikSigortaFiyat = extracted.fiyat;
+          if (Object.keys(patch).length > 0) await storage.updateArac(req.params.id, patch);
+        }
+      } catch (ocrErr) {
+        console.error("Trafik poliçe OCR hatası (yükleme yine de başarılı):", ocrErr);
+      }
+
+      res.json({ message: "Trafik poliçesi yüklendi", url: fileUrl, extracted });
+    } catch (err) {
+      console.error("Trafik poliçe yükleme hatası:", err);
+      res.status(500).json({ error: "Trafik poliçesi yüklenirken bir hata oluştu" });
+    }
+  });
+
+  app.post("/api/araclar/:id/kasko-police", uploadKaskoPolice.single('police'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Dosya yüklenemedi." });
+      }
+      const fileUrl = `/uploads/kasko-police/${req.file.filename}`;
+      const updated = await storage.updateArac(req.params.id, { kaskoPoliceDosyasi: fileUrl });
+      if (!updated) return res.status(404).json({ error: "Bulunamadı" });
+
+      // OCR (best-effort): poliçeden alanları çıkar; yalnızca BOŞ alanları doldur (mevcut veriyi ezme)
+      let extracted = null;
+      try {
+        extracted = await extractPolicyFields(req.file.path, "kasko");
+        if (extracted) {
+          const patch: any = {};
+          if (extracted.sirket && !updated.kaskoSigortaSirketi) patch.kaskoSigortaSirketi = extracted.sirket;
+          if (extracted.policeNo && !updated.kaskoPoliceNo) patch.kaskoPoliceNo = extracted.policeNo;
+          if (extracted.bitisTarihi && !updated.kaskoBitisTarihi) patch.kaskoBitisTarihi = extracted.bitisTarihi;
+          if (extracted.fiyat && (!updated.kaskoSigortaFiyat || Number(updated.kaskoSigortaFiyat) === 0)) patch.kaskoSigortaFiyat = extracted.fiyat;
+          if (Object.keys(patch).length > 0) await storage.updateArac(req.params.id, patch);
+        }
+      } catch (ocrErr) {
+        console.error("Kasko poliçe OCR hatası (yükleme yine de başarılı):", ocrErr);
+      }
+
+      res.json({ message: "Kasko poliçesi yüklendi", url: fileUrl, extracted });
+    } catch (err) {
+      console.error("Kasko poliçe yükleme hatası:", err);
+      res.status(500).json({ error: "Kasko poliçesi yüklenirken bir hata oluştu" });
     }
   });
 

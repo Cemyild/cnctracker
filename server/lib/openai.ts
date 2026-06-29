@@ -63,7 +63,7 @@ export async function processUserQuery(userQuery: string): Promise<{ answer: str
     `;
 
     const message = await anthropic.messages.create({
-      model: "claude-3-sonnet-20240229",
+      model: "claude-sonnet-4-6",
       max_tokens: 1024,
       system: systemPrompt1,
       messages: [
@@ -114,7 +114,7 @@ export async function generateNaturalLanguageResponse(userQuery: string, sql: st
       `;
 
       const message = await anthropic.messages.create({
-        model: "claude-3-sonnet-20240229",
+        model: "claude-sonnet-4-6",
         max_tokens: 1024,
         system: systemPrompt2,
         messages: [{ role: "user", content: "Lütfen sonuçları analiz et." }]

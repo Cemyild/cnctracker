@@ -240,11 +240,13 @@ export const araclar = pgTable("araclar", {
   trafikPoliceNo: text("trafik_police_no"),
   trafikBitisTarihi: text("trafik_bitis_tarihi"),
   trafikSigortaFiyat: decimal("trafik_sigorta_fiyat", { precision: 15, scale: 2 }),
+  trafikPoliceDosyasi: text("trafik_police_dosyasi"),
   // Kasko
   kaskoSigortaSirketi: text("kasko_sigorta_sirketi"),
   kaskoPoliceNo: text("kasko_police_no"),
   kaskoBitisTarihi: text("kasko_bitis_tarihi"),
   kaskoSigortaFiyat: decimal("kasko_sigorta_fiyat", { precision: 15, scale: 2 }),
+  kaskoPoliceDosyasi: text("kasko_police_dosyasi"),
   // Ruhsat
   ruhsatDosyasi: text("ruhsat_dosyasi"),
 });

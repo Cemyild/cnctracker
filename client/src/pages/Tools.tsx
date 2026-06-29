@@ -3,8 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Plus, Trash2, Car, Calendar, MoreVertical, Fuel, Wrench, FileText, AlertCircle, TrendingUp, DollarSign, Upload, Zap, Building2 } from "lucide-react";
-import { format, parseISO, isBefore, addDays } from "date-fns";
+import { Plus, Trash2, Car, Calendar, MoreVertical, Fuel, Wrench, FileText, AlertCircle, TrendingUp, DollarSign, Upload, Zap, Building2, MapPin, Pencil } from "lucide-react";
+import { format, parseISO, isBefore, addDays, differenceInCalendarDays } from "date-fns";
 import { tr } from "date-fns/locale";
 import * as XLSX from "xlsx";
 
@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetDescription } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 import {
     Table,
@@ -33,6 +34,7 @@ import {
     FormMessage,
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
+import { cn, formatCurrencyFull } from "@/lib/utils";
 import { type Arac, insertAracSchema, type AracGider, insertAracGiderSchema, type Gider } from "@shared/schema";
 import { subYears, parse } from "date-fns";
 
@@ -72,16 +74,16 @@ const BRAND_LOGOS: Record<string, string> = {
 
 const BrandLogo = ({ brand, model }: { brand?: string | null, model?: string | null }) => {
     if (!brand) return <Car className="w-12 h-12 text-slate-200" />;
-    
+
     const normalizedBrand = brand.toLowerCase().trim().replace(/ /g, "-");
     const logoUrl = BRAND_LOGOS[normalizedBrand];
 
     if (logoUrl) {
         return (
             <div className="w-16 h-16 flex items-center justify-center p-1">
-                <img 
-                    src={logoUrl} 
-                    alt={brand} 
+                <img
+                    src={logoUrl}
+                    alt={brand}
                     className="max-w-full max-h-full object-contain opacity-90 hover:opacity-100 transition-opacity"
                     onError={(e) => {
                         // Fallback if image fails
@@ -102,18 +104,131 @@ const BrandLogo = ({ brand, model }: { brand?: string | null, model?: string | n
 
 // --- SUBSIDIARY COMPONENTS ---
 
-function VehicleForm({ 
-    defaultValues, 
-    onSubmit, 
-    isEditing = false 
-}: { 
-    defaultValues?: Partial<Arac>, 
+// Poliçe OCR'ından dönen alanlar (server /api/araclar/:id/{trafik,kasko}-police → extracted)
+type ExtractedPolicyFields = { sirket: string | null; policeNo: string | null; bitisTarihi: string | null; fiyat: string | null };
+
+function PoliceUploader({
+    aracId,
+    isEditing,
+    endpoint,
+    currentUrl,
+    onChange,
+    fieldNameForUpdate,
+    onExtract,
+}: {
+    aracId?: string;
+    isEditing: boolean;
+    endpoint: "trafik-police" | "kasko-police";
+    currentUrl?: string | null;
+    onChange: (url: string | null) => void;
+    fieldNameForUpdate: "trafikPoliceDosyasi" | "kaskoPoliceDosyasi";
+    onExtract?: (fields: ExtractedPolicyFields) => void;
+}) {
+    const { toast } = useToast();
+    const queryClient = useQueryClient();
+
+    if (currentUrl) {
+        return (
+            <div className="flex flex-col gap-2 p-3 border border-dashed rounded-lg bg-slate-50/50">
+                <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 w-full font-medium border-2 border-primary/20 hover:border-primary/50 hover:bg-primary/5 hover:text-primary gap-2"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        window.open(currentUrl, "_blank");
+                    }}
+                >
+                    <FileText className="w-4 h-4" />
+                    Poliçeyi Görüntüle
+                </Button>
+                <div className="flex items-center justify-between gap-2 px-1">
+                    <span className="text-xs text-muted-foreground truncate max-w-[200px] font-mono bg-slate-100 px-2 py-1 rounded">
+                        {currentUrl.split('/').pop()}
+                    </span>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={async (e) => {
+                            e.preventDefault();
+                            if (!confirm("Poliçe dosyasını silmek istediğinize emin misiniz?")) return;
+                            if (!aracId) return;
+                            try {
+                                const res = await fetch(`/api/araclar/${aracId}`, {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ [fieldNameForUpdate]: null }),
+                                });
+                                if (!res.ok) throw new Error("Silme başarısız");
+                                onChange(null);
+                                toast({ description: "Poliçe dosyası silindi." });
+                                await queryClient.invalidateQueries({ queryKey: ["/api/araclar"] });
+                            } catch (err) {
+                                console.error(err);
+                                toast({ title: "Hata", description: "Dosya silinemedi.", variant: "destructive" });
+                            }
+                        }}
+                        title="Dosyayı Sil"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <Input
+            type="file"
+            accept="image/*,.pdf"
+            className="cursor-pointer file:cursor-pointer file:text-primary file:font-medium"
+            onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (!isEditing || !aracId) {
+                    alert("Lütfen önce aracı kaydedin, sonra poliçe yükleyin.");
+                    e.target.value = "";
+                    return;
+                }
+                const formData = new FormData();
+                formData.append("police", file);
+                try {
+                    const res = await fetch(`/api/araclar/${aracId}/${endpoint}`, {
+                        method: "POST",
+                        body: formData,
+                    });
+                    if (!res.ok) throw new Error("Yükleme başarısız");
+                    const data = await res.json();
+                    onChange(data.url);
+                    if (data.extracted && onExtract) onExtract(data.extracted);
+                    const okundu = data.extracted && Object.values(data.extracted).some((v: any) => v);
+                    toast({ title: "Başarılı", description: okundu ? "Poliçe yüklendi, bilgiler otomatik okundu." : "Poliçe dosyası yüklendi." });
+                    await queryClient.invalidateQueries({ queryKey: ["/api/araclar"] });
+                } catch (err) {
+                    console.error(err);
+                    toast({ title: "Hata", description: "Yükleme sırasında hata oluştu.", variant: "destructive" });
+                }
+            }}
+        />
+    );
+}
+
+function VehicleForm({
+    defaultValues,
+    onSubmit,
+    isEditing = false
+}: {
+    defaultValues?: Partial<Arac>,
     onSubmit: (values: any) => void,
-    isEditing?: boolean 
+    isEditing?: boolean
 }) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [ruhsatUrl, setRuhsatUrl] = useState(defaultValues?.ruhsatDosyasi);
+    const [trafikPoliceUrl, setTrafikPoliceUrl] = useState(defaultValues?.trafikPoliceDosyasi);
+    const [kaskoPoliceUrl, setKaskoPoliceUrl] = useState(defaultValues?.kaskoPoliceDosyasi);
 
     const form = useForm({
         resolver: zodResolver(insertAracSchema),
@@ -236,6 +351,23 @@ function VehicleForm({
                             )}
                         />
                      </div>
+                     <FormItem>
+                        <FormLabel>Poliçe Dosyası</FormLabel>
+                        <PoliceUploader
+                            aracId={defaultValues?.id}
+                            isEditing={isEditing}
+                            endpoint="trafik-police"
+                            currentUrl={trafikPoliceUrl}
+                            onChange={setTrafikPoliceUrl}
+                            fieldNameForUpdate="trafikPoliceDosyasi"
+                            onExtract={(f) => {
+                                if (f.sirket && !form.getValues("trafikSigortaSirketi")) form.setValue("trafikSigortaSirketi", f.sirket, { shouldDirty: true });
+                                if (f.policeNo && !form.getValues("trafikPoliceNo")) form.setValue("trafikPoliceNo", f.policeNo, { shouldDirty: true });
+                                if (f.bitisTarihi && !form.getValues("trafikBitisTarihi")) form.setValue("trafikBitisTarihi", f.bitisTarihi, { shouldDirty: true });
+                                if (f.fiyat && (!form.getValues("trafikSigortaFiyat") || Number(form.getValues("trafikSigortaFiyat")) === 0)) form.setValue("trafikSigortaFiyat", f.fiyat, { shouldDirty: true });
+                            }}
+                        />
+                     </FormItem>
                 </div>
 
                 <div className="border rounded-md p-4 space-y-4 bg-muted/20">
@@ -288,6 +420,23 @@ function VehicleForm({
                             )}
                         />
                      </div>
+                     <FormItem>
+                        <FormLabel>Poliçe Dosyası</FormLabel>
+                        <PoliceUploader
+                            aracId={defaultValues?.id}
+                            isEditing={isEditing}
+                            endpoint="kasko-police"
+                            currentUrl={kaskoPoliceUrl}
+                            onChange={setKaskoPoliceUrl}
+                            fieldNameForUpdate="kaskoPoliceDosyasi"
+                            onExtract={(f) => {
+                                if (f.sirket && !form.getValues("kaskoSigortaSirketi")) form.setValue("kaskoSigortaSirketi", f.sirket, { shouldDirty: true });
+                                if (f.policeNo && !form.getValues("kaskoPoliceNo")) form.setValue("kaskoPoliceNo", f.policeNo, { shouldDirty: true });
+                                if (f.bitisTarihi && !form.getValues("kaskoBitisTarihi")) form.setValue("kaskoBitisTarihi", f.bitisTarihi, { shouldDirty: true });
+                                if (f.fiyat && (!form.getValues("kaskoSigortaFiyat") || Number(form.getValues("kaskoSigortaFiyat")) === 0)) form.setValue("kaskoSigortaFiyat", f.fiyat, { shouldDirty: true });
+                            }}
+                        />
+                     </FormItem>
                 </div>
 
                 <div className="border rounded-md p-4 space-y-4 bg-muted/20">
@@ -295,11 +444,11 @@ function VehicleForm({
                      <div className="grid grid-cols-1 gap-4">
                         <FormItem>
                             <FormLabel>Ruhsat Dosyası</FormLabel>
-                            
+
                             {ruhsatUrl ? (
                                 <div className="flex flex-col gap-3 p-4 border border-dashed rounded-lg bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                                    <Button 
-                                        variant="outline" 
+                                    <Button
+                                        variant="outline"
                                         className="h-16 w-full text-lg font-medium border-2 border-primary/20 hover:border-primary/50 hover:bg-primary/5 hover:text-primary transition-all gap-3"
                                         onClick={(e) => {
                                             e.preventDefault();
@@ -309,19 +458,19 @@ function VehicleForm({
                                         <FileText className="w-6 h-6" />
                                         Ruhsatı Görüntüle
                                     </Button>
-                                    
+
                                     <div className="flex items-center justify-between gap-2 px-1">
                                         <span className="text-xs text-muted-foreground truncate max-w-[200px] font-mono bg-slate-100 px-2 py-1 rounded">
                                             {ruhsatUrl.split('/').pop()}
                                         </span>
-                                        <Button 
-                                            variant="ghost" 
-                                            size="sm" 
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
                                             className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                                             onClick={async (e) => {
                                                 e.preventDefault();
                                                 if (!confirm("Ruhsat dosyasını silmek istediğinize emin misiniz?")) return;
-                                                
+
                                                 try {
                                                     const aracId = defaultValues?.id;
                                                     if (!aracId) return;
@@ -330,21 +479,21 @@ function VehicleForm({
                                                     // Since we don't have a specific DELETE for just the file field, we update the vehicle.
                                                     // Note: We need to ensure the backend accepts partial updates or we verify the implementation.
                                                     // Alternatively, we can use the same logic as the parent updateMutation but simpler.
-                                                    
+
                                                     const res = await fetch(`/api/araclar/${aracId}`, {
-                                                        method: "PUT", // Assuming PATCH is supported or PUT with partial data? 
+                                                        method: "PUT", // Assuming PATCH is supported or PUT with partial data?
                                                         // Actually server routes usually define PUT /api/araclar/:id logic.
                                                         // Let's check routes.ts or storage.ts to be safe, but typically PUT updates fields.
-                                                        // If backend expects full object, this might be risky. 
-                                                        // Let's assume we can send partial for now or check routes. 
+                                                        // If backend expects full object, this might be risky.
+                                                        // Let's assume we can send partial for now or check routes.
                                                         // Wait, in Tools.tsx updateMutation uses PUT. Let's see if PUT handles partials.
                                                         // Usually standard practice. If not, I'll need to adapt.
                                                         // For now, let's try assuming standard partial update or create a specific delete route if needed. source of truth is routes.ts
                                                         // The safer bet is to use the same logic as "delete file" by uploading empty? No.
                                                         // Let's assume I can send { ruhsatDosyasi: null }
-                                                        
+
                                                         headers: { "Content-Type": "application/json" },
-                                                        body: JSON.stringify({ ruhsatDosyasi: null }) 
+                                                        body: JSON.stringify({ ruhsatDosyasi: null })
                                                     });
 
                                                     if (!res.ok) throw new Error("Silme başarısız");
@@ -367,8 +516,8 @@ function VehicleForm({
                             ) : (
                                 <FormControl>
                                     <div className="flex items-center gap-4">
-                                        <Input 
-                                            type="file" 
+                                        <Input
+                                            type="file"
                                             accept="image/*,.pdf"
                                             className="cursor-pointer file:cursor-pointer file:text-primary file:font-medium"
                                             onChange={async (e) => {
@@ -386,16 +535,16 @@ function VehicleForm({
                                                 try {
                                                     const aracId = defaultValues?.id;
                                                     if (!aracId) throw new Error("Araç ID bulunamadı");
-                                                    
+
                                                     const res = await fetch(`/api/araclar/${aracId}/ruhsat`, {
                                                         method: "POST",
                                                         body: formData
                                                     });
-                                                    
+
                                                     if (!res.ok) throw new Error("Yükleme başarısız");
-                                                    
+
                                                     const data = await res.json();
-                                                    
+
                                                     setRuhsatUrl(data.url);
 
                                                     toast({
@@ -595,7 +744,7 @@ function ExpensesTab({ arac }: { arac: Arac }) {
                                     <FormItem>
                                         <FormLabel>Kategori</FormLabel>
                                         <FormControl>
-                                            <select 
+                                            <select
                                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                                                 {...field}
                                             >
@@ -717,14 +866,75 @@ function ExpensesTab({ arac }: { arac: Arac }) {
 }
 
 // --- MAIN PAGE COMPONENT ---
+
+// Liste endpoint'i araç + türetilmiş gider/maliyet alanlarını döner
+type AracRow = Arac & { toplamGider: number; seneBasindanBeriGider: number; amortismanGiderYtd: number; toplamMaliyet: number };
+
+// Plaka il kodu → şube (araç kaydının `sube` alanı boşsa fallback)
+const PLATE_SUBE: Record<string, string> = {
+    "34": "İstanbul", "06": "Ankara", "35": "İzmir", "16": "Bursa", "33": "Mersin",
+};
+const subeOf = (arac: Partial<Arac>) =>
+    arac.sube || PLATE_SUBE[String(arac.plaka || "").trim().split(/\s+/)[0]] || "Merkez";
+
+// Bitiş tarihinden (yyyy-MM-dd) bugüne kalan gün; geçersiz/boş → null
+const daysLeft = (dateStr?: string | null): number | null => {
+    if (!dateStr) return null;
+    try { return differenceInCalendarDays(parseISO(dateStr), new Date()); } catch { return null; }
+};
+const vehicleMinDays = (a: Partial<Arac>): number | null => {
+    const arr = [daysLeft(a.trafikBitisTarihi), daysLeft(a.kaskoBitisTarihi)].filter((x): x is number => x !== null);
+    return arr.length ? Math.min(...arr) : null;
+};
+const dayColor = (d: number | null) => d === null ? "#94a3b8" : d <= 7 ? "#dc2626" : d <= 30 ? "#b45309" : "#475569";
+const dayLabel = (d: number | null) => d === null ? "tanımsız" : d < 0 ? `${Math.abs(d)} gün geçti` : `${d} gün kaldı`;
+const statusOf = (m: number | null) =>
+    m === null ? { label: "TANIMSIZ", badgeBg: "#f1f5f9", badgeFg: "#475569", accent: "#cbd5e1" }
+        : m <= 7 ? { label: "KRİTİK", badgeBg: "#fee2e2", badgeFg: "#991b1b", accent: "#dc2626" }
+            : m <= 30 ? { label: "YAKLAŞIYOR", badgeBg: "#ffedd5", badgeFg: "#9a3412", accent: "#f59e0b" }
+                : { label: "GÜNCEL", badgeBg: "#dcfce7", badgeFg: "#166534", accent: "#10b981" };
+
+// TR plaka görseli (kart + modal ortak)
+function PlateBadge({ plaka, size = "sm" }: { plaka: string; size?: "sm" | "md" }) {
+    return (
+        <span className={cn("inline-flex items-stretch overflow-hidden rounded-[5px] border-[1.5px] border-slate-800 bg-white shadow-sm", size === "md" ? "h-8" : "h-[30px]")}>
+            <span className="flex w-[19px] flex-col items-center justify-center bg-[#0a3d91] leading-none text-white">
+                <span className="text-[6px]">★</span>
+                <span className="text-[8px] font-bold tracking-wider">TR</span>
+            </span>
+            <span className={cn("flex items-center whitespace-nowrap px-2.5 font-bold tracking-[1.5px] text-slate-900", size === "md" ? "text-[16px]" : "text-[15px]")} style={{ fontFamily: "'JetBrains Mono', monospace" }}>{plaka}</span>
+        </span>
+    );
+}
+
+// Logo kutusu — mevcut BrandLogo'yu sabit kutuda gösterir
+function LogoBox({ marka, model, className }: { marka?: string | null; model?: string | null; className?: string }) {
+    return (
+        <div className={cn("flex flex-shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-slate-100 bg-slate-50", className)}>
+            <BrandLogo brand={marka} model={model} />
+        </div>
+    );
+}
+
+// Modal sigorta kartı satırı
+function InfoRow({ label, value, mono, color }: { label: string; value: string; mono?: boolean; color?: string }) {
+    return (
+        <div className="flex items-center justify-between gap-2">
+            <span className="text-[12.5px] text-slate-400">{label}</span>
+            <span className={cn("text-[12.5px] font-semibold", mono && "font-mono")} style={color ? { color, fontWeight: 700 } : undefined}>{value}</span>
+        </div>
+    );
+}
+
 export default function Tools() {
-    const [selectedArac, setSelectedArac] = useState<Arac | null>(null);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [isNewMode, setIsNewMode] = useState(false);
+    const [editArac, setEditArac] = useState<AracRow | null>(null);
     const [selectedSube, setSelectedSube] = useState<string>("all");
 
-    // Default to 'bilgiler'. If user clicks "Add Policy", we might change this.
-    const [activeTab, setActiveTab] = useState("bilgiler");
+    // Detay (okuma) modalı
+    const [detailArac, setDetailArac] = useState<AracRow | null>(null);
+    const [detailTab, setDetailTab] = useState<"bilgiler" | "giderler">("bilgiler");
 
     const { toast } = useToast();
     const queryClient = useQueryClient();
@@ -746,7 +956,7 @@ export default function Tools() {
                 const validGiderler = jsonData.map(row => {
                     const plaka = String(row.Plaka || row.plaka || "").trim().toUpperCase();
                     const arac = araclar?.find(a => a.plaka.replace(/\s+/g, '').toUpperCase() === plaka.replace(/\s+/g, '').toUpperCase());
-                    
+
                     if (!arac) return null;
 
                     let rawTutar = row.Tutar || row.tutar || "0";
@@ -788,7 +998,7 @@ export default function Tools() {
     };
 
     // Fetch vehicles with updated type (including totalGider, ytd stuff)
-    const { data: araclar, isLoading } = useQuery<(Arac & { toplamGider: number; seneBasindanBeriGider: number; amortismanGiderYtd: number; toplamMaliyet: number })[]>({
+    const { data: araclar, isLoading } = useQuery<AracRow[]>({
         queryKey: ["/api/araclar"],
     });
 
@@ -832,34 +1042,8 @@ export default function Tools() {
         }
     });
 
-    const openSheet = (arac: Arac | null, isNew: boolean, tab: string = "bilgiler") => {
-        setSelectedArac(arac);
-        setIsNewMode(isNew);
-        setActiveTab(tab);
-        setIsSheetOpen(true);
-    };
-
-    const getStatusColor = (dateStr?: string | null) => {
-        if (!dateStr) return "border-l-slate-300"; // Grey/Unknown
-        const date = parseISO(dateStr);
-        const today = new Date();
-        const warningDate = addDays(today, 30);
-
-        if (isBefore(date, today)) return "border-l-red-500";
-        if (isBefore(date, warningDate)) return "border-l-orange-500";
-        return "border-l-green-500";
-    };
-
-    const getStatusBadge = (dateStr?: string | null) => {
-       if (!dateStr) return null;
-       const date = parseISO(dateStr);
-       const today = new Date();
-       const warningDate = addDays(today, 30);
-
-       if (isBefore(date, today)) return <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm animate-pulse" title="Süresi Dolmuş" />;
-        // Only show red dot for critical issues to avoid clutter
-       return null;
-    }
+    const openNew = () => { setEditArac(null); setIsNewMode(true); setIsSheetOpen(true); };
+    const openEdit = (arac: AracRow) => { setEditArac(arac); setIsNewMode(false); setIsSheetOpen(true); setDetailArac(null); };
 
     // Benzersiz şubeleri al ve araç sayılarını hesapla
     const subeler = useMemo(() => {
@@ -881,256 +1065,299 @@ export default function Tools() {
         return araclar.filter(a => (a.sube || "Belirtilmemiş") === selectedSube);
     }, [araclar, selectedSube]);
 
+    // En yakın sigorta bitişine göre sıralı (tanımsız en sonda)
+    const sortedAraclar = useMemo(() => {
+        return [...filteredAraclar].sort((a, b) => {
+            const am = vehicleMinDays(a), bm = vehicleMinDays(b);
+            if (am === null && bm === null) return 0;
+            if (am === null) return 1;
+            if (bm === null) return -1;
+            return am - bm;
+        });
+    }, [filteredAraclar]);
+
+    // KPI'lar — görüntülenen (filtreli) filodan türetilir
+    const kpis = useMemo(() => {
+        const list = filteredAraclar;
+        const mins = list.map(vehicleMinDays);
+        const kritik = mins.filter((m) => m !== null && m <= 7).length;
+        const yaklasan = mins.filter((m) => m !== null && m > 7 && m <= 30).length;
+        const yillikSig = list.reduce((acc, v) => acc + Number(v.trafikSigortaFiyat || 0) + Number(v.kaskoSigortaFiyat || 0), 0);
+        const yillikGider = list.reduce((acc, v) => acc + Number(v.seneBasindanBeriGider || 0), 0);
+        return [
+            { label: "Toplam Araç", value: String(list.length), sub: "aktif filo", color: "#0ea5e9", valColor: "#0f172a" },
+            { label: "Sigortası Yaklaşan", value: String(yaklasan), sub: "8–30 gün içinde", color: "#f59e0b", valColor: "#0f172a" },
+            { label: "Kritik", value: String(kritik), sub: "≤7 gün kaldı", color: "#dc2626", valColor: "#dc2626" },
+            { label: "Yıllık Sigorta", value: formatCurrencyFull(yillikSig), sub: "trafik + kasko", color: "#7c3aed", valColor: "#0f172a" },
+            { label: "Yıllık Gider", value: formatCurrencyFull(yillikGider), sub: "yakıt, bakım, sigorta", color: "#0f766e", valColor: "#0f172a" },
+        ];
+    }, [filteredAraclar]);
+
+    // Detay modalı için listeden taze kayıt (yüklenen dosyaları anında yansıtır)
+    const detail = detailArac ? (araclar?.find((a) => a.id === detailArac.id) || detailArac) : null;
+
     return (
-        <div className="p-6 bg-slate-50 min-h-screen">
-             <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
-                <div>
-                     <h2 className="text-3xl font-bold tracking-tight text-slate-800 flex items-center gap-2">
-                        <Car className="w-8 h-8 text-primary" />
-                        Filo Yönetimi
-                     </h2>
-                     <p className="text-muted-foreground">Şirket araçlarını yönetin ve giderleri izleyin.</p>
+        <div className="min-h-full bg-slate-50 dark:bg-background">
+            <div className="px-6 pb-12 lg:px-8">
+                {/* ===== STICKY HEADER ===== */}
+                <div className="sticky top-0 z-20 border-b border-border/70 bg-slate-50/90 pt-5 backdrop-blur dark:bg-background/90">
+                    <div className="flex flex-wrap items-end justify-between gap-4 pb-3.5">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-[11px] bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400">
+                                <Car className="h-[22px] w-[22px]" strokeWidth={1.8} />
+                            </div>
+                            <div>
+                                <h1 className="text-[21px] font-extrabold tracking-tight">Araçlar</h1>
+                                <p className="mt-0.5 text-[12.5px] text-muted-foreground">Şirket araçlarını yönetin ve giderleri izleyin · <strong className="text-foreground/80">karta tıklayarak detay</strong></p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input type="file" accept=".xlsx, .xls" id="fuel-excel-upload" className="hidden" onChange={handleFuelExcelUpload} />
+                            <Button variant="outline" className="h-[38px] gap-2 font-semibold" asChild>
+                                <label htmlFor="fuel-excel-upload" className="cursor-pointer">
+                                    <Upload className="h-4 w-4 text-emerald-600" /> Yakıt Yükle
+                                </label>
+                            </Button>
+                            <Button onClick={openNew} className="h-[38px] gap-2 bg-slate-900 font-semibold text-white hover:bg-slate-800">
+                                <Plus className="h-4 w-4" /> Yeni Araç
+                            </Button>
+                        </div>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Input
-                        type="file"
-                        accept=".xlsx, .xls"
-                        id="fuel-excel-upload"
-                        className="hidden"
-                        onChange={handleFuelExcelUpload}
-                    />
-                    <Button variant="outline" size="lg" className="shadow-sm gap-2" asChild>
-                        <label htmlFor="fuel-excel-upload" className="cursor-pointer">
-                            <Upload className="w-5 h-5 text-emerald-600" />
-                            Yakıt Yükle
-                        </label>
-                    </Button>
-                    <Button onClick={() => openSheet(null, true)} size="lg" className="shadow-lg hover:shadow-xl transition-all">
-                        <Plus className="w-5 h-5 mr-2" /> Yeni Araç
-                    </Button>
+
+                {/* ===== 5 KPI (accent-bar) ===== */}
+                <div className="mt-5 grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-5">
+                    {kpis.map((k) => (
+                        <div key={k.label} className="relative overflow-hidden rounded-[14px] border bg-card p-4">
+                            <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: k.color }} />
+                            <div className="pl-2 text-[10.5px] font-semibold uppercase tracking-wide leading-tight text-muted-foreground">{k.label}</div>
+                            <div className="mt-2 pl-2 text-[22px] font-extrabold tracking-tight tabular-nums" style={{ color: k.valColor }}>{k.value}</div>
+                            <div className="mt-0.5 pl-2 text-[11.5px] text-muted-foreground">{k.sub}</div>
+                        </div>
+                    ))}
                 </div>
-            </div>
 
-            {/* Şube Filtreleri */}
-            <div className="mb-6 flex flex-wrap gap-2">
-                <Button
-                    variant={selectedSube === "all" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setSelectedSube("all")}
-                    className="gap-2"
-                >
-                    <Car className="w-4 h-4" />
-                    Tümü
-                    <Badge variant="secondary" className="ml-1 h-5 px-1.5">{araclar?.length || 0}</Badge>
-                </Button>
-                {subeler.map((sube) => (
-                    <Button
-                        key={sube.name}
-                        variant={selectedSube === sube.name ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setSelectedSube(sube.name)}
-                        className="gap-2"
-                    >
-                        <Building2 className="w-4 h-4" />
-                        {sube.name}
-                        <Badge variant="secondary" className="ml-1 h-5 px-1.5">{sube.count}</Badge>
-                    </Button>
-                ))}
-            </div>
-
-            {isLoading ? (
-                <div className="flex justify-center p-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>
-            ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-                    {filteredAraclar?.map((arac) => {
-                         // Determine overall status color based on worst case (expired > warning > ok)
-                         const tStatus = getStatusColor(arac.trafikBitisTarihi);
-                         const kStatus = getStatusColor(arac.kaskoBitisTarihi);
-                         
-                         let cardStyle = "border-t-4 border-t-green-500";
-                         
-                         // Check for expiration (Red)
-                         if (tStatus === "border-l-red-500" || kStatus === "border-l-red-500") {
-                            // Expired: Red top border + aesthetic red glow/ring
-                            cardStyle = "border-t-4 border-t-red-500 ring-1 ring-red-200 shadow-[0_0_20px_-5px_rgba(239,68,68,0.15)] bg-red-50/10";
-                         } 
-                         // Check for nearing expiration (Orange)
-                         else if (tStatus === "border-l-orange-500" || kStatus === "border-l-orange-500") {
-                            cardStyle = "border-t-4 border-t-orange-500";
-                         }
-
-                         return (
-                            <Card 
-                                key={arac.id} 
-                                className={`group relative overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:shadow-xl cursor-pointer ${cardStyle}`}
-                                onClick={() => openSheet(arac, false)}
+                {/* ===== Şube filtresi + sıralama notu ===== */}
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={() => setSelectedSube("all")}
+                            className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] font-semibold transition-colors",
+                                selectedSube === "all" ? "border-slate-900 bg-slate-900 text-white" : "bg-card text-slate-600 hover:border-slate-300")}
+                        >
+                            <Car className="h-3.5 w-3.5" /> Tümü
+                            <span className="rounded-full bg-black/10 px-1.5 text-[11px] tabular-nums">{araclar?.length || 0}</span>
+                        </button>
+                        {subeler.map((s) => (
+                            <button
+                                key={s.name}
+                                onClick={() => setSelectedSube(s.name)}
+                                className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] font-semibold transition-colors",
+                                    selectedSube === s.name ? "border-slate-900 bg-slate-900 text-white" : "bg-card text-slate-600 hover:border-slate-300")}
                             >
-                                <CardContent className="p-4 pt-5 space-y-4">
-                                    {/* Header Section */}
-                                    <div className="flex flex-col items-center justify-center space-y-3 relative">
-                                        <div className="absolute right-0 top-0" onClick={(e) => e.stopPropagation()}>
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <Button variant="ghost" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <span className="sr-only">Aç</span>
-                                                        <MoreVertical className="h-4 w-4" />
-                                                    </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end">
-                                                    <DropdownMenuItem onClick={() => openSheet(arac, false)}>Düzenle</DropdownMenuItem>
-                                                    <DropdownMenuItem 
-                                                        className="text-destructive focus:text-destructive" 
-                                                        onClick={() => {
-                                                            if (confirm("Silmek istediğinize emin misiniz?")) deleteMutation.mutate(arac.id);
-                                                        }}
-                                                    >
-                                                        Sil
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
+                                <MapPin className="h-3.5 w-3.5" /> {s.name}
+                                <span className="rounded-full bg-black/10 px-1.5 text-[11px] tabular-nums">{s.count}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <span className="text-xs text-muted-foreground">Filo · {sortedAraclar.length} araç · en yakın sigorta bitişine göre sıralı</span>
+                </div>
+
+                {/* ===== Kart Grid ===== */}
+                {isLoading ? (
+                    <div className="flex justify-center p-12"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-sky-500"></div></div>
+                ) : (
+                    <div className="mt-4 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                        {sortedAraclar.map((arac) => {
+                            const m = vehicleMinDays(arac);
+                            const st = statusOf(m);
+                            const td = daysLeft(arac.trafikBitisTarihi);
+                            const kd = daysLeft(arac.kaskoBitisTarihi);
+                            return (
+                                <div
+                                    key={arac.id}
+                                    onClick={() => { setDetailArac(arac); setDetailTab("bilgiler"); }}
+                                    className="cursor-pointer rounded-[14px] border bg-card p-4 transition-all hover:-translate-y-[3px] hover:shadow-[0_12px_26px_rgba(15,23,42,0.08)]"
+                                    style={{ borderLeft: `4px solid ${st.accent}` }}
+                                >
+                                    {/* plaka + durum */}
+                                    <div className="flex items-center justify-between gap-2">
+                                        <PlateBadge plaka={arac.plaka} />
+                                        <span className="whitespace-nowrap rounded-full px-2.5 py-[3px] text-[10px] font-bold" style={{ background: st.badgeBg, color: st.badgeFg }}>{st.label}</span>
+                                    </div>
+                                    {/* marka + şube */}
+                                    <div className="mt-3.5 flex items-center gap-2.5 border-b pb-3.5">
+                                        <LogoBox marka={arac.marka} model={arac.model} className="h-[46px] w-[46px] p-1.5" />
+                                        <div className="min-w-0 flex-1">
+                                            <div className="text-[14px] font-bold text-slate-900">{arac.marka || "—"}</div>
+                                            <div className="truncate text-[12px] text-slate-400">{arac.model || "Model belirtilmemiş"}</div>
+                                        </div>
+                                        <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                                            <MapPin className="h-[11px] w-[11px]" strokeWidth={2.4} />{subeOf(arac)}
+                                        </span>
+                                    </div>
+                                    {/* trafik / kasko */}
+                                    <div className="mt-3 grid grid-cols-2 gap-3">
+                                        <div>
+                                            <div className="mb-0.5 text-[10px] uppercase tracking-wide text-slate-400">Trafik</div>
+                                            <div className="font-mono text-[13px] font-bold" style={{ color: dayColor(td) }}>{arac.trafikBitisTarihi ? format(parseISO(arac.trafikBitisTarihi), "dd.MM.yyyy") : "—"}</div>
+                                            <div className="text-[11px]" style={{ color: dayColor(td) }}>{dayLabel(td)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="mb-0.5 text-[10px] uppercase tracking-wide text-slate-400">Kasko</div>
+                                            <div className="font-mono text-[13px] font-bold" style={{ color: dayColor(kd) }}>{arac.kaskoBitisTarihi ? format(parseISO(arac.kaskoBitisTarihi), "dd.MM.yyyy") : "—"}</div>
+                                            <div className="text-[11px]" style={{ color: dayColor(kd) }}>{dayLabel(kd)}</div>
+                                        </div>
+                                    </div>
+                                    {/* yıllık gider */}
+                                    <div className="mt-3.5 flex items-center justify-between border-t pt-3">
+                                        <span className="text-[11.5px] text-slate-500">Yıllık Gider</span>
+                                        <span className="text-[14px] font-bold tabular-nums">{formatCurrencyFull(arac.seneBasindanBeriGider || 0)}</span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {!araclar?.length && (
+                            <div className="col-span-full flex flex-col items-center justify-center rounded-2xl border-2 border-dashed bg-slate-50/50 p-12">
+                                <Car className="mb-4 h-12 w-12 text-slate-300" />
+                                <h3 className="text-lg font-medium text-slate-900">Henüz Araç Yok</h3>
+                                <p className="mb-4 text-slate-500">Filoya yeni bir araç ekleyerek başlayın.</p>
+                                <Button onClick={openNew}>Aracı Ekle</Button>
+                            </div>
+                        )}
+                        {!!araclar?.length && sortedAraclar.length === 0 && (
+                            <div className="col-span-full py-12 text-center text-muted-foreground">Bu şubede araç bulunamadı.</div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* ===== Düzenle / Yeni Araç Sheet (mevcut form korundu) ===== */}
+            <Sheet open={isSheetOpen} onOpenChange={(open) => { if (!open) setEditArac(null); setIsSheetOpen(open); }}>
+                <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+                    <SheetHeader className="mb-6">
+                        <SheetTitle className="flex items-center gap-2 text-xl font-bold">
+                            {isNewMode ? "Yeni Araç Ekle" : <span>{editArac?.plaka} <span className="text-base font-normal text-muted-foreground">- Düzenle</span></span>}
+                        </SheetTitle>
+                        <SheetDescription>
+                            Araç bilgilerini, sigorta poliçelerini ve ruhsat dosyasını buradan yönetebilirsiniz.
+                        </SheetDescription>
+                    </SheetHeader>
+
+                    {isNewMode ? (
+                        <div className="px-1">
+                            <VehicleForm onSubmit={(values) => createMutation.mutate(values)} />
+                        </div>
+                    ) : editArac && (() => {
+                        // Listeden taze veri ile (yüklenen dosyalar anında görünür)
+                        const freshArac = araclar?.find(a => a.id === editArac.id) || editArac;
+                        return (
+                            <VehicleForm
+                                key={freshArac?.ruhsatDosyasi ? 'has-file' : 'no-file'}
+                                defaultValues={freshArac}
+                                isEditing={true}
+                                onSubmit={(values) => updateMutation.mutate({ ...values, id: freshArac.id })}
+                            />
+                        );
+                    })()}
+                </SheetContent>
+            </Sheet>
+
+            {/* ===== Detay (okuma) Modalı ===== */}
+            <Dialog open={!!detail} onOpenChange={(o) => !o && setDetailArac(null)}>
+                <DialogContent className="max-w-[640px] gap-0 overflow-hidden p-0">
+                    {detail && (() => {
+                        const td = daysLeft(detail.trafikBitisTarihi);
+                        const kd = daysLeft(detail.kaskoBitisTarihi);
+                        return (
+                            <div className="max-h-[86vh] overflow-y-auto">
+                                {/* header */}
+                                <div className="sticky top-0 z-10 flex items-center gap-3 border-b bg-card px-5 py-4 pr-12">
+                                    <PlateBadge plaka={detail.plaka} size="md" />
+                                    <LogoBox marka={detail.marka} model={detail.model} className="h-[38px] w-[38px] p-1.5" />
+                                    <div className="min-w-0 flex-1">
+                                        <div className="truncate text-[13px] font-bold">{detail.marka} {detail.model}</div>
+                                        <div className="text-[11.5px] text-slate-400">{subeOf(detail)} şubesi</div>
+                                    </div>
+                                    <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openEdit(detail)}>
+                                        <Pencil className="h-3.5 w-3.5" /> Düzenle
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                        onClick={() => { if (confirm("Aracı silmek istediğinize emin misiniz?")) { deleteMutation.mutate(detail.id); setDetailArac(null); } }}
+                                        title="Aracı Sil"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                </div>
+
+                                {/* tab barı */}
+                                <div className="flex gap-1 px-5 pt-3.5">
+                                    {([["bilgiler", "Bilgiler & Sigorta"], ["giderler", "Giderler"]] as const).map(([id, label]) => (
+                                        <button
+                                            key={id}
+                                            onClick={() => setDetailTab(id)}
+                                            className={cn("rounded-t-lg px-3.5 py-2 text-[13px] transition-colors",
+                                                detailTab === id ? "font-bold text-foreground shadow-[inset_0_-2px_0_#0ea5e9]" : "font-semibold text-muted-foreground hover:text-foreground")}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {detailTab === "bilgiler" ? (
+                                    <div className="px-5 pb-6 pt-4">
+                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                            {/* Trafik kartı */}
+                                            <div className="rounded-[12px] border p-4">
+                                                <div className="mb-3 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-sky-500" /><h4 className="text-[13.5px] font-bold">Trafik Sigortası</h4></div>
+                                                <div className="flex flex-col gap-2.5">
+                                                    <InfoRow label="Şirket" value={detail.trafikSigortaSirketi || "—"} />
+                                                    <InfoRow label="Poliçe No" value={detail.trafikPoliceNo || "—"} mono />
+                                                    <InfoRow label="Bitiş" value={detail.trafikBitisTarihi ? format(parseISO(detail.trafikBitisTarihi), "dd.MM.yyyy") : "—"} color={dayColor(td)} />
+                                                    <InfoRow label="Fiyat" value={formatCurrencyFull(Number(detail.trafikSigortaFiyat || 0))} />
+                                                </div>
+                                            </div>
+                                            {/* Kasko kartı */}
+                                            <div className="rounded-[12px] border p-4">
+                                                <div className="mb-3 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-violet-600" /><h4 className="text-[13.5px] font-bold">Kasko</h4></div>
+                                                <div className="flex flex-col gap-2.5">
+                                                    <InfoRow label="Şirket" value={detail.kaskoSigortaSirketi || "—"} />
+                                                    <InfoRow label="Poliçe No" value={detail.kaskoPoliceNo || "—"} mono />
+                                                    <InfoRow label="Bitiş" value={detail.kaskoBitisTarihi ? format(parseISO(detail.kaskoBitisTarihi), "dd.MM.yyyy") : "—"} color={dayColor(kd)} />
+                                                    <InfoRow label="Fiyat" value={formatCurrencyFull(Number(detail.kaskoSigortaFiyat || 0))} />
+                                                </div>
+                                            </div>
                                         </div>
 
-                                        {/* Plate Design */}
-                                        <div className="inline-flex items-center border-4 border-slate-900 rounded-md px-3 py-1 bg-white shadow-md font-sans font-black text-slate-900 tracking-wider text-xl select-all z-10">
-                                            <div className="w-3.5 h-5 bg-blue-700 mr-2.5 rounded-sm"></div>
-                                            {arac.plaka}
-                                        </div>
-
-                                        {/* Brand & Model - Centered with Logo */}
-                                        <div className="flex flex-col items-center justify-center w-full mt-2 space-y-1">
-                                             <BrandLogo brand={arac.marka} model={arac.model} />
-                                             <div className="text-sm font-medium text-slate-600 text-center">
-                                                <span className="text-slate-900 font-semibold">{arac.marka}</span> {arac.model}
+                                        {/* Poliçe belge kartları (yükle / görüntüle) */}
+                                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                                            <div>
+                                                <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Trafik Poliçesi</div>
+                                                <PoliceUploader aracId={detail.id} isEditing endpoint="trafik-police" currentUrl={detail.trafikPoliceDosyasi} onChange={() => { }} fieldNameForUpdate="trafikPoliceDosyasi" />
+                                            </div>
+                                            <div>
+                                                <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Kasko Poliçesi</div>
+                                                <PoliceUploader aracId={detail.id} isEditing endpoint="kasko-police" currentUrl={detail.kaskoPoliceDosyasi} onChange={() => { }} fieldNameForUpdate="kaskoPoliceDosyasi" />
                                             </div>
                                         </div>
                                     </div>
-
-                                    {/* Status Section */}
-                                    <div className="grid grid-cols-2 gap-2 text-xs">
-                                        <div className="space-y-2">
-                                            <span className="text-muted-foreground block text-[11px] uppercase tracking-wide">Trafik</span>
-                                            {arac.trafikBitisTarihi ? (
-                                                <span className={`font-mono font-bold text-sm ${getStatusColor(arac.trafikBitisTarihi).replace('border-l-', 'text-')}`}>
-                                                    {format(parseISO(arac.trafikBitisTarihi), "dd.MM.yyyy")}
-                                                </span>
-                                            ) : (
-                                                <Button 
-                                                    variant="ghost" 
-                                                    className="h-auto p-0 text-xs text-blue-500 hover:bg-transparent hover:underline" 
-                                                    onClick={(e) => { e.stopPropagation(); openSheet(arac, false, "bilgiler"); }}
-                                                >
-                                                    Poliçe Ekle
-                                                </Button>
-                                            )}
+                                ) : (
+                                    <div className="px-5 pb-6 pt-4">
+                                        <div className="mb-4 flex items-center justify-between rounded-[10px] border bg-slate-50 px-4 py-2.5 dark:bg-background/40">
+                                            <span className="text-[13px] font-bold">Toplam (Yıllık Gider)</span>
+                                            <span className="text-[16px] font-extrabold tabular-nums">{formatCurrencyFull(detail.seneBasindanBeriGider || 0)}</span>
                                         </div>
-                                        <div className="space-y-2">
-                                            <span className="text-muted-foreground block text-[11px] uppercase tracking-wide">Kasko</span>
-                                            {arac.kaskoBitisTarihi ? (
-                                                <span className={`font-mono font-bold text-sm ${getStatusColor(arac.kaskoBitisTarihi).replace('border-l-', 'text-')}`}>
-                                                    {format(parseISO(arac.kaskoBitisTarihi), "dd.MM.yyyy")}
-                                                </span>
-                                            ) : (
-                                                <Button 
-                                                    variant="ghost" 
-                                                    className="h-auto p-0 text-xs text-blue-500 hover:bg-transparent hover:underline"
-                                                    onClick={(e) => { e.stopPropagation(); openSheet(arac, false, "bilgiler"); }}
-                                                >
-                                                    Poliçe Ekle
-                                                </Button>
-                                            )}
-                                        </div>
+                                        <ExpensesTab arac={detail} />
                                     </div>
-
-                                     {/* Detailed Stats Section */}
-                                    <div className="grid grid-cols-1 gap-1 pt-2 border-t mt-2">
-                                        <div className="flex justify-between items-center text-[11px]">
-                                            <span className="text-muted-foreground">Sene Başı Gider (YTD):</span>
-                                            <span className="font-semibold text-slate-700">
-                                                {(arac.seneBasindanBeriGider || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺
-                                            </span>
-                                        </div>
-                                        <div className="flex justify-between items-center text-[11px]">
-                                            <span className="text-muted-foreground" title="Sigorta Amortismanı (Yıllık bedel / 12 * ay)">Poliçe Amortisman:</span>
-                                            <span className="font-semibold text-amber-600">
-                                                +{(arac.amortismanGiderYtd || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺
-                                            </span>
-                                        </div>
-                                        <div className="flex justify-between items-center text-xs pt-1 mt-1 border-t border-dashed">
-                                            <span className="font-bold text-slate-900">Toplam Maliyet:</span>
-                                            <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                                                {(arac.toplamMaliyet || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    {/* Footer / Info */}
-                                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
-                                         <span>{arac.sube || "Merkez"}</span>
-                                         <Badge variant="outline" className="h-4 px-1 text-[9px] font-normal uppercase">{arac.marka || "Bilinmiyor"}</Badge>
-                                    </div>
-                                    
-                                    {getStatusBadge(arac.trafikBitisTarihi)}
-                                    {getStatusBadge(arac.kaskoBitisTarihi)}
-                                </CardContent>
-                            </Card>
-                         )
-                    })}
-                     {!araclar?.length && (
-                        <div className="col-span-full flex flex-col items-center justify-center p-12 border-2 border-dashed rounded-xl bg-slate-50/50">
-                            <Car className="w-12 h-12 text-slate-300 mb-4" />
-                            <h3 className="text-lg font-medium text-slate-900">Henüz Araç Yok</h3>
-                            <p className="text-slate-500 mb-4">Filoya yeni bir araç ekleyerek başlayın.</p>
-                            <Button onClick={() => openSheet(null, true)}>Aracı Ekle</Button>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <Sheet open={isSheetOpen} onOpenChange={(open) => {
-                if (!open) setSelectedArac(null);
-                setIsSheetOpen(open);
-            }}>
-                <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
-                    <SheetHeader className="mb-6">
-                        <SheetTitle className="text-xl font-bold flex items-center gap-2">
-                             {isNewMode ? "Yeni Araç Ekle" : <span>{selectedArac?.plaka} <span className="text-muted-foreground font-normal text-base">- Detaylar</span></span>}
-                        </SheetTitle>
-                        <SheetDescription>
-                            Araç detaylarını, sigorta poliçelerini ve masraf kayıtlarını buradan yönetebilirsiniz.
-                        </SheetDescription>
-                    </SheetHeader>
-                    
-                    {isNewMode ? (
-                        <div className="px-1">
-                             <VehicleForm onSubmit={(values) => createMutation.mutate(values)} />
-                        </div>
-                    ) : selectedArac && (
-                        (() => {
-                            // Use fresh data from list if available to ensure we see updates (like uploaded files) immediately
-                            const freshArac = araclar?.find(a => a.id === selectedArac.id) || selectedArac;
-                            return (
-                                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                                    <TabsList className="grid w-full grid-cols-2 mb-6">
-                                        <TabsTrigger value="bilgiler">Bilgiler & Sigorta</TabsTrigger>
-                                        <TabsTrigger value="giderler">Giderler</TabsTrigger>
-                                    </TabsList>
-                                    <TabsContent value="bilgiler">
-                                        <VehicleForm 
-                                            key={freshArac?.ruhsatDosyasi ? 'has-file' : 'no-file'}
-                                            defaultValues={freshArac} 
-                                            isEditing={true} 
-                                            onSubmit={(values) => updateMutation.mutate({ ...values, id: freshArac.id })} 
-                                        />
-                                    </TabsContent>
-                                    <TabsContent value="giderler">
-                                        <ExpensesTab arac={freshArac} />
-                                    </TabsContent>
-                                </Tabs>
-                             );
-                        })()
-                    )}
-                </SheetContent>
-            </Sheet>
+                                )}
+                            </div>
+                        );
+                    })()}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
