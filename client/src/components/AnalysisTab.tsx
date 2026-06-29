@@ -335,8 +335,16 @@ export function AnalysisTab() {
 
   return (
     <div className="space-y-6">
+      {/* Sticky başlık — diğer Gümrük tab'larıyla görsel tutarlılık */}
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-2 border-b border-border/70 bg-slate-50/85 px-6 py-4 backdrop-blur dark:bg-background/85 lg:-mx-8 lg:px-8">
+        <h1 className="text-[21px] font-extrabold tracking-tight">Analiz &amp; Projeksiyon</h1>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          2025 verileri baz alınarak oluşturulan 2026 senaryoları · gelişmiş projeksiyon araçları
+        </p>
+      </div>
+
       {/* Control Panel */}
-      <Card className="bg-muted/30 border-dashed">
+      <Card className="bg-card border">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Calculator className="w-5 h-5 text-primary" />
@@ -464,22 +472,25 @@ export function AnalysisTab() {
         </CardContent>
       </Card>
 
-      {/* Summary Chips */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-              <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">Hedef Yıllık Satış (Net)</p>
-                  <p className="text-xl font-bold text-blue-600">{formatCurrency(totalProjectedSalesNet)}</p>
-                  <p className="text-[10px] text-muted-foreground">KDV Dahil: {formatCurrency(totalProjectedSales)}</p>
-              </CardContent>
-          </Card>
-          <Card>
-              <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">Hedef Yıllık Kar (Net)</p>
-                  <p className="text-xl font-bold text-green-600">{formatCurrency(totalProjectedProfit)}</p>
-                  <p className="text-[10px] text-muted-foreground">Margin: %{totalProjectedSalesNet > 0 ? ((totalProjectedProfit / totalProjectedSalesNet) * 100).toFixed(1) : 0}</p>
-              </CardContent>
-          </Card>
+      {/* Hedef KPI — gradient kartlar (tasarım sistemi) */}
+      <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
+          <div className="rounded-[14px] bg-gradient-to-br from-sky-500 to-sky-700 p-5 text-white">
+              <p className="text-[11.5px] font-semibold uppercase tracking-wide opacity-85">Hedef Yıllık Satış (Net)</p>
+              <p className="mt-2 text-[28px] font-extrabold tabular-nums tracking-tight">{formatCurrency(totalProjectedSalesNet)}</p>
+              <p className="mt-1 text-[12.5px] opacity-85">KDV dahil: {formatCurrency(totalProjectedSales)}</p>
+          </div>
+          <div className="rounded-[14px] bg-gradient-to-br from-violet-600 to-violet-800 p-5 text-white">
+              <p className="text-[11.5px] font-semibold uppercase tracking-wide opacity-85">Hedef Yıllık Kâr (Net)</p>
+              <p className="mt-2 text-[28px] font-extrabold tabular-nums tracking-tight">{formatCurrency(totalProjectedProfit)}</p>
+              <p className="mt-1 text-[12.5px] opacity-85">marj %{totalProjectedSalesNet > 0 ? ((totalProjectedProfit / totalProjectedSalesNet) * 100).toFixed(1).replace(".", ",") : 0}</p>
+          </div>
+          <div className="rounded-[14px] border border-border/70 bg-card p-5">
+              <p className="text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">Net Kâr Marjı</p>
+              <p className="mt-2 text-2xl font-extrabold tabular-nums" style={{ color: totalProjectedProfit >= 0 ? "#059669" : "#e11d48" }}>
+                  %{totalProjectedSalesNet > 0 ? ((totalProjectedProfit / totalProjectedSalesNet) * 100).toFixed(1).replace(".", ",") : 0}
+              </p>
+              <p className="mt-1 text-[12.5px] text-muted-foreground">net satış üzerinden</p>
+          </div>
       </div>
 
 

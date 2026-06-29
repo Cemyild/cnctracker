@@ -23,7 +23,8 @@ import {
   Target,
   History,
   Trash2,
-  Calculator
+  Calculator,
+  Plus
 } from "lucide-react";
 import { GiderEditModal } from "@/components/GiderEditModal";
 import { Badge } from "@/components/ui/badge";
@@ -69,11 +70,13 @@ import {
   Bar, 
   XAxis, 
   YAxis, 
-  CartesianGrid, 
+  CartesianGrid,
   Tooltip,
   ComposedChart,
   Cell,
-  LabelList
+  LabelList,
+  PieChart,
+  Pie
 } from "recharts";
 import { ExcelUploadModal } from "@/components/ExcelUploadModal";
 import { FinancialOverview } from "@/components/FinancialOverview";
@@ -1680,15 +1683,8 @@ type Arac = {
 
                     // Sub-component for Calisanlar Tab to keep main component clean
                     function CalisanlarTabContent({currentYear}: {currentYear: number }) {
-  const [selectedAy, setSelectedAy] = useState<string>("1"); // Default January
+  const [selectedAy, setSelectedAy] = useState<string>("toplam"); // Varsayılan: Yıllık Toplam (referansla hizalı)
                       const [selectedYil, setSelectedYil] = useState<string>(String(currentYear));
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("tr-TR", {
-                          style: "currency",
-                        currency: "TRY",
-    }).format(value);
-  };
 
                         // Fetch data
                         const {data: calisanlar, isLoading } = useQuery<any[]>({
@@ -1749,150 +1745,308 @@ type Arac = {
     }), {count: 0, brut: 0, net: 0, isverenPayi: 0, toplamMaliyet: 0, isciSgk: 0 });
   }, [branchStats]);
 
-                        const aylar = [
-                        {value: "1", label: "Ocak" }, {value: "2", label: "Şubat" }, {value: "3", label: "Mart" },
-                        {value: "4", label: "Nisan" }, {value: "5", label: "Mayıs" }, {value: "6", label: "Haziran" },
-                        {value: "7", label: "Temmuz" }, {value: "8", label: "Ağustos" }, {value: "9", label: "Eylül" },
-                        {value: "10", label: "Ekim" }, {value: "11", label: "Kasım" }, {value: "12", label: "Aralık" }
-                        ];
+  const aylar = [
+    { value: "1", label: "Ocak" }, { value: "2", label: "Şubat" }, { value: "3", label: "Mart" },
+    { value: "4", label: "Nisan" }, { value: "5", label: "Mayıs" }, { value: "6", label: "Haziran" },
+    { value: "7", label: "Temmuz" }, { value: "8", label: "Ağustos" }, { value: "9", label: "Eylül" },
+    { value: "10", label: "Ekim" }, { value: "11", label: "Kasım" }, { value: "12", label: "Aralık" }
+  ];
 
-                        return (
-                        <div className="space-y-6">
-                          {/* Filters */}
-                          <div className="flex flex-wrap items-center gap-4 bg-background/50 backdrop-blur-sm p-4 rounded-lg border shadow-sm">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-muted-foreground">Dönem:</span>
-                              <Select value={selectedAy} onValueChange={setSelectedAy}>
-                                <SelectTrigger className="w-[140px] bg-background">
-                                  <SelectValue placeholder="Ay Seçin" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {aylar.map(ay => (
-                                    <SelectItem key={ay.value} value={ay.value}>{ay.label}</SelectItem>
-                                  ))}
-                                  <SelectItem value="toplam" className="font-bold border-t">Yıllık Toplam</SelectItem>
-                                </SelectContent>
-                              </Select>
+  // Şube renk paleti (donut + yüzdeli liste ortak)
+  const branchColors = ["#7c3aed", "#0ea5e9", "#059669", "#d97706", "#e11d48"];
 
-                              <Select value={selectedYil} onValueChange={setSelectedYil}>
-                                <SelectTrigger className="w-[100px] bg-background">
-                                  <SelectValue placeholder="Yıl" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="2024">2024</SelectItem>
-                                  <SelectItem value="2025">2025</SelectItem>
-                                  <SelectItem value="2026">2026</SelectItem>
-                                  <SelectItem value="2027">2027</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
+  // Dönem etiketi (eyebrow için): seçili ay adı · yıl ("toplam" → "Yıllık Toplam")
+  const donemLabel = useMemo(() => {
+    const ayLabel = selectedAy === "toplam" ? "Yıllık Toplam" : (aylar.find((a) => a.value === selectedAy)?.label ?? "");
+    return `${ayLabel} · ${selectedYil}`;
+  }, [selectedAy, selectedYil]);
 
-                          {/* Warnings / Info */}
-                          {isLoading && <div className="text-center py-10"><Loader2 className="animate-spin w-8 h-8 mx-auto text-primary" /></div>}
+  // Donut + yüzdeli liste verisi: her şubenin toplam maliyetteki payı
+  const subePayData = useMemo(() => {
+    const toplam = totalStats.toplamMaliyet || 0;
+    return branchStats.map((s, i) => ({
+      name: s.name,
+      count: s.count,
+      toplamMaliyet: s.toplamMaliyet,
+      color: branchColors[i % branchColors.length],
+      pay: toplam > 0 ? (s.toplamMaliyet / toplam) * 100 : 0,
+    }));
+  }, [branchStats, totalStats.toplamMaliyet]);
 
-                          {!isLoading && branchStats.length === 0 && (
-                            <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
-                              Kayıt bulunamadı.
-                            </div>
-                          )}
+  const enBuyukPay = useMemo(() => {
+    if (subePayData.length === 0) return 0;
+    return Math.round(Math.max(...subePayData.map((s) => s.pay)));
+  }, [subePayData]);
 
-                          {/* Summary Cards */}
-                          {!isLoading && branchStats.length > 0 && (
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                              <Card>
-                                <CardContent className="pt-6">
-                                  <div className="text-xs font-semibold text-muted-foreground uppercase">Personel</div>
-                                  <div className="text-2xl font-bold flex items-center gap-2">
-                                    <Users className="w-5 h-5 text-primary" /> {totalStats.count}
-                                  </div>
-                                </CardContent>
-                              </Card>
-                              <Card>
-                                <CardContent className="pt-6">
-                                  <div className="text-xs font-semibold text-muted-foreground uppercase">Genel Brüt</div>
-                                  <div className="text-lg font-bold text-blue-600">{formatCurrency(totalStats.brut)}</div>
-                                </CardContent>
-                              </Card>
-                              <Card>
-                                <CardContent className="pt-6">
-                                  <div className="text-xs font-semibold text-muted-foreground uppercase">Genel Net</div>
-                                  <div className="text-lg font-bold text-green-600">{formatCurrency(totalStats.net)}</div>
-                                </CardContent>
-                              </Card>
-                              <Card>
-                                <CardContent className="pt-6">
-                                  <div className="text-xs font-semibold text-muted-foreground uppercase">İşçi SGK</div>
-                                  <div className="text-lg font-bold text-orange-600">{formatCurrency(totalStats.isciSgk)}</div>
-                                </CardContent>
-                              </Card>
-                              <Card>
-                                <CardContent className="pt-6">
-                                  <div className="text-xs font-semibold text-muted-foreground uppercase">İşveren SGK</div>
-                                  <div className="text-lg font-bold text-purple-600">{formatCurrency(totalStats.isverenPayi)}</div>
-                                </CardContent>
-                              </Card>
-                              <Card className="bg-primary/5 border-primary/20">
-                                <CardContent className="pt-6">
-                                  <div className="text-xs font-bold text-primary uppercase">Toplam Maliyet</div>
-                                  <div className="text-lg font-black text-primary">{formatCurrency(totalStats.toplamMaliyet)}</div>
-                                </CardContent>
-                              </Card>
-                            </div>
-                          )}
+  // Çalışan detay listesi: ham kayıtlardan per-employee hesap
+  const calisanRows = useMemo(() => {
+    if (!calisanlar) return [];
+    return calisanlar.map((p) => {
+      const brut = parseFloat(p.brutUcret || 0);
+      const isciSgk = parseFloat(p.sigortaKesintisi || 0);
+      const isverenSgk = parseFloat(p.isverenSgkPayi || 0) + parseFloat(p.isverenIssizlikPayi || 0);
+      const dbMaliyet = parseFloat(p.toplamIsverenMaliyeti || 0);
+      const maliyet = dbMaliyet > 0 ? dbMaliyet : brut + isverenSgk;
+      const statu = (p.statu || "").toString().trim();
+      const statuLabel = statu || "Normal";
+      let statuClass = "text-slate-600 bg-slate-100 border-slate-200";
+      if (statu.includes("önetim")) statuClass = "text-violet-700 bg-violet-50 border-violet-200";
+      else if (statu.includes("mekli")) statuClass = "text-amber-700 bg-amber-50 border-amber-200";
+      return {
+        adSoyad: p.adSoyad || "—",
+        sube: p.sube || "Merkez",
+        statuLabel,
+        statuClass,
+        brut,
+        net: parseFloat(p.netUcret || 0),
+        isciSgk,
+        isverenSgk,
+        maliyet,
+      };
+    });
+  }, [calisanlar]);
 
-                          {/* Branch Table */}
-                          {!isLoading && branchStats.length > 0 && (
-                            <Card>
-                              <CardHeader>
-                                <CardTitle>Şube Bazlı Dağılım</CardTitle>
-                              </CardHeader>
-                              <CardContent className="p-0">
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow className="bg-muted/50">
-                                      <TableHead>Şube Adı</TableHead>
-                                      <TableHead className="text-center">Personel</TableHead>
-                                      <TableHead className="text-right">Brüt Ücret</TableHead>
-                                      <TableHead className="text-right text-green-600 font-bold">Net Ücret</TableHead>
-                                      <TableHead className="text-right">İşçi SGK Payı</TableHead>
-                                      <TableHead className="text-right text-purple-600">İşveren SGK Payı</TableHead>
-                                      <TableHead className="text-right text-primary font-black">Toplam Maliyet</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {branchStats.map(stat => (
-                                      <TableRow key={stat.name} className="hover:bg-muted/30">
-                                        <TableCell className="font-medium flex items-center gap-2">
-                                          <Building2 className="w-4 h-4 text-muted-foreground" />
-                                          {stat.name}
-                                        </TableCell>
-                                        <TableCell className="text-center">{stat.count}</TableCell>
-                                        <TableCell className="text-right font-medium">{formatCurrency(stat.brut)}</TableCell>
-                                        <TableCell className="text-right font-bold text-green-600">{formatCurrency(stat.net)}</TableCell>
-                                        <TableCell className="text-right">{formatCurrency(stat.isciSgk)}</TableCell>
-                                        <TableCell className="text-right font-medium text-purple-600">{formatCurrency(stat.isverenPayi)}</TableCell>
-                                        <TableCell className="text-right font-black text-primary bg-primary/5">{formatCurrency(stat.toplamMaliyet)}</TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                  <TableFooter>
-                                    <TableRow className="bg-muted font-bold">
-                                      <TableCell>GENEL TOPLAM</TableCell>
-                                      <TableCell className="text-center">{totalStats.count}</TableCell>
-                                      <TableCell className="text-right">{formatCurrency(totalStats.brut)}</TableCell>
-                                      <TableCell className="text-right text-green-700">{formatCurrency(totalStats.net)}</TableCell>
-                                      <TableCell className="text-right">{formatCurrency(totalStats.isciSgk)}</TableCell>
-                                      <TableCell className="text-right text-purple-700">{formatCurrency(totalStats.isverenPayi)}</TableCell>
-                                      <TableCell className="text-right text-primary">{formatCurrency(totalStats.toplamMaliyet)}</TableCell>
-                                    </TableRow>
-                                  </TableFooter>
-                                </Table>
-                              </CardContent>
-                            </Card>
-                          )}
-                        </div>
-                        );
+  // Türkçe yüzde formatı (virgül): 18,4
+  const fmtPct = (v: number) => v.toFixed(1).replace(".", ",");
+
+  return (
+    <div className="space-y-6">
+      {/* Sticky filtre header */}
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-2 border-b border-border/70 bg-slate-50/85 px-6 py-4 backdrop-blur dark:bg-background/85 lg:-mx-8 lg:px-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Gümrük · Çalışanlar · {donemLabel}
+            </p>
+            <h2 className="mt-1 text-2xl font-extrabold tracking-tight">Personel Maliyeti</h2>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-muted-foreground">Dönem</span>
+              <Select value={selectedAy} onValueChange={setSelectedAy}>
+                <SelectTrigger className="w-[140px]"><SelectValue placeholder="Ay Seçin" /></SelectTrigger>
+                <SelectContent>
+                  {aylar.map((ay) => (
+                    <SelectItem key={ay.value} value={ay.value}>{ay.label}</SelectItem>
+                  ))}
+                  <SelectItem value="toplam" className="font-bold border-t">Yıllık Toplam</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-muted-foreground">Yıl</span>
+              <Select value={selectedYil} onValueChange={setSelectedYil}>
+                <SelectTrigger className="w-[100px]"><SelectValue placeholder="Yıl" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="2024">2024</SelectItem>
+                  <SelectItem value="2025">2025</SelectItem>
+                  <SelectItem value="2026">2026</SelectItem>
+                  <SelectItem value="2027">2027</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Yükleniyor / boş durum */}
+      {isLoading && (
+        <div className="text-center py-10"><Loader2 className="animate-spin w-8 h-8 mx-auto text-primary" /></div>
+      )}
+
+      {!isLoading && branchStats.length === 0 && (
+        <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
+          Kayıt bulunamadı.
+        </div>
+      )}
+
+      {!isLoading && branchStats.length > 0 && (
+        <>
+          {/* 6 KPI kart */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
+            {[
+              { label: "Personel", accent: "#7c3aed", value: String(totalStats.count), valueClass: "" },
+              { label: "Genel Brüt", accent: "#0ea5e9", value: formatCurrencyFull(totalStats.brut), valueClass: "" },
+              { label: "Genel Net", accent: "#059669", value: formatCurrencyFull(totalStats.net), valueClass: "text-emerald-600" },
+              { label: "İşçi SGK", accent: "#d97706", value: formatCurrencyFull(totalStats.isciSgk), valueClass: "" },
+              { label: "İşveren SGK", accent: "#e11d48", value: formatCurrencyFull(totalStats.isverenPayi), valueClass: "" },
+              { label: "Toplam Maliyet", accent: "#0f172a", value: formatCurrencyFull(totalStats.toplamMaliyet), valueClass: "" },
+            ].map((kpi) => (
+              <div key={kpi.label} className="relative overflow-hidden rounded-[13px] border bg-card p-4">
+                <div className="absolute left-0 top-0 h-full w-[3px]" style={{ background: kpi.accent }} />
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{kpi.label}</p>
+                <p className={cn("mt-2 text-[18px] font-extrabold tabular-nums leading-tight", kpi.valueClass)}>
+                  {kpi.value}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Şube Bazında Toplam Maliyet — donut + yüzdeli liste */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <CardTitle className="text-[15px] font-bold">Şube Bazında Toplam Maliyet</CardTitle>
+                <p className="text-xs text-muted-foreground">Her ofisin toplam personel maliyetindeki payı</p>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-7 items-center">
+                {/* Donut */}
+                <div className="relative mx-auto h-[180px] w-[180px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={subePayData}
+                        dataKey="toplamMaliyet"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={64}
+                        outerRadius={80}
+                        stroke="none"
+                      >
+                        {subePayData.map((s) => (
+                          <Cell key={s.name} fill={s.color} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">En büyük pay</span>
+                    <span className="text-[22px] font-extrabold tabular-nums" style={{ color: "#7c3aed" }}>%{enBuyukPay}</span>
+                  </div>
+                </div>
+                {/* Yüzdeli liste */}
+                <div className="flex flex-col gap-3">
+                  {subePayData.map((s) => (
+                    <div key={s.name} className="flex items-center gap-3">
+                      <span className="h-[9px] w-[9px] flex-shrink-0 rounded-[3px]" style={{ background: s.color }} />
+                      <span className="flex-[0_0_140px] text-[13px] font-semibold text-foreground/80">
+                        {s.name} <span className="font-normal text-muted-foreground">· {s.count} kişi</span>
+                      </span>
+                      <span className="h-[9px] flex-1 overflow-hidden rounded-full bg-muted">
+                        <span className="block h-full rounded-full" style={{ width: `${s.pay}%`, background: s.color }} />
+                      </span>
+                      <span className="flex-[0_0_56px] text-right text-[13px] font-extrabold tabular-nums">%{fmtPct(s.pay)}</span>
+                      <span className="flex-[0_0_auto] text-right text-[12.5px] font-semibold tabular-nums text-muted-foreground">
+                        {formatCurrencyFull(s.toplamMaliyet)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Şube Bazlı Dağılım tablosu */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-[15px] font-bold">Şube Bazlı Dağılım</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead className="text-[10.5px] uppercase tracking-wide">Şube Adı</TableHead>
+                    <TableHead className="text-center text-[10.5px] uppercase tracking-wide">Personel</TableHead>
+                    <TableHead className="text-right text-[10.5px] uppercase tracking-wide">Brüt Ücret</TableHead>
+                    <TableHead className="text-right text-[10.5px] uppercase tracking-wide">Net Ücret</TableHead>
+                    <TableHead className="text-right text-[10.5px] uppercase tracking-wide">İşçi SGK</TableHead>
+                    <TableHead className="text-right text-[10.5px] uppercase tracking-wide">İşveren SGK</TableHead>
+                    <TableHead className="text-right text-[10.5px] uppercase tracking-wide">Toplam Maliyet</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {branchStats.map((stat, i) => (
+                    <TableRow key={stat.name} className={cn("hover:bg-muted/30", i % 2 === 1 && "bg-muted/20")}>
+                      <TableCell className="font-semibold">
+                        <span className="flex items-center gap-2">
+                          <Building2 className="w-4 h-4 text-muted-foreground" />
+                          {stat.name}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center tabular-nums">{stat.count}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{formatCurrencyFull(stat.brut)}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums text-emerald-600">{formatCurrencyFull(stat.net)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{formatCurrencyFull(stat.isciSgk)}</TableCell>
+                      <TableCell className="text-right font-medium tabular-nums text-violet-600">{formatCurrencyFull(stat.isverenPayi)}</TableCell>
+                      <TableCell className="text-right font-extrabold tabular-nums">{formatCurrencyFull(stat.toplamMaliyet)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+                <TableFooter>
+                  <TableRow className="bg-muted/60 border-t-2">
+                    <TableCell className="font-extrabold">GENEL TOPLAM</TableCell>
+                    <TableCell className="text-center font-extrabold tabular-nums">{totalStats.count}</TableCell>
+                    <TableCell className="text-right font-extrabold tabular-nums">{formatCurrencyFull(totalStats.brut)}</TableCell>
+                    <TableCell className="text-right font-extrabold tabular-nums text-emerald-700">{formatCurrencyFull(totalStats.net)}</TableCell>
+                    <TableCell className="text-right font-extrabold tabular-nums">{formatCurrencyFull(totalStats.isciSgk)}</TableCell>
+                    <TableCell className="text-right font-extrabold tabular-nums text-violet-700">{formatCurrencyFull(totalStats.isverenPayi)}</TableCell>
+                    <TableCell className="text-right font-extrabold tabular-nums">{formatCurrencyFull(totalStats.toplamMaliyet)}</TableCell>
+                  </TableRow>
+                </TableFooter>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {/* Çalışan Detay Listesi — per-employee */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-[15px] font-bold">Çalışan Detay Listesi</CardTitle>
+                <span className="text-[12.5px] tabular-nums text-muted-foreground">{totalStats.count} kişi</span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="max-h-[62vh] overflow-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 z-[5]">
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="text-[10.5px] uppercase tracking-wide">Ad Soyad</TableHead>
+                      <TableHead className="text-[10.5px] uppercase tracking-wide">Şube</TableHead>
+                      <TableHead className="text-[10.5px] uppercase tracking-wide">Statü</TableHead>
+                      <TableHead className="text-right text-[10.5px] uppercase tracking-wide">Brüt Ücret</TableHead>
+                      <TableHead className="text-right text-[10.5px] uppercase tracking-wide">Net Ücret</TableHead>
+                      <TableHead className="text-right text-[10.5px] uppercase tracking-wide">İşçi SGK</TableHead>
+                      <TableHead className="text-right text-[10.5px] uppercase tracking-wide">İşveren SGK</TableHead>
+                      <TableHead className="text-right text-[10.5px] uppercase tracking-wide">Toplam Maliyet</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {calisanRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                          Çalışan kaydı bulunamadı.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      calisanRows.map((p, i) => (
+                        <TableRow key={`${p.adSoyad}-${i}`} className={cn("hover:bg-muted/30", i % 2 === 1 && "bg-muted/20")}>
+                          <TableCell className="font-semibold">{p.adSoyad}</TableCell>
+                          <TableCell className="text-muted-foreground">{p.sube}</TableCell>
+                          <TableCell>
+                            <span className={cn("inline-block rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", p.statuClass)}>
+                              {p.statuLabel}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{formatCurrencyFull(p.brut)}</TableCell>
+                          <TableCell className="text-right font-semibold tabular-nums text-emerald-600">{formatCurrencyFull(p.net)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{formatCurrencyFull(p.isciSgk)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-violet-600">{formatCurrencyFull(p.isverenSgk)}</TableCell>
+                          <TableCell className="text-right font-extrabold tabular-nums">{formatCurrencyFull(p.maliyet)}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
 }
 
 // CSV satırlarını Türkçe Excel uyumlu (UTF-8 BOM + ; ayraç) string'e çevir.
@@ -2035,6 +2189,9 @@ function TrendAnalysis() {
   const [includeAllChurn, setIncludeAllChurn] = useState(false);
   const [topN, setTopN] = useState("100");
   const [drillFirma, setDrillFirma] = useState<string | null>(null);
+  const [tab, setTab] = useState<"rising" | "falling" | "risk" | "yeni">("rising");
+  const [sortField, setSortField] = useState<"currentVol" | "prevVol" | "growth" | "absGrowth">("currentVol");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const queryUrl = `/api/gumruk/analiz?churnMonths=${churnMonths}&comparisonWindow=${comparisonWindow}&includeAllChurn=${includeAllChurn}&topN=${topN}`;
   const { data, isLoading } = useQuery<{
@@ -2082,91 +2239,6 @@ function TrendAnalysis() {
 
   const newCustomerAlerts = alerts.filter((a: any) => a.type === 'new_customer');
 
-  // Trend Table Component
-  const TrendTable = ({ trends = [], defaultSortField = 'currentVol' }: { trends: any[], defaultSortField?: 'currentVol' | 'prevVol' }) => {
-    const [sortField, setSortField] = useState<'currentVol' | 'prevVol' | 'growth' | 'absGrowth'>(defaultSortField);
-    const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-
-    const sortedTrends = [...trends].sort((a, b) => {
-        const valA = a[sortField];
-        const valB = b[sortField];
-        return sortDirection === 'asc' ? valA - valB : valB - valA;
-    });
-
-    const handleSort = (field: 'currentVol' | 'prevVol' | 'growth' | 'absGrowth') => {
-        if (sortField === field) {
-            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-        } else {
-            setSortField(field);
-            setSortDirection('desc');
-        }
-    };
-
-    return (
-    <Card>
-        <CardContent className="p-0">
-            <div className="rounded-md overflow-hidden">
-                <div className="max-h-[600px] overflow-y-auto">
-                    <Table className="text-sm">
-                        <TableHeader className="sticky top-0 bg-muted z-10">
-                            <TableRow>
-                                <TableHead>Firma</TableHead>
-                                <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('currentVol')}>
-                                     <div className="flex items-center justify-end gap-1 whitespace-nowrap">
-                                        Son Dönem
-                                        {sortField === 'currentVol' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
-                                     </div>
-                                </TableHead>
-                                <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('prevVol')}>
-                                     <div className="flex items-center justify-end gap-1 whitespace-nowrap">
-                                        Önceki Dönem
-                                        {sortField === 'prevVol' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
-                                     </div>
-                                </TableHead>
-                                <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('growth')}>
-                                     <div className="flex items-center justify-end gap-1">
-                                        Büyüme
-                                        {sortField === 'growth' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
-                                     </div>
-                                </TableHead>
-                                <TableHead className="text-right cursor-pointer hover:text-primary" onClick={() => handleSort('absGrowth')}>
-                                     <div className="flex items-center justify-end gap-1 whitespace-nowrap">
-                                        Fark (TL)
-                                        {sortField === 'absGrowth' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
-                                     </div>
-                                </TableHead>
-                                <TableHead className="w-[40px]"></TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {!sortedTrends || sortedTrends.length === 0 ? (
-                                <TableRow><TableCell colSpan={5} className="text-center py-8">Veri yok</TableCell></TableRow>
-                            ) : sortedTrends.map((t: any, i: number) => (
-                                <TableRow key={i} className="cursor-pointer hover:bg-accent/40" onClick={() => setDrillFirma(t.company)}>
-                                    <TableCell className="font-medium">{t.company}</TableCell>
-                                    <TableCell className="text-right font-bold tabular-nums whitespace-nowrap">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(t.currentVol)}</TableCell>
-                                    <TableCell className="text-right text-muted-foreground tabular-nums whitespace-nowrap">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(t.prevVol)}</TableCell>
-                                    <TableCell className="text-right">
-                                        <Badge variant={t.growth > 0 ? "secondary" : "destructive"} className={t.growth > 0 ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}>
-                                            {t.growth > 0 ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
-                                            %{t.growth.toFixed(1)}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell className={`text-right font-medium tabular-nums whitespace-nowrap ${t.absGrowth > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                        {t.absGrowth > 0 ? '+' : ''}{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(t.absGrowth)}
-                                    </TableCell>
-                                    <TableCell><BarChart3 className="w-3.5 h-3.5 opacity-30" /></TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </div>
-            </div>
-        </CardContent>
-    </Card>
-    );
-  };
-
   const exportChurnCsv = () => {
     const rows = churnAlerts.map((a: any) => [a.company, a.lastSeenLabel || "-", a.inactiveMonths ?? "", a.transactionCount ?? "", a.totalVol ?? 0]);
     downloadCsv(`riskli-firmalar-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows, ["Firma", "Son İşlem Ayı", "Inactive Ay", "Toplam İşlem", "Toplam Hacim (TL)"]));
@@ -2182,245 +2254,286 @@ function TrendAnalysis() {
 
   const fmtCurrency = (v: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(v);
 
+  // ─── Türetilen değerler ───
+  const isTrendTab = tab === "rising" || tab === "falling";
+  const trendSource = (tab === "falling" ? fallingTrends : risingTrends) || [];
+  const sortedTrends = [...trendSource].sort((a: any, b: any) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return ((a[sortField] ?? 0) - (b[sortField] ?? 0)) * dir;
+  });
+  const handleSort = (field: typeof sortField) => {
+    if (sortField === field) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir("desc");
+    }
+  };
+  const sortCaret = (field: typeof sortField) =>
+    sortField === field ? (sortDir === "asc" ? "▲" : "▼") : "";
+
+  const riskTotalHacim = riskOzet?.toplamHacim ?? churnAlerts.reduce((sum: number, a: any) => sum + (a.totalVol ?? 0), 0);
+  const riskFirmaSayisi = riskOzet?.firmaSayisi ?? churnAlerts.length;
+
+  // CSV — aktif tab'ın dışa aktarıcısı
+  const exportActive = () => {
+    if (tab === "risk") return exportChurnCsv();
+    if (tab === "yeni") return exportNewCsv();
+    return exportTrendCsv(trendSource, tab === "falling" ? "dususte-trendler" : "yukselen-trendler");
+  };
+
+  const kpis = [
+    { label: "Yükselen Firma", accent: "#10b981", value: String(risingTrends?.length ?? 0), sub: "ciro artışı pozitif" },
+    { label: "Düşen Firma", accent: "#e11d48", value: String(fallingTrends?.length ?? 0), sub: "ciro daralması" },
+    { label: "Riskli Firma", accent: "#f59e0b", value: String(riskFirmaSayisi), sub: `${formatCurrencyFull(riskTotalHacim)} hacim` },
+    { label: "Yeni Müşteri", accent: "#0ea5e9", value: String(newCustomerAlerts.length), sub: "yeni kazanılan" },
+  ];
+
+  const tabsDef = [
+    { id: "rising" as const, label: "Yükselen", dot: "#10b981", count: risingTrends?.length ?? 0, badgeBg: "bg-emerald-100", badgeFg: "text-emerald-700" },
+    { id: "falling" as const, label: "Düşen", dot: "#e11d48", count: fallingTrends?.length ?? 0, badgeBg: "bg-rose-100", badgeFg: "text-rose-700" },
+    { id: "risk" as const, label: "Riskli Firmalar", dot: "#f59e0b", count: churnAlerts.length, badgeBg: "bg-amber-100", badgeFg: "text-amber-700" },
+    { id: "yeni" as const, label: "Yeni Müşteriler", dot: "#0ea5e9", count: newCustomerAlerts.length, badgeBg: "bg-sky-100", badgeFg: "text-sky-700" },
+  ];
+
+  const segBtn = (active: boolean) =>
+    cn(
+      "rounded-md px-3 py-1.5 text-[12.5px] transition-colors",
+      active
+        ? "bg-white text-foreground font-bold shadow-sm dark:bg-background"
+        : "text-muted-foreground font-semibold hover:text-foreground"
+    );
+
+  const riskDot = (m: number) => (m >= 9 ? "#ef4444" : m >= 5 ? "#f59e0b" : "#fbbf24");
+  const riskMonColor = (m: number) => (m >= 9 ? "text-red-600" : m >= 5 ? "text-amber-600" : "text-amber-500");
+
   return (
-    <div className="space-y-6">
-      {/* Genel kontrol bar — tüm tablar için ortak parametreler */}
-      <div className="flex flex-wrap items-end justify-between gap-3 p-4 rounded-lg border bg-muted/20">
-        <div>
-          <div className="text-sm font-semibold flex items-center gap-2">
-            <Calculator className="w-4 h-4 text-primary" />
-            Karşılaştırma: <span className="text-primary">{currentPeriodLabel}</span> vs <span className="text-muted-foreground">{previousPeriodLabel}</span>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
+    <div className="space-y-5">
+      {/* Sticky kontrol barı */}
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-2 border-b border-border/70 bg-slate-50/85 px-6 py-4 backdrop-blur dark:bg-background/85 lg:-mx-8 lg:px-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <Label className="text-xs">Karşılaştırma Penceresi</Label>
-            <Select value={comparisonWindow} onValueChange={setComparisonWindow}>
-              <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">1 ay</SelectItem>
-                <SelectItem value="3">3 ay</SelectItem>
-                <SelectItem value="6">6 ay</SelectItem>
-                <SelectItem value="12">12 ay</SelectItem>
-              </SelectContent>
-            </Select>
+            <h1 className="text-[21px] font-extrabold tracking-tight">Trend Analizi</h1>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Karşılaştırma: <strong style={{ color: "#0284c7" }}>{currentPeriodLabel}</strong>
+              {" "}vs{" "}
+              <span className="text-muted-foreground">{previousPeriodLabel}</span>
+            </p>
           </div>
-          <div>
-            <Label className="text-xs">Risk Süresi (Ay)</Label>
-            <Select value={churnMonths} onValueChange={setChurnMonths}>
-              <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="2">2</SelectItem>
-                <SelectItem value="3">3</SelectItem>
-                <SelectItem value="4">4</SelectItem>
-                <SelectItem value="5">5</SelectItem>
-                <SelectItem value="6">6</SelectItem>
-                <SelectItem value="9">9</SelectItem>
-                <SelectItem value="12">12</SelectItem>
-                <SelectItem value="24">24</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="flex flex-wrap items-end gap-2.5">
+            {/* Pencere */}
+            <div>
+              <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Pencere</div>
+              <div className="inline-flex rounded-lg bg-muted p-1">
+                {["1", "3", "6", "12"].map((w) => (
+                  <button key={w} type="button" onClick={() => setComparisonWindow(w)} className={segBtn(comparisonWindow === w)}>
+                    {w} ay
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Risk Süresi */}
+            <div>
+              <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Risk Süresi</div>
+              <div className="inline-flex rounded-lg bg-muted p-1">
+                {["2", "3", "6", "12"].map((m) => (
+                  <button key={m} type="button" onClick={() => setChurnMonths(m)} className={segBtn(churnMonths === m)}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Sıralama Limiti */}
+            <div>
+              <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Limit</div>
+              <Select value={topN} onValueChange={setTopN}>
+                <SelectTrigger className="h-[38px] w-[100px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="50">İlk 50</SelectItem>
+                  <SelectItem value="100">İlk 100</SelectItem>
+                  <SelectItem value="200">İlk 200</SelectItem>
+                  <SelectItem value="all">Tümü</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Tamamen kaybedilenler toggle */}
+            <label className="flex h-[38px] items-center gap-2 rounded-lg border bg-card px-3 cursor-pointer">
+              <Switch checked={includeAllChurn} onCheckedChange={setIncludeAllChurn} />
+              <span className="whitespace-nowrap text-xs font-medium">Tamamen kaybedilenler</span>
+            </label>
+            {/* CSV */}
+            <Button variant="outline" onClick={exportActive} className="h-[38px] gap-2">
+              <DownloadIcon className="h-[15px] w-[15px]" />
+              CSV
+            </Button>
           </div>
-          <div>
-            <Label className="text-xs">Sıralama Limiti</Label>
-            <Select value={topN} onValueChange={setTopN}>
-              <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="50">İlk 50</SelectItem>
-                <SelectItem value="100">İlk 100</SelectItem>
-                <SelectItem value="200">İlk 200</SelectItem>
-                <SelectItem value="all">Tümü</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer pb-2">
-            <Switch checked={includeAllChurn} onCheckedChange={setIncludeAllChurn} />
-            <span className="text-xs font-medium">Tamamen kaybedilenleri de göster</span>
-          </label>
         </div>
       </div>
 
-      <Tabs defaultValue="risks" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="risks" className="gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-500" />
-                Riskli Şirketler ({churnAlerts.length})
-            </TabsTrigger>
-            <TabsTrigger value="new" className="gap-2">
-                <Lightbulb className="w-4 h-4 text-yellow-500" />
-                Yeni Şirketler ({newCustomerAlerts.length})
-            </TabsTrigger>
-            <TabsTrigger value="rising" className="gap-2">
-                <TrendingUp className="w-4 h-4 text-green-500" />
-                Yükselen ({risingTrends?.length || 0})
-            </TabsTrigger>
-            <TabsTrigger value="falling" className="gap-2">
-                <TrendingDown className="w-4 h-4 text-red-500" />
-                Düşüşte ({fallingTrends?.length || 0})
-            </TabsTrigger>
-        </TabsList>
+      {/* 4 KPI kartı */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {kpis.map((kpi) => (
+          <div key={kpi.label} className="relative overflow-hidden rounded-[14px] border bg-card p-5">
+            <div className="absolute left-0 top-0 h-full w-[3px]" style={{ background: kpi.accent }} />
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{kpi.label}</p>
+            <p className="mt-2.5 text-[25px] font-extrabold tabular-nums leading-tight">{kpi.value}</p>
+            <p className="mt-2 text-[12px] font-medium text-muted-foreground">{kpi.sub}</p>
+          </div>
+        ))}
+      </div>
 
-        {/* RISKLI SIRKETLER */}
-        <TabsContent value="risks" className="space-y-4 mt-6">
-            {/* Risk altındaki ciro özet */}
-            {riskOzet && riskOzet.firmaSayisi > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <Card className="border-l-4 border-l-red-500 p-4">
-                  <div className="text-xs text-muted-foreground">Riskli Firma Sayısı</div>
-                  <div className="text-2xl font-black text-red-600 tabular-nums">{riskOzet.firmaSayisi}</div>
-                </Card>
-                <Card className="border-l-4 border-l-orange-500 p-4 md:col-span-2">
-                  <div className="text-xs text-muted-foreground">Risk Altındaki Ciro (Toplam Geçmiş Hacim, KDV hariç)</div>
-                  <div className="text-2xl font-black text-orange-600 tabular-nums">{fmtCurrency(riskOzet.toplamHacim)}</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Bu firmalar geçmişte aktifken {fmtCurrency(riskOzet.toplamHacim)} hacim üretti — şu an tehlikedeler.
-                  </div>
-                </Card>
-              </div>
+      {/* Tab switcher */}
+      <div className="flex flex-wrap gap-1.5 border-b">
+        {tabsDef.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={cn(
+              "relative -mb-px inline-flex items-center px-1 py-2.5 mr-4 text-[13.5px] transition-colors",
+              tab === t.id ? "font-bold text-foreground" : "font-semibold text-muted-foreground hover:text-foreground"
             )}
+            style={tab === t.id ? { boxShadow: "inset 0 -2px 0 #0ea5e9" } : undefined}
+          >
+            <span className="mr-2 inline-block h-[7px] w-[7px] rounded-full" style={{ background: t.dot }} />
+            {t.label}
+            <span className={cn("ml-2 rounded-full px-1.5 py-px text-[11px] font-bold", t.badgeBg, t.badgeFg)}>{t.count}</span>
+          </button>
+        ))}
+      </div>
 
-            <div className="flex items-center justify-between mb-2 bg-muted/30 p-4 rounded-lg border">
-                <div>
-                     <h3 className="text-lg font-semibold flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-red-500" />
-                        Kaybetme Riski Olan Şirketler
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                        Son işlemi {churnMonths}+ ay önce yapan eski müşteriler.
-                        {!includeAllChurn && ` (Sadece son ${parseInt(churnMonths) + 3} ay içinde aktiftiler.)`}
-                    </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={exportChurnCsv} disabled={churnAlerts.length === 0}>
-                  <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
-                </Button>
+      {/* ── Trend tablosu (Yükselen / Düşen) ── */}
+      {isTrendTab && (
+        <Card className="overflow-hidden rounded-[14px]">
+          <CardContent className="p-0">
+            <div className="max-h-[600px] overflow-y-auto">
+              <Table className="text-sm">
+                <TableHeader className="sticky top-0 z-10 bg-muted/60 backdrop-blur">
+                  <TableRow>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Firma</TableHead>
+                    {([
+                      { key: "currentVol", label: "Son Dönem" },
+                      { key: "prevVol", label: "Önceki Dönem" },
+                      { key: "growth", label: "Büyüme" },
+                      { key: "absGrowth", label: "Fark (₺)" },
+                    ] as const).map((c) => (
+                      <TableHead
+                        key={c.key}
+                        className="cursor-pointer select-none text-right text-[11px] font-bold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort(c.key)}
+                      >
+                        <span className="whitespace-nowrap">{c.label} {sortCaret(c.key)}</span>
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sortedTrends.length === 0 ? (
+                    <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">Veri yok</TableCell></TableRow>
+                  ) : sortedTrends.map((t: any, i: number) => (
+                    <TableRow key={i} className="cursor-pointer hover:bg-accent/40" onClick={() => setDrillFirma(t.company)}>
+                      <TableCell className="font-semibold text-[13.5px]">{t.company}</TableCell>
+                      <TableCell className="text-right font-bold tabular-nums whitespace-nowrap">{formatCurrencyFull(t.currentVol)}</TableCell>
+                      <TableCell className="text-right tabular-nums whitespace-nowrap text-muted-foreground">{formatCurrencyFull(t.prevVol)}</TableCell>
+                      <TableCell className="text-right">
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-bold",
+                            t.growth >= 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
+                          )}
+                        >
+                          {t.growth >= 0 ? "▲" : "▼"} %{Math.abs(t.growth).toFixed(1).replace(".", ",")}
+                        </span>
+                      </TableCell>
+                      <TableCell className={cn("text-right font-semibold tabular-nums whitespace-nowrap", t.absGrowth >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                        {t.absGrowth >= 0 ? "+" : "−"}{formatCurrencyFull(Math.abs(t.absGrowth))}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
+          </CardContent>
+        </Card>
+      )}
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {churnAlerts.length === 0 ? (
-                <div className="col-span-3 text-center py-10 text-muted-foreground border-2 border-dashed rounded-lg">
-                    <TrendingUp className="w-8 h-8 mb-2 mx-auto opacity-30" />
-                    Belirlenen kriterlere uyan riskli şirket bulunamadı.
-                </div>
-            ) : (
-                churnAlerts.map((alert: any, i: number) => (
-                <Card key={i} className="border-l-4 border-l-red-500 cursor-pointer hover:shadow-md transition-shadow" onClick={() => setDrillFirma(alert.company)}>
-                    <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start gap-2">
-                            <CardTitle className="text-base font-bold">{alert.company}</CardTitle>
-                            <Badge variant="destructive" className="shrink-0">Risk</Badge>
+      {/* ── Riskli Firmalar ── */}
+      {tab === "risk" && (
+        <Card className="overflow-hidden rounded-[14px]">
+          <CardContent className="p-0">
+            <div className="max-h-[600px] overflow-y-auto">
+              <Table className="text-sm">
+                <TableHeader className="sticky top-0 z-10 bg-rose-50 backdrop-blur">
+                  <TableRow>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wide text-rose-700">Firma</TableHead>
+                    <TableHead className="text-right text-[11px] font-bold uppercase tracking-wide text-rose-700">Son İşlem</TableHead>
+                    <TableHead className="text-right text-[11px] font-bold uppercase tracking-wide text-rose-700">İnaktif</TableHead>
+                    <TableHead className="text-right text-[11px] font-bold uppercase tracking-wide text-rose-700">Toplam Hacim</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {churnAlerts.length === 0 ? (
+                    <TableRow><TableCell colSpan={4} className="py-10 text-center text-muted-foreground">Belirlenen kriterlere uyan riskli şirket bulunamadı.</TableCell></TableRow>
+                  ) : churnAlerts.map((a: any, i: number) => (
+                    <TableRow key={i} className="cursor-pointer hover:bg-rose-50/40" onClick={() => setDrillFirma(a.company)}>
+                      <TableCell>
+                        <div className="flex items-center gap-2.5">
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: riskDot(a.inactiveMonths ?? 0) }} />
+                          <span className="font-semibold text-[13.5px]">{a.company}</span>
                         </div>
-                    </CardHeader>
-                    <CardContent className="space-y-1.5">
-                        <div className="flex items-center gap-2 text-sm text-red-600 font-medium">
-                            <AlertTriangle className="w-4 h-4" />
-                            <span>{alert.message}</span>
-                        </div>
-                        {alert.lastSeenLabel && (
-                          <div className="text-xs text-muted-foreground">Son işlem: <strong>{alert.lastSeenLabel}</strong></div>
-                        )}
-                        {alert.totalVol > 0 && (
-                          <div className="text-xs flex items-center gap-2">
-                            <span className="text-muted-foreground">Geçmiş hacim:</span>
-                            <strong className="text-orange-600 tabular-nums">{fmtCurrency(alert.totalVol)}</strong>
-                            <span className="text-muted-foreground">· {alert.transactionCount} işlem</span>
-                          </div>
-                        )}
-                    </CardContent>
-                </Card>
-                ))
-            )}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">{a.lastSeenLabel || "-"}</TableCell>
+                      <TableCell className="text-right">
+                        <span className={cn("font-bold tabular-nums", riskMonColor(a.inactiveMonths ?? 0))}>{a.inactiveMonths ?? 0} ay</span>
+                      </TableCell>
+                      <TableCell className="text-right font-bold tabular-nums whitespace-nowrap">{formatCurrencyFull(a.totalVol ?? 0)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-        </TabsContent>
+          </CardContent>
+        </Card>
+      )}
 
-        {/* YENI SIRKETLER */}
-        <TabsContent value="new" className="space-y-4 mt-6">
-             <div className="flex items-center justify-between mb-2 bg-muted/30 p-4 rounded-lg border">
-                 <div>
-                     <h3 className="text-lg font-semibold flex items-center gap-2">
-                        <Lightbulb className="w-5 h-5 text-yellow-500" />
-                        Portföye Yeni Katılanlar
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">Karşılaştırma penceresi içinde ({currentPeriodLabel}) ilk işlemini yapan firmalar.</p>
-                 </div>
-                 <Button variant="outline" size="sm" onClick={exportNewCsv} disabled={newCustomerAlerts.length === 0}>
-                   <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
-                 </Button>
-            </div>
-             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {newCustomerAlerts.length === 0 ? (
-                 <div className="col-span-3 text-center py-10 text-muted-foreground border-2 border-dashed rounded-lg">
-                    Yeni müşteri bulunamadı.
-                </div>
-            ) : (
-                newCustomerAlerts.map((alert: any, i: number) => (
-                <Card key={i} className="border-l-4 border-l-green-500 cursor-pointer hover:shadow-md transition-shadow" onClick={() => setDrillFirma(alert.company)}>
-                    <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start gap-2">
-                             <CardTitle className="text-base font-bold">{alert.company}</CardTitle>
-                             <Badge className="bg-green-500 hover:bg-green-600 shrink-0">Yeni</Badge>
+      {/* ── Yeni Müşteriler ── */}
+      {tab === "yeni" && (
+        <Card className="overflow-hidden rounded-[14px]">
+          <CardContent className="p-0">
+            <div className="max-h-[600px] overflow-y-auto">
+              <Table className="text-sm">
+                <TableHeader className="sticky top-0 z-10 bg-emerald-50 backdrop-blur">
+                  <TableRow>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Firma</TableHead>
+                    <TableHead className="text-right text-[11px] font-bold uppercase tracking-wide text-emerald-700">İlk İşlem</TableHead>
+                    <TableHead className="text-right text-[11px] font-bold uppercase tracking-wide text-emerald-700">İşlem</TableHead>
+                    <TableHead className="text-right text-[11px] font-bold uppercase tracking-wide text-emerald-700">Son Dönem Hacim</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {newCustomerAlerts.length === 0 ? (
+                    <TableRow><TableCell colSpan={4} className="py-10 text-center text-muted-foreground">Yeni müşteri bulunamadı.</TableCell></TableRow>
+                  ) : newCustomerAlerts.map((a: any, i: number) => (
+                    <TableRow key={i} className="cursor-pointer hover:bg-emerald-50/40" onClick={() => setDrillFirma(a.company)}>
+                      <TableCell>
+                        <div className="flex items-center gap-2.5">
+                          <span className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md bg-emerald-100 text-emerald-600">
+                            <Plus className="h-[13px] w-[13px]" strokeWidth={2.4} />
+                          </span>
+                          <span className="font-semibold text-[13.5px]">{a.company}</span>
                         </div>
-                    </CardHeader>
-                    <CardContent className="space-y-1.5">
-                        <div className="flex items-center gap-2 text-sm text-green-600 font-medium">
-                            <TrendingUp className="w-4 h-4" />
-                            <span>İlk işlem: <strong>{alert.firstSeenLabel}</strong></span>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                            <strong className="text-foreground tabular-nums">{alert.transactionCount}</strong> işlem · Son dönem hacim:{' '}
-                            <strong className="text-green-700 tabular-nums">{fmtCurrency(alert.currentVol || 0)}</strong>
-                        </div>
-                        {alert.totalVol > (alert.currentVol || 0) && (
-                          <div className="text-xs text-muted-foreground">
-                            Toplam hacim: <strong className="tabular-nums">{fmtCurrency(alert.totalVol)}</strong>
-                          </div>
-                        )}
-                    </CardContent>
-                </Card>
-                ))
-            )}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">{a.firstSeenLabel || "-"}</TableCell>
+                      <TableCell className="text-right tabular-nums text-foreground/80">{a.transactionCount ?? 0}</TableCell>
+                      <TableCell className="text-right font-bold tabular-nums whitespace-nowrap">{formatCurrencyFull(a.currentVol ?? a.totalVol ?? 0)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-        </TabsContent>
-
-        {/* YUKSELEN TRENDLER */}
-        <TabsContent value="rising" className="space-y-4 mt-6">
-            <div className="flex items-center justify-between mb-2 bg-muted/30 p-4 rounded-lg border">
-                <div>
-                    <h3 className="text-lg font-semibold flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5 text-green-500" />
-                        Yükselen Şirketler ve Trendler
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                        İşlem hacmi {currentPeriodLabel} döneminde artan şirketler.
-                        Yeni müşteriler hariç (Yeni sekmesinde gösterilir).
-                    </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => exportTrendCsv(risingTrends || [], "yukselen-trendler")} disabled={!risingTrends?.length}>
-                  <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
-                </Button>
-            </div>
-            <TrendTable trends={risingTrends || []} defaultSortField="currentVol" />
-        </TabsContent>
-
-        {/* DUSUSTEKI TRENDLER */}
-        <TabsContent value="falling" className="space-y-4 mt-6">
-             <div className="flex items-center justify-between mb-2 bg-muted/30 p-4 rounded-lg border">
-                <div>
-                    <h3 className="text-lg font-semibold flex items-center gap-2">
-                        <TrendingDown className="w-5 h-5 text-red-500" />
-                        Düşüşteki Şirketler ve Trendler
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                        Önceki dönemde aktifken {currentPeriodLabel} döneminde hacmi azalan şirketler.
-                    </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => exportTrendCsv(fallingTrends || [], "dususte-trendler")} disabled={!fallingTrends?.length}>
-                  <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
-                </Button>
-            </div>
-            <TrendTable trends={fallingTrends || []} defaultSortField="prevVol" />
-        </TabsContent>
-
-      </Tabs>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Drill-down dialog */}
       <FirmaTimelineDialog firma={drillFirma} onClose={() => setDrillFirma(null)} />

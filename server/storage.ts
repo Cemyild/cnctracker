@@ -124,7 +124,7 @@ export interface IStorage {
   insertSigortaPoliceleri(veriler: InsertSigortaPolice[]): Promise<SigortaPolice[]>;
   deleteSigortaPoliceleri(sirket: string, ay?: string, yil?: number): Promise<void>;
   getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; toplamBedel: number; evetSayisi: number; tutarFarkiSayisi: number }[]>;
-  getSigortaFirmaOzet(yil: number, ay?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]>;
+  getSigortaFirmaOzet(yil: number, ay?: string, sirket?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]>;
   updateSigortaPoliceDekontDurumu(id: string, durum: string): Promise<SigortaPolice | null>;
   updateSigortaPoliceleriDekontDurumuBulk(ids: string[], durum: string): Promise<number>;
 
@@ -1443,10 +1443,14 @@ export class DatabaseStorage implements IStorage {
   }
 
 
-  async getSigortaFirmaOzet(yil: number, ay?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]> {
+  async getSigortaFirmaOzet(yil: number, ay?: string, sirket?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]> {
     const filters = [eq(sigortaPoliceleri.yil, yil)];
     if (ay && ay !== 'toplam' && ay !== 'ALL') {
       filters.push(eq(sigortaPoliceleri.ay, ay));
+    }
+    if (sirket) {
+      // Acente filtresi (Mapfre / Ray Sigorta) — Özet'teki "En Çok Brüt Prim" tablosu için
+      filters.push(eq(sigortaPoliceleri.sirket, sirket));
     }
 
     const result = await db.select({

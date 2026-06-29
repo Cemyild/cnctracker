@@ -925,8 +925,8 @@ export async function registerRoutes(
   app.get("/api/sigorta/firmalar/:yil", async (req, res) => {
     try {
       const { yil } = req.params;
-      const { ay } = req.query;
-      const result = await storage.getSigortaFirmaOzet(parseInt(yil), ay as string | undefined);
+      const { ay, sirket } = req.query;
+      const result = await storage.getSigortaFirmaOzet(parseInt(yil), ay as string | undefined, sirket as string | undefined);
       res.json(result);
     } catch (err) {
       console.error("Firma özeti alınırken hata:", err);

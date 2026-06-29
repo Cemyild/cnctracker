@@ -8,11 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, XCircle, AlertCircle, Upload, Search, FileSpreadsheet, ArrowRightLeft, Save, Trash2, Filter, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link, MousePointerClick, Download } from "lucide-react";
-import { BackgroundPaths } from "@/components/BackgroundPaths";
+import { CheckCircle2, XCircle, AlertCircle, Upload, Search, FileSpreadsheet, ArrowRightLeft, Save, Trash2, Filter, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link, MousePointerClick, Download, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { formatCurrency } from "@/lib/utils"; // Assuming this exists or I should use Intl directly
+import { formatCurrency, cn } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -92,60 +91,98 @@ export default function Sigorta() {
     
     const [selectedYear, setSelectedYear] = useState<number>(2025);
     const [selectedMonth, setSelectedMonth] = useState<string>("toplam");
+    // Acente filtresi — Tümü / Mapfre / Ray; tüm KPI ve listeleri o acenteye indirger
+    const [acente, setAcente] = useState<"tum" | "mapfre" | "ray">("tum");
+
+    const FIRMS: { id: "tum" | "mapfre" | "ray"; label: string }[] = [
+        { id: "tum", label: "Tümü" },
+        { id: "mapfre", label: "Mapfre" },
+        { id: "ray", label: "Ray" },
+    ];
+    const TABS: { id: string; label: string }[] = [
+        { id: "ozet", label: "Özet" },
+        { id: "liste", label: "Poliçe Listesi" },
+        { id: "aging", label: "Yaşlandırma" },
+        { id: "yukleme", label: "Veri Yükleme" },
+    ];
 
     return (
-        <div className="relative min-h-full">
-            <BackgroundPaths />
-            <div className="relative z-10 p-6 lg:p-8 space-y-6">
-                <div className="flex justify-between items-center">
-                    <div>
-                        <h2 className="text-3xl font-bold tracking-tight">Sigorta Yönetimi</h2>
-                        <p className="text-muted-foreground mt-1">
-                            Sigorta poliçeleri, mutabakat ve performans takibi.
-                        </p>
+        <div className="min-h-full bg-slate-50 dark:bg-background">
+            <div className="mx-auto max-w-[1200px] px-6 pb-12">
+                <Tabs value={mainTab} onValueChange={setMainTab} className="w-full">
+                    {/* ===== STICKY HEADER + TABS ===== */}
+                    <div className="sticky top-0 z-20 border-b border-border/70 bg-slate-50/90 pt-5 backdrop-blur dark:bg-background/90">
+                        <div className="flex flex-wrap items-end justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-[11px] bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400">
+                                    <Shield className="h-[22px] w-[22px]" strokeWidth={1.8} />
+                                </div>
+                                <div>
+                                    <h1 className="text-[21px] font-extrabold tracking-tight">Sigorta</h1>
+                                    <p className="mt-0.5 text-[12.5px] text-muted-foreground">Poliçe, mutabakat ve performans takibi</p>
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                {/* Acente segmented */}
+                                <div className="inline-flex gap-1 rounded-[9px] border border-border bg-muted p-[3px]">
+                                    {FIRMS.map((f) => (
+                                        <button
+                                            key={f.id}
+                                            onClick={() => setAcente(f.id)}
+                                            className={cn(
+                                                "rounded-[7px] px-3 py-1.5 text-[12.5px] transition-colors",
+                                                acente === f.id ? "bg-card font-bold text-foreground shadow-sm" : "font-semibold text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            {f.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
+                                    <SelectTrigger className="h-[38px] w-[100px]"><SelectValue placeholder="Yıl" /></SelectTrigger>
+                                    <SelectContent>{YILLAR.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+                                </Select>
+                                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                                    <SelectTrigger className="h-[38px] w-[130px]"><SelectValue placeholder="Ay" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="toplam">Tüm Yıl</SelectItem>
+                                        {AYLAR.map((a) => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        {/* Tab barı — aktif tab inset alt çizgi */}
+                        <div className="mt-3.5 flex gap-1">
+                            {TABS.map((t) => (
+                                <button
+                                    key={t.id}
+                                    onClick={() => setMainTab(t.id)}
+                                    className={cn(
+                                        "rounded-t-lg px-3.5 py-2.5 text-[13.5px] transition-colors",
+                                        mainTab === t.id
+                                            ? "font-bold text-foreground shadow-[inset_0_-2px_0_#0ea5e9]"
+                                            : "font-semibold text-muted-foreground hover:text-foreground"
+                                    )}
+                                >
+                                    {t.label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
-                    <div className="flex gap-2">
-                        <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
-                             <SelectTrigger className="w-[120px]">
-                                 <SelectValue placeholder="Yıl" />
-                             </SelectTrigger>
-                             <SelectContent>
-                                 {YILLAR.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
-                             </SelectContent>
-                        </Select>
-                        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                            <SelectTrigger className="w-[150px]">
-                                <SelectValue placeholder="Ay" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="toplam">Tüm Yıl</SelectItem>
-                                {AYLAR.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                </div>
 
-                <Tabs defaultValue="ozet" value={mainTab} onValueChange={setMainTab} className="w-full">
-                    <TabsList className="grid w-full grid-cols-4 max-w-[760px]">
-                        <TabsTrigger value="ozet">Özet</TabsTrigger>
-                        <TabsTrigger value="liste">Poliçe Listesi</TabsTrigger>
-                        <TabsTrigger value="aging">Yaşlandırma</TabsTrigger>
-                        <TabsTrigger value="yukleme">Veri Yükleme</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="ozet" className="mt-6">
-                        <SigortaOzet yil={selectedYear} ay={selectedMonth} />
+                    <TabsContent value="ozet" className="mt-5">
+                        <SigortaOzet yil={selectedYear} ay={selectedMonth} acente={acente} />
                     </TabsContent>
 
-                    <TabsContent value="liste" className="mt-6">
-                        <PoliceListesi yil={selectedYear} ay={selectedMonth} />
+                    <TabsContent value="liste" className="mt-5">
+                        <PoliceListesi yil={selectedYear} ay={selectedMonth} acente={acente} />
                     </TabsContent>
 
-                    <TabsContent value="aging" className="mt-6">
-                        <SigortaAging yil={selectedYear} ay={selectedMonth} />
+                    <TabsContent value="aging" className="mt-5">
+                        <SigortaAging yil={selectedYear} ay={selectedMonth} acente={acente} />
                     </TabsContent>
 
-                    <TabsContent value="yukleme" className="mt-6">
+                    <TabsContent value="yukleme" className="mt-5">
                         <VeriYukleme yil={selectedYear} globalAy={selectedMonth} />
                     </TabsContent>
                 </Tabs>
@@ -157,7 +194,10 @@ export default function Sigorta() {
 // ---------------------------------------------------------------------------
 // 1. ÖZET TAB COMPONENT
 // ---------------------------------------------------------------------------
-function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
+function SigortaOzet({ yil, ay, acente = "tum" }: { yil: number, ay: string, acente?: "tum" | "mapfre" | "ray" }) {
+    // Acente filtresi → şirket adı eşlemesi (Mapfre / Ray Sigorta)
+    const acenteCompany = acente === "mapfre" ? COMPANIES.MAPFRE : acente === "ray" ? COMPANIES.RAY : null;
+
     const { data: ozet } = useQuery({
         queryKey: ['sigorta-ozet', yil],
         queryFn: async () => {
@@ -167,14 +207,69 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
     });
 
     // Firma bazlı toplam — yıl (+ opsiyonel ay) bazında sigortali alanına göre agregasyon
+    // 'sigorta-ozet' önekiyle yuvalandı → VeriYukleme'nin invalidateQueries(['sigorta-ozet'])'i yakalar (staleness fix).
+    // sirket param + acenteCompany queryKey → acente filtresi (Mapfre/Ray) bu tabloya da uygulanır.
     const { data: firmalar } = useQuery({
-        queryKey: ['sigorta-firmalar', yil, ay],
+        queryKey: ['sigorta-ozet', 'firmalar', yil, ay, acenteCompany],
         queryFn: async () => {
-            const qs = ay && ay !== 'toplam' ? `?ay=${ay}` : '';
+            const params = new URLSearchParams();
+            if (ay && ay !== 'toplam') params.set('ay', ay);
+            if (acenteCompany) params.set('sirket', acenteCompany);
+            const qs = params.toString() ? `?${params.toString()}` : '';
             const res = await apiRequest("GET", `/api/sigorta/firmalar/${yil}${qs}`);
             return res.json();
         }
     });
+
+    // Dekont Edilmemiş Poliçeler mini-listesi için poliçe çek
+    // (SigortaAging deseni: /api/sigorta/policeler?sirket=&yil=&ay=)
+    const { data: mapfrePol } = useQuery({
+        queryKey: ['sigorta-ozet', 'pol', COMPANIES.MAPFRE, yil, ay],
+        queryFn: async () => {
+            let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(COMPANIES.MAPFRE)}&yil=${yil}`;
+            if (ay !== 'toplam') url += `&ay=${ay}`;
+            const res = await apiRequest("GET", url);
+            return res.json();
+        },
+        enabled: acente !== "ray",
+    });
+    const { data: rayPol } = useQuery({
+        queryKey: ['sigorta-ozet', 'pol', COMPANIES.RAY, yil, ay],
+        queryFn: async () => {
+            let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(COMPANIES.RAY)}&yil=${yil}`;
+            if (ay !== 'toplam') url += `&ay=${ay}`;
+            const res = await apiRequest("GET", url);
+            return res.json();
+        },
+        enabled: acente !== "mapfre",
+    });
+
+    // tanzimTarihi (DD.MM.YYYY) → bugüne kadar geçen gün
+    const daysSince = (s: string): number | null => {
+        if (!s) return null;
+        const parts = s.split('.');
+        if (parts.length !== 3) return null;
+        const d = parseInt(parts[0]), m = parseInt(parts[1]), y = parseInt(parts[2]);
+        if (isNaN(d) || isNaN(m) || isNaN(y)) return null;
+        return Math.floor((Date.now() - new Date(y, m - 1, d).getTime()) / (1000 * 60 * 60 * 24));
+    };
+
+    // Dekont edilmemiş (dekontDurumu !== 'EVET') poliçeler — en eski önce
+    const dekontsuz = useMemo(() => {
+        const merged = [
+            ...(acente !== "ray" ? (mapfrePol || []) : []),
+            ...(acente !== "mapfre" ? (rayPol || []) : []),
+        ];
+        return merged
+            .filter((p: any) => p.dekontDurumu !== 'EVET')
+            .map((p: any) => ({ ...p, _gun: daysSince(p.tanzimTarihi) }))
+            .sort((a: any, b: any) => (b._gun ?? -1) - (a._gun ?? -1));
+    }, [mapfrePol, rayPol, acente]);
+
+    const dekontsuzTop = dekontsuz.slice(0, 6);
+    const dekontsuzToplam = dekontsuz.reduce((acc: number, p: any) => acc + (parseFloat(p.netPrim || "0") || 0), 0);
+    const dekontDotColor = (g: number | null) =>
+        g === null ? "#94a3b8" : g >= 90 ? "#dc2626" : g >= 60 ? "#fb7185" : g >= 30 ? "#f59e0b" : "#10b981";
 
     // Sortable firma tablosu — her sütun tıklanabilir, asc/desc toggle
     const [firmaSortKey, setFirmaSortKey] = useState<'sigortali' | 'brutPrim' | 'komisyon' | 'policeSayisi'>('brutPrim');
@@ -208,15 +303,11 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
         }
     };
 
-    const FirmaSortIcon = ({ column }: { column: typeof firmaSortKey }) => {
-        if (firmaSortKey !== column) return <ArrowUpDown className="ml-1 h-3 w-3 inline" />;
-        return firmaSortDir === 'asc'
-            ? <ArrowUp className="ml-1 h-3 w-3 inline" />
-            : <ArrowDown className="ml-1 h-3 w-3 inline" />;
-    };
-
-    // Filter by month if selected
-    const filteredOzet = ay === 'toplam' ? ozet : ozet?.filter((o: any) => o.ay === ay);
+    // Filter by month if selected, then by acente (şirket) if not "tum"
+    const monthOzet = ay === 'toplam' ? ozet : ozet?.filter((o: any) => o.ay === ay);
+    const filteredOzet = acenteCompany
+        ? monthOzet?.filter((o: any) => o.sirket === acenteCompany)
+        : monthOzet;
 
     const stats = filteredOzet?.reduce((acc: any, curr: any) => ({
         toplamPrim: acc.toplamPrim + (curr.toplamPrim || 0),
@@ -232,170 +323,169 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
         ? ((stats.evetSayisi / stats.policeSayisi) * 100).toFixed(1)
         : "0.0";
 
-    const fmtPara = (n: number) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(n);
+    // Şirket (acente) bazlı agregasyon — referans kart kırılımı
+    const sirketDetay = (filteredOzet || []).reduce((acc: any[], curr: any) => {
+        const existing = acc.find(x => x.sirket === curr.sirket);
+        if (existing) {
+            existing.toplamPrim += (curr.toplamPrim || 0);
+            existing.toplamKomisyon += (curr.toplamKomisyon || 0);
+            existing.policeSayisi += (curr.policeSayisi || 0);
+            existing.evetSayisi += (curr.evetSayisi || 0);
+        } else {
+            acc.push({
+                sirket: curr.sirket,
+                toplamPrim: curr.toplamPrim || 0,
+                toplamKomisyon: curr.toplamKomisyon || 0,
+                policeSayisi: curr.policeSayisi || 0,
+                evetSayisi: curr.evetSayisi || 0,
+            });
+        }
+        return acc;
+    }, []);
+
+    const sirketDot = (sirket: string) => sirket === COMPANIES.MAPFRE ? "#0ea5e9" : "#7c3aed";
+
+    // KPI kart tanımları (accent-bar)
+    const kpis = [
+        { label: "Toplam Net Prim", value: formatCurrency(stats.toplamPrim), sub: `${yil} kümülatif`, color: "#0ea5e9" },
+        { label: "Toplam Komisyon", value: formatCurrency(stats.toplamKomisyon), sub: "komisyon", color: "#7c3aed" },
+        { label: "Sigorta Bedeli (Risk)", value: formatCurrency(stats.toplamBedel), sub: "teminat altındaki", color: "#0f766e" },
+        { label: "Poliçe Adedi", value: String(stats.policeSayisi), sub: `${stats.evetSayisi} dekont · ${stats.tutarFarkiSayisi} tutar farkı`, color: "#d97706" },
+        { label: "Dekont Oranı", value: `%${dekontOrani}`, sub: "tahsil edilmiş", color: "#10b981" },
+    ];
+
+    const FirmaSortCaret = ({ column }: { column: typeof firmaSortKey }) => {
+        if (firmaSortKey !== column) return null;
+        return <span className="ml-1">{firmaSortDir === 'asc' ? '▲' : '▼'}</span>;
+    };
 
     return (
-        <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Toplam Net Prim</CardTitle>
-                        <Upload className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{fmtPara(stats.toplamPrim)}</div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                         <CardTitle className="text-sm font-medium">Toplam Komisyon</CardTitle>
-                         <Upload className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                         <div className="text-2xl font-bold">{fmtPara(stats.toplamKomisyon)}</div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Sigorta Bedeli (Risk)</CardTitle>
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{fmtPara(stats.toplamBedel)}</div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Poliçe Adedi</CardTitle>
-                        <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{stats.policeSayisi}</div>
-                        <div className="text-xs text-muted-foreground mt-1">
-                            {stats.evetSayisi} dekont • {stats.tutarFarkiSayisi} tutar farkı
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Dekont Oranı</CardTitle>
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">% {dekontOrani}</div>
-                        <div className="text-xs text-muted-foreground mt-1">tahsil edilmiş</div>
-                    </CardContent>
-                </Card>
+        <div className="space-y-[18px]">
+            {/* 5 KPI kartı — accent-bar */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
+                {kpis.map((k) => (
+                    <div key={k.label} className="relative overflow-hidden rounded-[14px] border bg-card p-4">
+                        <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: k.color }} />
+                        <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground leading-tight pl-2">{k.label}</div>
+                        <div className="mt-2 text-[21px] font-extrabold tracking-tight tabular-nums pl-2">{k.value}</div>
+                        <div className="mt-0.5 text-[11.5px] text-muted-foreground pl-2">{k.sub}</div>
+                    </div>
+                ))}
             </div>
-            
-            {/* Charts or Detailed Lists could go here */}
-            {/* Companies Data Aggregated */}
-            <div className="grid gap-4 md:grid-cols-2">
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Şirket Bazlı Detay</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Şirket</TableHead>
-                                    <TableHead className="text-right">Prim</TableHead>
-                                    <TableHead className="text-right">Komisyon</TableHead>
-                                    <TableHead className="text-right">Adet</TableHead>
-                                    <TableHead className="text-right">Dekont %</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {filteredOzet?.reduce((acc: any[], curr: any) => {
-                                    const existing = acc.find(x => x.sirket === curr.sirket);
-                                    if (existing) {
-                                        existing.toplamPrim += curr.toplamPrim;
-                                        existing.toplamKomisyon += curr.toplamKomisyon;
-                                        existing.policeSayisi += curr.policeSayisi;
-                                        existing.evetSayisi += (curr.evetSayisi || 0);
-                                    } else {
-                                        acc.push({...curr, evetSayisi: curr.evetSayisi || 0});
-                                    }
-                                    return acc;
-                                }, []).map((row: any) => {
-                                    const pct = row.policeSayisi > 0 ? ((row.evetSayisi / row.policeSayisi) * 100).toFixed(0) : "0";
-                                    return (
-                                        <TableRow key={row.sirket}>
-                                            <TableCell className="font-medium">{row.sirket}</TableCell>
-                                            <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(row.toplamPrim)}</TableCell>
-                                            <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(row.toplamKomisyon)}</TableCell>
-                                            <TableCell className="text-right">{row.policeSayisi}</TableCell>
-                                            <TableCell className="text-right">% {pct}</TableCell>
-                                        </TableRow>
-                                    );
-                                })}
-                                {(!filteredOzet || filteredOzet.length === 0) && (
-                                     <TableRow><TableCell colSpan={5} className="text-center h-12">Veri yok</TableCell></TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
-                    </CardContent>
-                </Card>
+
+            {/* Şirket Bazlı Detay (sol) + Dekont Edilmemiş Poliçeler (sağ) */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-4">
+                {/* Şirket Bazlı Detay */}
+                <div className="rounded-[14px] border bg-card p-5">
+                    <h3 className="text-[15px] font-bold mb-1">Şirket Bazlı Detay</h3>
+                    <p className="text-xs text-muted-foreground mb-4">{yil} · acente bazında prim &amp; komisyon</p>
+                    <div className="flex flex-col gap-3.5">
+                        {sirketDetay.length === 0 && (
+                            <div className="text-center text-sm text-muted-foreground py-6">Veri yok</div>
+                        )}
+                        {sirketDetay.map((row: any) => {
+                            const oran = row.toplamPrim > 0
+                                ? ((row.toplamKomisyon / row.toplamPrim) * 100).toFixed(1).replace('.', ',')
+                                : "0,0";
+                            return (
+                                <div key={row.sirket} className="rounded-xl border p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2.5">
+                                            <span className="w-2.5 h-2.5 rounded-[3px]" style={{ background: sirketDot(row.sirket) }} />
+                                            <span className="text-sm font-bold">{row.sirket}</span>
+                                        </div>
+                                        <span className="text-xs text-muted-foreground">{row.policeSayisi} poliçe</span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2.5">
+                                        <div>
+                                            <div className="text-[11px] text-muted-foreground">Net Prim</div>
+                                            <div className="text-sm font-bold mt-0.5 tabular-nums">{formatCurrency(row.toplamPrim)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-[11px] text-muted-foreground">Komisyon</div>
+                                            <div className="text-sm font-bold mt-0.5 tabular-nums" style={{ color: "#7c3aed" }}>{formatCurrency(row.toplamKomisyon)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-[11px] text-muted-foreground">Komisyon %</div>
+                                            <div className="text-sm font-bold mt-0.5 tabular-nums" style={{ color: "#0284c7" }}>%{oran}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Dekont Edilmemiş Poliçeler */}
+                <div className="rounded-[14px] border bg-card p-5 flex flex-col">
+                    <div className="flex items-baseline justify-between mb-1">
+                        <h3 className="text-[15px] font-bold">Dekont Edilmemiş Poliçeler</h3>
+                        <span className="text-xs font-bold tabular-nums" style={{ color: "#dc2626" }}>{dekontsuz.length} adet</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3.5">en eski önce · net prim</p>
+                    <div className="flex flex-col gap-2.5 flex-1">
+                        {dekontsuzTop.length === 0 && (
+                            <div className="text-center text-sm text-muted-foreground py-6">Dekont edilmemiş poliçe yok 🎉</div>
+                        )}
+                        {dekontsuzTop.map((p: any) => (
+                            <div key={p.id} className="flex items-center gap-2.5">
+                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: dekontDotColor(p._gun) }} />
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[13px] font-semibold truncate" title={p.sigortali}>{p.sigortali}</div>
+                                    <div className="text-[11px] text-muted-foreground">{p.policeNo} · {p._gun ?? "—"} gün</div>
+                                </div>
+                                <span className="text-[13px] font-bold tabular-nums flex-shrink-0">{formatCurrency(p.netPrim)}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="mt-4 pt-3.5 border-t flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">Toplam dekont edilmemiş</span>
+                        <span className="text-base font-extrabold tabular-nums" style={{ color: "#dc2626" }}>{formatCurrency(dekontsuzToplam)}</span>
+                    </div>
+                </div>
             </div>
 
             {/* En Çok Brüt Prim Üreten Firmalar — sortable */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>En Çok Brüt Prim Üreten Firmalar</CardTitle>
-                    <CardDescription>
-                        {yil} yılı{ay !== 'toplam' ? ` / ${AYLAR.find(a => a.value === ay)?.label}` : ''} — {sortedFirmalar.length} firma. Sütun başlığına tıklayarak sırala.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="rounded-md border">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>
-                                        <Button variant="ghost" onClick={() => toggleFirmaSort('sigortali')} className="p-0 h-auto font-bold hover:bg-transparent">
-                                            Firma Adı
-                                            <FirmaSortIcon column="sigortali" />
-                                        </Button>
-                                    </TableHead>
-                                    <TableHead className="text-right">
-                                        <Button variant="ghost" onClick={() => toggleFirmaSort('brutPrim')} className="p-0 h-auto font-bold hover:bg-transparent">
-                                            Brüt Prim
-                                            <FirmaSortIcon column="brutPrim" />
-                                        </Button>
-                                    </TableHead>
-                                    <TableHead className="text-right">
-                                        <Button variant="ghost" onClick={() => toggleFirmaSort('komisyon')} className="p-0 h-auto font-bold hover:bg-transparent">
-                                            Komisyon
-                                            <FirmaSortIcon column="komisyon" />
-                                        </Button>
-                                    </TableHead>
-                                    <TableHead className="text-right">
-                                        <Button variant="ghost" onClick={() => toggleFirmaSort('policeSayisi')} className="p-0 h-auto font-bold hover:bg-transparent">
-                                            Poliçe Adedi
-                                            <FirmaSortIcon column="policeSayisi" />
-                                        </Button>
-                                    </TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {sortedFirmalar.length === 0 ? (
-                                    <TableRow><TableCell colSpan={4} className="text-center h-16 text-muted-foreground">Veri yok</TableCell></TableRow>
-                                ) : (
-                                    sortedFirmalar.map((f: any, idx: number) => (
-                                        <TableRow key={`${f.sigortali}-${idx}`}>
-                                            <TableCell className="font-medium max-w-[420px] truncate" title={f.sigortali}>{f.sigortali}</TableCell>
-                                            <TableCell className="text-right">{fmtPara(f.brutPrim)}</TableCell>
-                                            <TableCell className="text-right">{fmtPara(f.komisyon)}</TableCell>
-                                            <TableCell className="text-right">{f.policeSayisi}</TableCell>
-                                        </TableRow>
-                                    ))
-                                )}
-                            </TableBody>
-                        </Table>
+            <div className="rounded-[14px] border bg-card overflow-hidden">
+                <div className="px-5 py-4 border-b flex items-center justify-between flex-wrap gap-2">
+                    <h3 className="text-[15px] font-bold">En Çok Brüt Prim Üreten Firmalar</h3>
+                    <span className="text-xs text-muted-foreground">
+                        {sortedFirmalar.length} firma · {yil}{ay !== 'toplam' ? ` / ${AYLAR.find(a => a.value === ay)?.label}` : ''} · sütun başlığına tıklayarak sırala
+                    </span>
+                </div>
+                <div className="overflow-x-auto">
+                    <div className="min-w-[640px]">
+                        <div className="grid grid-cols-[0.4fr_2fr_1fr_1fr_0.8fr] gap-3 px-5 py-3 bg-muted/40 border-b text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">
+                            <div>#</div>
+                            <button onClick={() => toggleFirmaSort('sigortali')} className="text-left uppercase hover:text-foreground">
+                                Firma<FirmaSortCaret column="sigortali" />
+                            </button>
+                            <button onClick={() => toggleFirmaSort('brutPrim')} className="text-right uppercase hover:text-foreground">
+                                Brüt Prim<FirmaSortCaret column="brutPrim" />
+                            </button>
+                            <button onClick={() => toggleFirmaSort('komisyon')} className="text-right uppercase hover:text-foreground">
+                                Komisyon<FirmaSortCaret column="komisyon" />
+                            </button>
+                            <button onClick={() => toggleFirmaSort('policeSayisi')} className="text-right uppercase hover:text-foreground">
+                                Poliçe<FirmaSortCaret column="policeSayisi" />
+                            </button>
+                        </div>
+                        {sortedFirmalar.length === 0 ? (
+                            <div className="px-5 py-6 text-center text-sm text-muted-foreground">Veri yok</div>
+                        ) : (
+                            sortedFirmalar.map((f: any, idx: number) => (
+                                <div key={`${f.sigortali}-${idx}`} className="grid grid-cols-[0.4fr_2fr_1fr_1fr_0.8fr] gap-3 px-5 py-3 border-b items-center hover:bg-muted/40 transition-colors">
+                                    <div className="text-xs font-bold tabular-nums text-muted-foreground/60">{idx + 1}</div>
+                                    <div className="text-[13.5px] font-semibold truncate" title={f.sigortali}>{f.sigortali}</div>
+                                    <div className="text-right text-[13.5px] font-bold tabular-nums">{formatCurrency(f.brutPrim)}</div>
+                                    <div className="text-right text-[13px] font-semibold tabular-nums" style={{ color: "#7c3aed" }}>{formatCurrency(f.komisyon)}</div>
+                                    <div className="text-right text-[13px] tabular-nums text-muted-foreground">{f.policeSayisi}</div>
+                                </div>
+                            ))
+                        )}
                     </div>
-                </CardContent>
-            </Card>
+                </div>
+            </div>
         </div>
     );
 }
@@ -403,7 +493,7 @@ function SigortaOzet({ yil, ay }: { yil: number, ay: string }) {
 // ---------------------------------------------------------------------------
 // 2. POLİÇE LİSTESİ TAB COMPONENT
 // ---------------------------------------------------------------------------
-function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
+function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, acente?: "tum" | "mapfre" | "ray" }) {
     const [subTab, setSubTab] = useState("mapfre");
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'policeNo', direction: 'asc' });
 
@@ -424,13 +514,17 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
         enabled: !!selectedPolicy?.id,
     });
 
-    const queryKey = ['sigorta-policeler', subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY, ay, yil];
-    
+    // Acente filtresi seçiliyse şirketi ona kilitle; değilse iç subTab toggle'ı sürer.
+    const effectiveTab = acente === "tum" ? subTab : acente;
+    const effectiveCompany = effectiveTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY;
+    const effectiveLabel = effectiveTab === "mapfre" ? "Mapfre" : "Ray Sigorta";
+
+    const queryKey = ['sigorta-policeler', effectiveCompany, ay, yil];
+
     const { data: policeler, isLoading } = useQuery({
         queryKey,
         queryFn: async () => {
-             const companyName = subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY;
-             let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(companyName)}&yil=${yil}`;
+             let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(effectiveCompany)}&yil=${yil}`;
              if (ay !== 'toplam') url += `&ay=${ay}`;
              const res = await apiRequest("GET", url);
              return res.json();
@@ -511,16 +605,10 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
         setSortConfig({ key, direction });
     };
 
-    const SortIcon = ({ column }: { column: string }) => {
-        if (sortConfig.key !== column) return <ArrowUpDown className="ml-2 h-4 w-4" />;
-        if (sortConfig.direction === 'asc') return <ArrowUp className="ml-2 h-4 w-4" />;
-        return <ArrowDown className="ml-2 h-4 w-4" />;
-    };
-
     const handleExport = async () => {
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet('Poliçeler');
-        const sirketName = subTab === 'mapfre' ? 'Mapfre' : 'Ray';
+        const sirketName = effectiveTab === 'mapfre' ? 'Mapfre' : 'Ray';
 
         // 1. Report Title (Merged Rows 1-3)
         worksheet.mergeCells('A1:I3');
@@ -698,161 +786,169 @@ function PoliceListesi({ yil, ay }: { yil: number, ay: string }) {
         return { evet, hayir, tutarFarki };
     }, [sortedPoliceler]);
 
+    // Branş rozet renk eşlemesi (referanstan birebir: [zemin, metin])
+    const bransColors: Record<string, [string, string]> = {
+        Trafik: ["#e0f2fe", "#075985"],
+        Kasko: ["#ede9fe", "#6d28d9"],
+        DASK: ["#fef3c7", "#92400e"],
+        Sağlık: ["#dcfce7", "#166534"],
+        Nakliyat: ["#ffedd5", "#9a3412"],
+    };
+    const bransColor = (b: string): [string, string] => bransColors[(b || "").trim()] || ["#f1f5f9", "#475569"];
+
+    const SortHeaderBtn = ({ column, label, align = "left" }: { column: string, label: string, align?: "left" | "right" | "center" }) => (
+        <button
+            onClick={() => requestSort(column)}
+            className={cn(
+                "flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-[0.03em] text-slate-500 hover:text-slate-700 transition-colors",
+                align === "right" && "ml-auto",
+                align === "center" && "mx-auto",
+            )}
+        >
+            {label}
+            <span className="text-[9px] leading-none w-2 inline-block">
+                {sortConfig.key === column ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+            </span>
+        </button>
+    );
+
     return (
         <div className="space-y-4">
-             <Tabs defaultValue="mapfre" value={subTab} onValueChange={setSubTab} className="w-full">
-                <TabsList>
-                    <TabsTrigger value="mapfre">Mapfre Sigorta</TabsTrigger>
-                    <TabsTrigger value="ray">Ray Sigorta</TabsTrigger>
-                </TabsList>
-            </Tabs>
+            {/* Üst satır: arama + acente toggle (yalnız "tum") + poliçe sayısı */}
+            <div className="flex items-center gap-3 flex-wrap">
+                <div className="relative flex-1 max-w-[340px] min-w-[220px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                    <Input
+                        placeholder="Sigortalı / Poliçe No ara…"
+                        className="h-[38px] pl-9 rounded-[9px] text-[13px]"
+                        value={sigortaliFilter}
+                        onChange={(e) => setSigortaliFilter(e.target.value)}
+                    />
+                </div>
 
-            <Card>
-                <CardHeader>
-                    <div className="flex justify-between items-center">
-                         <div className="flex items-center gap-4">
-                            <CardTitle>{subTab === 'mapfre' ? 'Mapfre' : 'Ray'} Poliçeleri</CardTitle>
-                            <Badge variant="outline">{sortedPoliceler.length} kayıt</Badge>
-                            
-                            {/* Summary Badges */}
-                            <div className="flex gap-2">
-                                <Badge className="bg-green-600 hover:bg-green-700 text-white gap-1">
-                                    <CheckCircle2 className="h-3 w-3" />
-                                    {stats.evet} Dekont Edilen
-                                </Badge>
-                                <Badge className="bg-red-600 hover:bg-red-700 text-white gap-1">
-                                    <XCircle className="h-3 w-3" />
-                                    {stats.hayir} Dekont Edilmeyen
-                                </Badge>
-                                {stats.tutarFarki > 0 && (
-                                    <Badge className="bg-amber-500 hover:bg-amber-600 text-white gap-1">
-                                        <AlertTriangle className="h-3 w-3" />
-                                        {stats.tutarFarki} Tutar Farkı
-                                    </Badge>
+                {acente === "tum" && (
+                    <div className="inline-flex items-center rounded-[9px] border bg-slate-50 p-0.5">
+                        {(["mapfre", "ray"] as const).map((t) => (
+                            <button
+                                key={t}
+                                onClick={() => setSubTab(t)}
+                                className={cn(
+                                    "px-3 h-[30px] rounded-[7px] text-[12.5px] font-semibold transition-colors",
+                                    subTab === t
+                                        ? "bg-white text-sky-700 shadow-sm"
+                                        : "text-slate-500 hover:text-slate-700",
                                 )}
-                            </div>
-                         </div>
-                         <Button variant="outline" size="sm" onClick={handleExport}>
-                             <Download className="w-4 h-4 mr-2" />
-                             Excel İndir
-                         </Button>
+                            >
+                                {t === "mapfre" ? "Mapfre" : "Ray"}
+                            </button>
+                        ))}
                     </div>
-                    
-                    {/* FILTERS */}
-                    <div className="flex gap-4 mt-4 items-center flex-wrap">
-                        <div className="flex items-center gap-2">
-                            <Filter className="w-4 h-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Filtrele:</span>
+                )}
+
+                {/* Branş & dekont durumu filtreleri korunuyor */}
+                <Select value={bransFilter} onValueChange={setBransFilter}>
+                    <SelectTrigger className="w-[150px] h-[38px] rounded-[9px] text-[12.5px]">
+                        <SelectValue placeholder="Branş" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="ALL">Tüm Branşlar</SelectItem>
+                        {uniqueBranslar.map((b) => (
+                            <SelectItem key={b} value={b}>{b}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[150px] h-[38px] rounded-[9px] text-[12.5px]">
+                        <SelectValue placeholder="Dekont Durumu" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="ALL">Tümü</SelectItem>
+                        <SelectItem value="EVET">Dekont Evet</SelectItem>
+                        <SelectItem value="HAYIR">Dekont Hayır</SelectItem>
+                        <SelectItem value="TUTAR_FARKI">Tutar Farkı</SelectItem>
+                    </SelectContent>
+                </Select>
+
+                <Button variant="outline" size="sm" onClick={handleExport} className="h-[38px] rounded-[9px]">
+                    <Download className="w-4 h-4 mr-2" />
+                    Excel İndir
+                </Button>
+
+                <span className="ml-auto text-[12.5px] text-slate-400 tabular-nums">
+                    {effectiveLabel} · {sortedPoliceler.length} poliçe
+                </span>
+            </div>
+
+            {/* Poliçe tablosu kartı */}
+            <div className="rounded-[14px] border bg-card overflow-hidden">
+                <div className="overflow-x-auto">
+                    <div className="min-w-[880px]">
+                        {/* Başlık satırı */}
+                        <div className="grid items-center gap-2.5 px-5 py-3 bg-slate-50 border-b text-[10.5px] font-bold uppercase tracking-[0.03em] text-slate-500"
+                            style={{ gridTemplateColumns: "0.8fr 1.2fr 1.8fr 1fr 1fr 1fr 0.8fr" }}>
+                            <div>Branş</div>
+                            <div><SortHeaderBtn column="policeNo" label="Poliçe No" /></div>
+                            <div>Sigortalı</div>
+                            <div className="text-right">Net Prim</div>
+                            <div className="text-right">Brüt Prim</div>
+                            <div className="text-right">Komisyon</div>
+                            <div className="text-center">Dekont</div>
                         </div>
-                        <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-[170px] h-9">
-                                <SelectValue placeholder="Dekont Durumu" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="ALL">Tümü</SelectItem>
-                                <SelectItem value="EVET">Dekont Evet</SelectItem>
-                                <SelectItem value="HAYIR">Dekont Hayır</SelectItem>
-                                <SelectItem value="TUTAR_FARKI">Tutar Farkı</SelectItem>
-                            </SelectContent>
-                        </Select>
 
-                        <Select value={bransFilter} onValueChange={setBransFilter}>
-                            <SelectTrigger className="w-[170px] h-9">
-                                <SelectValue placeholder="Branş" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="ALL">Tüm Branşlar</SelectItem>
-                                {uniqueBranslar.map((b) => (
-                                    <SelectItem key={b} value={b}>{b}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        <Input
-                            placeholder="Sigortalı / Poliçe No Ara..."
-                            className="w-[250px] h-9"
-                            value={sigortaliFilter}
-                            onChange={(e) => setSigortaliFilter(e.target.value)}
-                        />
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <div className="rounded-md border">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Branş</TableHead>
-                                    <TableHead>
-                                        <Button variant="ghost" onClick={() => requestSort('policeNo')}>
-                                            Poliçe No
-                                            <SortIcon column="policeNo" />
-                                        </Button>
-                                    </TableHead>
-                                    <TableHead>Sigortalı</TableHead>
-                                    <TableHead>
-                                        <Button variant="ghost" onClick={() => requestSort('tanzimTarihi')}>
-                                            Tanzim Tarihi
-                                            <SortIcon column="tanzimTarihi" />
-                                        </Button>
-                                    </TableHead>
-                                    <TableHead className="text-right">Net Prim</TableHead>
-                                    <TableHead className="text-right">Brüt Prim</TableHead>
-                                    <TableHead className="text-right">Komisyon</TableHead>
-                                    <TableHead className="text-right">Sigorta Bedeli</TableHead>
-                                    <TableHead className="text-center">Dekont</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {isLoading ? (
-                                    <TableRow>
-                                        <TableCell colSpan={9} className="h-24 text-center">Yükleniyor...</TableCell>
-                                    </TableRow>
-                                ) : sortedPoliceler.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={9} className="h-24 text-center">Kayıt bulunamadı.</TableCell>
-                                    </TableRow>
-                                ) : (
-                                    <>
-                                    {sortedPoliceler.length > 500 && (
-                                        <TableRow>
-                                            <TableCell colSpan={9} className="text-xs text-amber-700 bg-amber-50">
-                                                ⚠ Performans için yalnızca ilk 500 kayıt gösteriliyor. Toplam {sortedPoliceler.length} kayıt — daraltmak için filtre kullanın veya Excel olarak indirin.
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                    {sortedPoliceler.slice(0, 500).map((p: any) => (
-                                        <TableRow
+                        {/* Gövde */}
+                        {isLoading ? (
+                            <div className="h-24 flex items-center justify-center text-sm text-muted-foreground">Yükleniyor...</div>
+                        ) : sortedPoliceler.length === 0 ? (
+                            <div className="h-24 flex items-center justify-center text-sm text-muted-foreground">Kayıt bulunamadı.</div>
+                        ) : (
+                            <>
+                                {sortedPoliceler.length > 500 && (
+                                    <div className="px-5 py-2 text-xs text-amber-700 bg-amber-50 border-b">
+                                        ⚠ Performans için yalnızca ilk 500 kayıt gösteriliyor. Toplam {sortedPoliceler.length} kayıt — daraltmak için filtre kullanın veya Excel olarak indirin.
+                                    </div>
+                                )}
+                                {sortedPoliceler.slice(0, 500).map((p: any) => {
+                                    const [bg, fg] = bransColor(p.brans);
+                                    const isDekont = p.dekontDurumu === 'EVET';
+                                    return (
+                                        <div
                                             key={p.id}
                                             onClick={() => setSelectedPolicy(p)}
-                                            className="cursor-pointer hover:bg-muted/50"
                                             title="Detay için tıkla"
+                                            className="grid items-center gap-2.5 px-5 py-[11px] border-b last:border-b-0 hover:bg-slate-50 cursor-pointer transition-colors"
+                                            style={{ gridTemplateColumns: "0.8fr 1.2fr 1.8fr 1fr 1fr 1fr 0.8fr" }}
                                         >
-                                            <TableCell>{p.brans}</TableCell>
-                                            <TableCell className="font-medium">{p.policeNo}</TableCell>
-                                            <TableCell>{p.sigortali}</TableCell>
-                                            <TableCell>{p.tanzimTarihi}</TableCell>
-                                            <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(p.netPrim))}</TableCell>
-                                            <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(p.brutPrim))}</TableCell>
-                                            <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(p.komisyon))}</TableCell>
-                                            <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(p.sigortaBedeli))}</TableCell>
-                                            <TableCell className="text-center">
-                                                {p.dekontDurumu === 'EVET' ? (
-                                                    <Badge className="bg-green-500">EVET</Badge>
-                                                ) : p.dekontDurumu === 'TUTAR FARKI' ? (
-                                                    <Badge variant="destructive">FARKLILIK</Badge>
+                                            <div>
+                                                <span className="inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold"
+                                                    style={{ background: bg, color: fg }}>
+                                                    {p.brans}
+                                                </span>
+                                            </div>
+                                            <div className="font-mono text-[12px] text-sky-600 truncate">{p.policeNo}</div>
+                                            <div className="text-[13px] font-semibold text-slate-800 truncate">{p.sigortali}</div>
+                                            <div className="text-right text-[12.5px] text-slate-600 tabular-nums">{formatCurrency(parseFloat(p.netPrim))}</div>
+                                            <div className="text-right text-[13px] font-bold text-slate-900 tabular-nums">{formatCurrency(parseFloat(p.brutPrim))}</div>
+                                            <div className="text-right text-[12.5px] font-medium text-violet-600 tabular-nums">{formatCurrency(parseFloat(p.komisyon))}</div>
+                                            <div className="text-center">
+                                                {p.dekontDurumu === 'TUTAR FARKI' ? (
+                                                    <span className="inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-50 text-amber-700">FARKLILIK</span>
                                                 ) : (
-                                                    <Badge className="bg-red-500 hover:bg-red-600 text-white">HAYIR</Badge>
+                                                    <span className={cn(
+                                                        "inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-bold",
+                                                        isDekont ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700",
+                                                    )}>
+                                                        {isDekont ? "EVET" : "—"}
+                                                    </span>
                                                 )}
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                    </>
-                                )}
-                            </TableBody>
-                        </Table>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </>
+                        )}
                     </div>
-                </CardContent>
-            </Card>
+                </div>
+            </div>
 
             <PoliceMuhasebeDialog
                 policy={selectedPolicy}
@@ -2273,9 +2369,10 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
 // dekontDurumu !== 'EVET' olan poliçeleri tanzim tarihinden bugüne kadar geçen
 // gün sayısına göre kovalara (0-30, 31-60, 61-90, 90+) ayırır.
 // dd.MM.yyyy formatını parse eder; geçersiz tarih = bilinmeyen kovaya gider.
-function SigortaAging({ yil, ay }: { yil: number; ay: string }) {
-    const { data: mapfre } = useQuery({
+function SigortaAging({ yil, ay, acente = "tum" }: { yil: number; ay: string; acente?: "tum" | "mapfre" | "ray" }) {
+    const { data: mapfre, isLoading: mapfreLoading } = useQuery({
         queryKey: ['sigorta-policeler-aging', COMPANIES.MAPFRE, yil, ay],
+        enabled: acente !== 'ray',
         queryFn: async () => {
             let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(COMPANIES.MAPFRE)}&yil=${yil}`;
             if (ay !== 'toplam') url += `&ay=${ay}`;
@@ -2283,8 +2380,9 @@ function SigortaAging({ yil, ay }: { yil: number; ay: string }) {
             return res.json();
         },
     });
-    const { data: ray } = useQuery({
+    const { data: ray, isLoading: rayLoading } = useQuery({
         queryKey: ['sigorta-policeler-aging', COMPANIES.RAY, yil, ay],
+        enabled: acente !== 'mapfre',
         queryFn: async () => {
             let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(COMPANIES.RAY)}&yil=${yil}`;
             if (ay !== 'toplam') url += `&ay=${ay}`;
@@ -2292,6 +2390,8 @@ function SigortaAging({ yil, ay }: { yil: number; ay: string }) {
             return res.json();
         },
     });
+
+    const isLoading = (acente !== 'ray' && mapfreLoading) || (acente !== 'mapfre' && rayLoading);
 
     const parseDDMMYYYY = (s: string): Date | null => {
         if (!s) return null;
@@ -2308,99 +2408,120 @@ function SigortaAging({ yil, ay }: { yil: number; ay: string }) {
         return Math.floor((Date.now() - dt.getTime()) / (1000 * 60 * 60 * 24));
     };
 
-    const aged = useMemo(() => {
-        const merged = [...(mapfre || []), ...(ray || [])];
-        const tahsilEdilmemis = merged.filter((p: any) => p.dekontDurumu !== 'EVET');
-        const buckets: Record<string, any[]> = { "0-30": [], "31-60": [], "61-90": [], "90+": [], "Bilinmiyor": [] };
-        for (const p of tahsilEdilmemis) {
+    // Acente filtresine göre tahsil edilmemiş poliçeler (dekont != EVET)
+    const dekontsuz = useMemo(() => {
+        const merged: any[] = [];
+        if (acente !== 'ray') merged.push(...(mapfre || []));
+        if (acente !== 'mapfre') merged.push(...(ray || []));
+        return merged.filter((p: any) => p.dekontDurumu !== 'EVET');
+    }, [mapfre, ray, acente]);
+
+    // 0-30 / 31-60 / 61-90 / 90+ gün kovaları — değer = net prim toplamı
+    const buckets = useMemo(() => {
+        const defs = [
+            { key: "0-30", label: "0–30 gün", color: "#10b981" },
+            { key: "31-60", label: "31–60 gün", color: "#f59e0b" },
+            { key: "61-90", label: "61–90 gün", color: "#fb7185" },
+            { key: "90+", label: "90+ gün", color: "#dc2626" },
+        ];
+        const totals: Record<string, number> = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
+        for (const p of dekontsuz) {
             const d = daysSince(p.tanzimTarihi);
-            if (d === null) buckets["Bilinmiyor"].push(p);
-            else if (d <= 30) buckets["0-30"].push(p);
-            else if (d <= 60) buckets["31-60"].push(p);
-            else if (d <= 90) buckets["61-90"].push(p);
-            else buckets["90+"].push(p);
+            const net = parseFloat(p.netPrim || "0") || 0;
+            if (d === null) continue;
+            if (d <= 30) totals["0-30"] += net;
+            else if (d <= 60) totals["31-60"] += net;
+            else if (d <= 90) totals["61-90"] += net;
+            else totals["90+"] += net;
         }
-        return buckets;
-    }, [mapfre, ray]);
+        const maxVal = Math.max(...defs.map(d => totals[d.key]), 0);
+        return defs.map(d => ({
+            ...d,
+            value: totals[d.key],
+            width: maxVal > 0 ? (totals[d.key] / maxVal) * 100 : 0,
+        }));
+    }, [dekontsuz]);
 
-    const bucketColor = (key: string) =>
-        key === "0-30" ? "bg-green-100 text-green-800"
-        : key === "31-60" ? "bg-amber-100 text-amber-800"
-        : key === "61-90" ? "bg-orange-100 text-orange-800"
-        : key === "90+" ? "bg-red-100 text-red-800"
-        : "bg-gray-100 text-gray-800";
+    const toplamAcik = useMemo(
+        () => dekontsuz.reduce((acc: number, p: any) => acc + (parseFloat(p.netPrim || "0") || 0), 0),
+        [dekontsuz]
+    );
 
-    const sumNet = (rows: any[]) => rows.reduce((acc, r) => acc + parseFloat(r.netPrim || "0"), 0);
-    const fmtMoney = (n: number) => new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(n);
+    // En eski önce (en büyük gün başta)
+    const dekontsuzSirali = useMemo(
+        () => dekontsuz
+            .slice()
+            .sort((a: any, b: any) => (daysSince(b.tanzimTarihi) ?? -1) - (daysSince(a.tanzimTarihi) ?? -1)),
+        [dekontsuz]
+    );
+
+    const gunColor = (d: number | null) =>
+        d === null ? "#475569" : d >= 90 ? "#dc2626" : d >= 60 ? "#b45309" : "#475569";
 
     return (
-        <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-5">
-                {Object.entries(aged).map(([key, rows]) => (
-                    <Card key={key}>
-                        <CardHeader className="pb-2">
-                            <div className="flex items-center justify-between">
-                                <CardTitle className="text-sm font-medium">{key} gün</CardTitle>
-                                <Badge className={bucketColor(key)}>{rows.length}</Badge>
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.6fr] gap-4 items-start">
+            {/* SOL — Dekont Yaşlandırma */}
+            <div className="rounded-[14px] border bg-card p-5">
+                <h3 className="text-[15px] font-bold m-0">Dekont Yaşlandırma</h3>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">tahsil edilmemiş · net prim</p>
+                <div className="flex flex-col gap-[13px]">
+                    {buckets.map((b) => (
+                        <div key={b.key}>
+                            <div className="flex items-center justify-between mb-[5px]">
+                                <span className="text-[12.5px] font-semibold" style={{ color: "#334155" }}>{b.label}</span>
+                                <span className="text-[12.5px] font-bold text-foreground tabular-nums">{formatCurrency(b.value)}</span>
                             </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-xl font-bold">{fmtMoney(sumNet(rows))} ₺</div>
-                            <div className="text-xs text-muted-foreground">net prim toplamı</div>
-                        </CardContent>
-                    </Card>
-                ))}
+                            <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                                <span className="block h-full rounded-full" style={{ width: `${b.width}%`, background: b.color }} />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                <div className="mt-4 pt-3.5 border-t flex items-center justify-between">
+                    <span className="text-[12.5px] text-muted-foreground">Toplam açık</span>
+                    <span className="text-base font-extrabold tabular-nums" style={{ color: "#dc2626" }}>{formatCurrency(toplamAcik)}</span>
+                </div>
             </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Tahsil Edilmemiş Poliçeler (En Eski Önce)</CardTitle>
-                    <CardDescription>
-                        Mapfre + Ray birlikte. {Object.values(aged).reduce((acc, r) => acc + r.length, 0)} kayıt.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Şirket</TableHead>
-                                <TableHead>Branş</TableHead>
-                                <TableHead>Poliçe No</TableHead>
-                                <TableHead>Sigortalı</TableHead>
-                                <TableHead>Tanzim</TableHead>
-                                <TableHead className="text-right">Gün</TableHead>
-                                <TableHead className="text-right">Net Prim</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {(["90+", "61-90", "31-60", "0-30", "Bilinmiyor"] as const).flatMap(bucket =>
-                                aged[bucket]
-                                    .slice()
-                                    .sort((a: any, b: any) => (daysSince(b.tanzimTarihi) || 0) - (daysSince(a.tanzimTarihi) || 0))
-                                    .map((p: any) => {
-                                        const d = daysSince(p.tanzimTarihi);
-                                        return (
-                                            <TableRow key={p.id}>
-                                                <TableCell>{p.sirket}</TableCell>
-                                                <TableCell>{p.brans}</TableCell>
-                                                <TableCell className="font-medium">{p.policeNo}</TableCell>
-                                                <TableCell className="max-w-[260px] truncate" title={p.sigortali}>{p.sigortali}</TableCell>
-                                                <TableCell>{p.tanzimTarihi}</TableCell>
-                                                <TableCell className="text-right">
-                                                    <Badge className={bucketColor(bucket)}>{d ?? "—"}</Badge>
-                                                </TableCell>
-                                                <TableCell className="text-right">{fmtMoney(parseFloat(p.netPrim || "0"))}</TableCell>
-                                            </TableRow>
-                                        );
-                                    })
+            {/* SAĞ — Tahsil Edilmemiş Poliçeler (En Eski Önce) */}
+            <div className="rounded-[14px] border bg-card overflow-hidden">
+                <div className="px-5 py-4 border-b">
+                    <h3 className="text-[15px] font-bold m-0">Tahsil Edilmemiş Poliçeler (En Eski Önce)</h3>
+                </div>
+                <div className="max-h-[520px] overflow-y-auto">
+                    <table className="w-full border-collapse">
+                        <thead className="sticky top-0 z-10">
+                            <tr className="bg-muted/50">
+                                <th className="text-left px-5 py-3 text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Poliçe No</th>
+                                <th className="text-left px-5 py-3 text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Sigortalı</th>
+                                <th className="text-right px-5 py-3 text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Gün</th>
+                                <th className="text-right px-5 py-3 text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Net Prim</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {isLoading && (
+                                <tr><td colSpan={4} className="text-center h-16 text-sm text-muted-foreground">Yükleniyor…</td></tr>
                             )}
-                            {Object.values(aged).every(r => r.length === 0) && (
-                                <TableRow><TableCell colSpan={7} className="text-center h-16">Tahsil edilmemiş poliçe yok 🎉</TableCell></TableRow>
+                            {!isLoading && dekontsuzSirali.length === 0 && (
+                                <tr><td colSpan={4} className="text-center h-16 text-sm text-muted-foreground">Tahsil edilmemiş poliçe yok 🎉</td></tr>
                             )}
-                        </TableBody>
-                    </Table>
-                </CardContent>
-            </Card>
+                            {!isLoading && dekontsuzSirali.map((p: any) => {
+                                const d = daysSince(p.tanzimTarihi);
+                                return (
+                                    <tr key={p.id} className="border-b last:border-b-0 hover:bg-slate-50 transition-colors">
+                                        <td className="px-5 py-3 font-mono text-xs text-sky-600">{p.policeNo}</td>
+                                        <td className="px-5 py-3 text-[13px] font-semibold text-slate-800 max-w-[260px] truncate" title={p.sigortali}>{p.sigortali}</td>
+                                        <td className="px-5 py-3 text-right">
+                                            <span className="text-[12.5px] font-bold tabular-nums" style={{ color: gunColor(d) }}>{d ?? "—"}</span>
+                                        </td>
+                                        <td className="px-5 py-3 text-right text-[13px] font-bold text-slate-900 tabular-nums">{formatCurrency(parseFloat(p.netPrim || "0"))}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     );
 }
