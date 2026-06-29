@@ -1,16 +1,14 @@
-import { useState, useEffect } from "react";
-import { BackgroundPaths } from "@/components/BackgroundPaths";
-import { Card, CardContent } from "@/components/ui/card";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, Database, FileSpreadsheet, RefreshCcw, Save, Trash2, History, Plus, X, ArrowUpDown, ArrowUp, ArrowDown, Check, ChevronsUpDown } from "lucide-react";
+import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, RefreshCcw, Save, Trash2, X, ArrowUpDown, ArrowUp, ArrowDown, Check, ChevronsUpDown, Truck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrencyFull } from "@/lib/utils";
 
 export default function Nakliye() {
     const [uploading, setUploading] = useState(false);
@@ -100,7 +98,7 @@ export default function Nakliye() {
             const customerLower = customer.toLocaleLowerCase('tr');
 
             // 1. Exact Substring Match (Highest priority if significant length)
-            // But be careful: "E" matches "Empo". 
+            // But be careful: "E" matches "Empo".
             // So we skip really short exact matches to avoid noise, unless it's the whole text.
             if (textLower.includes(customerLower) && customerLower.length > 4) {
                 // Base score 1000 + length
@@ -153,8 +151,8 @@ export default function Nakliye() {
                     }
                     // Check "DE KA" match (Space instead of hyphen)
                     else if (token.includes('-')) {
-                        // No need to escape spacedToken parts again if we trust replace, but safer to re-escape? 
-                        // token "DE-KA" -> "DE KA". 
+                        // No need to escape spacedToken parts again if we trust replace, but safer to re-escape?
+                        // token "DE-KA" -> "DE KA".
                         // If token had ".", it would be "DE.KA" -> "DE KA" which is regex safeish but let's be strict.
                         // Actually better to just escape the raw parts.
                         const parts = token.split('-').map(p => escapeRegExp(p));
@@ -165,11 +163,11 @@ export default function Nakliye() {
                     }
                     // Reverse check: DB "DEKA", Text "DE-KA"
                     // This is harder because 'token' is DEKA. We'd have to guess where to put hyphen or check all text words.
-                    // But usually DB name is the "official" one. 
+                    // But usually DB name is the "official" one.
                     // If DB is "DEKA KİMYA", and text has "DE-KA", it should match?
                     // Let's defer this specific reverse case unless needed, as "DEKA" usually matches "DEKA".
                     // If text is "DE-KA", \bDEKA\b generally fails.
-                    // A simple workaround if token has no hyphen: check if text has token-with-hyphen? 
+                    // A simple workaround if token has no hyphen: check if text has token-with-hyphen?
                     // No, "D-EKA"? "DE-KA"? Too many permutations.
                     // Instead, strip hyphens from TEXT temporarily for a check?
                     else if (!token.includes('-')) {
@@ -222,9 +220,9 @@ export default function Nakliye() {
                 // Single word company (e.g. "Borusan"). Must exact match.
                 if (ratio === 1) isValid = true;
             } else {
-                // Multi word. 
+                // Multi word.
                 // If First Token Matched (Brand): Allow lower threshold (e.g. 0.4)
-                // "KOM-SER KOMPRESÖR..." -> KOM-SER matches. Weight 2. Total Weight ~5.5. Ratio ~0.36. 
+                // "KOM-SER KOMPRESÖR..." -> KOM-SER matches. Weight 2. Total Weight ~5.5. Ratio ~0.36.
                 // Maybe 0.4 is still too high for long names.
                 // Let's use Hit Count logic combined.
 
@@ -547,39 +545,84 @@ export default function Nakliye() {
         setUploading(false);
     };
 
+    // Bir faturanın konteyner adedi: kayıtlı konteynerler alanı varsa ondan, yoksa
+    // mal/hizmet metninden regex ile çıkarılan benzersiz konteyner sayısı.
+    const containerCount = (inv: any): number => {
+        if (inv.konteynerler) {
+            return String(inv.konteynerler).split(",").map((s: string) => s.trim()).filter(Boolean).length;
+        }
+        const extracted = extractContainerRef(inv.malHizmet, true) as string[];
+        return extracted.length;
+    };
+
+    // ===== Türetilmiş KPI'lar + müşteri ciro payı (filtreli kayıtlardan) =====
+    const yil = new Date().getFullYear();
+    const num = (v: any) => {
+        const n = typeof v === "string" ? parseFloat(v) : v;
+        return Number.isFinite(n) ? n : 0;
+    };
+
+    const kpis = useMemo(() => {
+        const adet = filteredInvoices.length;
+        const navlun = filteredInvoices.reduce((a, inv) => a + num(inv.malHizmetToplamTutarı), 0);
+        const kdv = filteredInvoices.reduce((a, inv) => a + num(inv.kdvTutarı), 0);
+        const konteyner = filteredInvoices.reduce((a, inv) => a + containerCount(inv), 0);
+        const ort = adet > 0 ? navlun / adet : 0;
+        return [
+            { label: "Toplam Fatura", value: String(adet), sub: `${yil} kümülatif`, color: "#0ea5e9" },
+            { label: "Toplam Navlun", value: formatCurrencyFull(navlun), sub: "mal hizmet toplamı", color: "#0f766e" },
+            { label: "KDV", value: formatCurrencyFull(kdv), sub: "hesaplanan", color: "#7c3aed" },
+            { label: "Konteyner", value: String(konteyner), sub: "taşınan toplam", color: "#d97706" },
+            { label: "Ort. Fatura", value: formatCurrencyFull(ort), sub: "fatura başına", color: "#10b981" },
+        ];
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filteredInvoices, customers]);
+
+    const topMusteri = useMemo(() => {
+        const map = new Map<string, number>();
+        filteredInvoices.forEach((inv) => {
+            const name = inv.musteri || extractCustomer(inv.malHizmet);
+            if (!name || name === "-") return;
+            map.set(name, (map.get(name) || 0) + num(inv.odenecekTutar));
+        });
+        const arr = Array.from(map.entries()).map(([name, value]) => ({ name, value }));
+        arr.sort((a, b) => b.value - a.value);
+        const top = arr.slice(0, 5);
+        const max = Math.max(...top.map((t) => t.value), 1);
+        return top.map((t) => ({ ...t, w: Math.round((t.value / max) * 100) }));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filteredInvoices, customers]);
+
+    // Sıralanabilir tablo başlığı yardımcı bileşeni
+    const SortIcon = ({ column }: { column: string }) => {
+        if (sortConfig?.key !== column) return <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />;
+        return sortConfig.direction === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />;
+    };
+
     return (
-        <div className="relative min-h-screen pb-20 overflow-x-hidden">
-            <BackgroundPaths />
-
-            <div className="relative z-10 p-4 lg:p-6 max-w-[1600px] mx-auto">
-                {/* Compact Upload Bar */}
-                <Card className="mb-6 bg-background/60 backdrop-blur-xl border-primary/20 shadow-xl rounded-2xl overflow-hidden border">
-                    <CardContent className="p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="min-h-full bg-slate-50 dark:bg-background">
+            <div className="px-6 pb-12 lg:px-8">
+                {/* ===== STICKY HEADER ===== */}
+                <div className="sticky top-0 z-20 border-b border-border/70 bg-slate-50/90 pt-5 backdrop-blur dark:bg-background/90">
+                    <div className="flex flex-wrap items-end justify-between gap-4 pb-3.5">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-primary/20 rounded-xl shadow-inner border border-primary/20">
-                                <Database className="w-5 h-5 text-primary" />
+                            <div className="flex h-10 w-10 items-center justify-center rounded-[11px] bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400">
+                                <Truck className="h-[22px] w-[22px]" strokeWidth={1.9} />
                             </div>
-                            <span className="font-bold text-lg tracking-tight">Nakliye Paneli</span>
+                            <div>
+                                <h1 className="text-[21px] font-extrabold tracking-tight">Nakliye</h1>
+                                <p className="mt-0.5 text-[12.5px] text-muted-foreground">Navlun faturaları ve konteyner takibi · <strong className="text-foreground/80">{yil}</strong></p>
+                            </div>
                         </div>
-
-                        <div className="flex items-center gap-4 w-full md:w-auto">
+                        <div className="flex flex-wrap items-center gap-2">
                             <Button
                                 variant="outline"
-                                className="h-12 px-6 rounded-xl font-bold hover:bg-primary/10 border-primary/20 text-primary"
+                                className="h-[38px] gap-2 font-semibold"
                                 onClick={handleMatchWithGumruk}
                                 disabled={matching || uploading}
                             >
-                                {matching ? (
-                                    <>
-                                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                                        <span>Eşleşiyor...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <RefreshCcw className="w-5 h-5 mr-2" />
-                                        <span>Gümrük ile Eşleştir</span>
-                                    </>
-                                )}
+                                {matching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                                {matching ? "Eşleşiyor..." : "Gümrük ile Eşleştir"}
                             </Button>
 
                             <input
@@ -591,195 +634,138 @@ export default function Nakliye() {
                                 disabled={uploading}
                                 accept=".pdf,.jpg,.jpeg,.png"
                             />
-                            <Button
-                                asChild
-                                variant={uploading ? "secondary" : "default"}
-                                className={`h-12 px-6 rounded-xl font-bold transition-all ${uploading ? "animate-pulse" : "shadow-lg hover:shadow-primary/20"}`}
-                                disabled={uploading}
-                            >
-                                <label htmlFor="nakliye-upload-compact" className="cursor-pointer flex items-center gap-2">
-                                    {uploading ? (
-                                        <>
-                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                            <span>Analiz Ediliyor...</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Plus className="w-5 h-5" />
-                                            <span>Yeni Belgeleri Tara</span>
-                                        </>
-                                    )}
+                            <Button asChild className="h-[38px] gap-2 font-semibold" disabled={uploading}>
+                                <label htmlFor="nakliye-upload-compact" className="cursor-pointer">
+                                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                                    {uploading ? "Analiz Ediliyor..." : "Fatura Yükle"}
                                 </label>
                             </Button>
                         </div>
-                    </CardContent>
-                </Card>
+                    </div>
+                </div>
 
-                <div className="grid gap-6">
-                    {/* Extraction Preview (Temporary) */}
-                    {extractedData.length > 0 && (
-                        <Card className="bg-primary/5 border-primary/30 shadow-2xl rounded-2xl overflow-hidden border-2 animate-in fade-in slide-in-from-top-4 duration-500">
-                            <div className="p-4 border-b border-primary/20 flex items-center justify-between bg-primary/10">
-                                <div className="flex items-center gap-3">
-                                    <FileSpreadsheet className="w-5 h-5 text-primary" />
-                                    <h3 className="font-extrabold text-primary">Yeni Ayıklanan Veriler (Onay Bekliyor)</h3>
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button variant="ghost" size="sm" onClick={resetView} disabled={saving}>İptal</Button>
-                                    <Button
-                                        size="sm"
-                                        className="bg-green-600 hover:bg-green-700 font-bold"
-                                        onClick={handleSaveToSystem}
-                                        disabled={saving}
-                                    >
-                                        {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                                        Sisteme Kaydet
-                                    </Button>
-                                </div>
-                            </div>
-                            <div className="max-h-[300px] overflow-auto">
-                                <Table>
-                                    <TableHeader className="bg-muted/50 sticky top-0 z-10">
-                                        <TableRow>
-                                            {Object.keys(extractedData[0] || {}).map((key) => (
-                                                <TableHead key={key} className="text-xs font-bold uppercase py-2">{key}</TableHead>
-                                            ))}
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {extractedData.map((row, idx) => (
-                                            <TableRow key={idx} className="bg-background/40">
-                                                {Object.values(row).map((val: any, vIdx) => (
-                                                    <TableCell key={vIdx} className="text-sm py-2">
-                                                        {typeof val === 'object' && val !== null ? JSON.stringify(val) : (val?.toString() || "-")}
-                                                    </TableCell>
-                                                ))}
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </Card>
-                    )}
+                {/* ===== 5 KPI (accent-bar) ===== */}
+                <div className="mt-5 grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-5">
+                    {kpis.map((k) => (
+                        <div key={k.label} className="relative overflow-hidden rounded-[14px] border bg-card p-4">
+                            <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: k.color }} />
+                            <div className="pl-2 text-[10.5px] font-semibold uppercase tracking-wide leading-tight text-muted-foreground">{k.label}</div>
+                            <div className="mt-2 pl-2 text-[21px] font-extrabold tracking-tight tabular-nums">{k.value}</div>
+                            <div className="mt-0.5 pl-2 text-[11.5px] text-muted-foreground">{k.sub}</div>
+                        </div>
+                    ))}
+                </div>
 
-                    {/* Saved Invoices List */}
-                    <Card className="bg-background/40 backdrop-blur-xl border-border/50 shadow-2xl rounded-2xl overflow-hidden border">
-                        <div className="p-4 border-b border-border/50 flex items-center justify-between bg-muted/20">
-                            <div className="flex items-center gap-3">
-                                <History className="w-5 h-5 text-muted-foreground" />
-                                <h3 className="text-xl font-bold">Kayıtlı Faturalar</h3>
+                {/* ===== Extraction Preview (geçici) ===== */}
+                {extractedData.length > 0 && (
+                    <div className="mt-4 overflow-hidden rounded-[14px] border-2 border-sky-300 bg-sky-50/60 duration-500 animate-in fade-in slide-in-from-top-4 dark:bg-sky-950/20">
+                        <div className="flex items-center justify-between border-b border-sky-200 bg-sky-100/60 px-5 py-3.5 dark:bg-sky-950/30">
+                            <div className="flex items-center gap-2.5">
+                                <FileSpreadsheet className="h-5 w-5 text-sky-600" />
+                                <h3 className="font-extrabold text-sky-700 dark:text-sky-300">Yeni Ayıklanan Veriler (Onay Bekliyor)</h3>
                             </div>
-                            <div className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-bold border border-primary/20">
-                                {sortedInvoices.length} Toplam Kayıt
+                            <div className="flex gap-2">
+                                <Button variant="ghost" size="sm" onClick={resetView} disabled={saving}>İptal</Button>
+                                <Button size="sm" className="gap-2 bg-emerald-600 font-bold hover:bg-emerald-700" onClick={handleSaveToSystem} disabled={saving}>
+                                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                    Sisteme Kaydet
+                                </Button>
                             </div>
                         </div>
+                        <div className="max-h-[300px] overflow-auto">
+                            <Table>
+                                <TableHeader className="sticky top-0 z-10 bg-slate-50">
+                                    <TableRow className="hover:bg-transparent">
+                                        {Object.keys(extractedData[0] || {}).map((key) => (
+                                            <TableHead key={key} className="py-2 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">{key}</TableHead>
+                                        ))}
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {extractedData.map((row, idx) => (
+                                        <TableRow key={idx}>
+                                            {Object.values(row).map((val: any, vIdx) => (
+                                                <TableCell key={vIdx} className="py-2 text-sm">
+                                                    {typeof val === 'object' && val !== null ? JSON.stringify(val) : (val?.toString() || "-")}
+                                                </TableCell>
+                                            ))}
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </div>
+                )}
 
-                        {/* Date Filter Bar */}
-                        <div className="px-4 py-3 border-b border-border/50 bg-background/20 flex flex-wrap items-center gap-4">
+                {/* ===== Faturalar (sol) + En Çok Navlun · Müşteri (sağ) ===== */}
+                <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.7fr_1fr]">
+                    {/* Navlun Faturaları */}
+                    <div className="overflow-hidden rounded-[14px] border bg-card">
+                        <div className="flex items-center justify-between border-b px-5 py-4">
+                            <h3 className="text-[15px] font-bold">Navlun Faturaları</h3>
+                            <span className="text-xs text-muted-foreground">{sortedInvoices.length} kayıt</span>
+                        </div>
+
+                        {/* Tarih filtresi */}
+                        <div className="flex flex-wrap items-center gap-4 border-b bg-slate-50/60 px-5 py-3 dark:bg-background/40">
                             <div className="flex items-center gap-2">
-                                <Label htmlFor="startDate" className="text-xs font-bold uppercase text-muted-foreground whitespace-nowrap">Başlangıç:</Label>
-                                <Input
-                                    id="startDate"
-                                    type="date"
-                                    className="h-8 w-[140px] text-xs"
-                                    value={dateRange.start}
-                                    onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                                />
+                                <Label htmlFor="startDate" className="whitespace-nowrap text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Başlangıç</Label>
+                                <Input id="startDate" type="date" className="h-8 w-[140px] text-xs" value={dateRange.start} onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))} />
                             </div>
                             <div className="flex items-center gap-2">
-                                <Label htmlFor="endDate" className="text-xs font-bold uppercase text-muted-foreground whitespace-nowrap">Bitiş:</Label>
-                                <Input
-                                    id="endDate"
-                                    type="date"
-                                    className="h-8 w-[140px] text-xs"
-                                    value={dateRange.end}
-                                    onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                                />
+                                <Label htmlFor="endDate" className="whitespace-nowrap text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Bitiş</Label>
+                                <Input id="endDate" type="date" className="h-8 w-[140px] text-xs" value={dateRange.end} onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))} />
                             </div>
                             {(dateRange.start || dateRange.end) && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 text-xs text-muted-foreground hover:text-foreground"
-                                    onClick={() => setDateRange({ start: "", end: "" })}
-                                >
-                                    <X className="w-3 h-3 mr-1" /> Filtreyi Temizle
+                                <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground hover:text-foreground" onClick={() => setDateRange({ start: "", end: "" })}>
+                                    <X className="mr-1 h-3 w-3" /> Filtreyi Temizle
                                 </Button>
                             )}
                         </div>
 
-                        <div className="relative overflow-x-auto">
+                        <div className="overflow-x-auto">
                             <Table>
-                                <TableHeader className="bg-muted/30">
-                                    <TableRow>
-                                        <TableHead
-                                            className="font-bold py-4 cursor-pointer hover:bg-muted/50 transition-colors"
-                                            onClick={() => handleSort('faturaNo')}
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                Fatura No
-                                                {sortConfig?.key === 'faturaNo' ? (
-                                                    sortConfig.direction === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
-                                                ) : (
-                                                    <ArrowUpDown className="w-4 h-4 opacity-50" />
-                                                )}
-                                            </div>
+                                <TableHeader>
+                                    <TableRow className="hover:bg-transparent">
+                                        <TableHead className="cursor-pointer text-[10.5px] font-bold uppercase tracking-wide text-slate-500 transition-colors hover:text-foreground" onClick={() => handleSort('faturaNo')}>
+                                            <div className="flex items-center gap-1.5">Fatura No <SortIcon column="faturaNo" /></div>
                                         </TableHead>
-                                        <TableHead
-                                            className="font-bold py-4 cursor-pointer hover:bg-muted/50 transition-colors"
-                                            onClick={() => handleSort('faturaTarihi')}
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                Tarih
-                                                {sortConfig?.key === 'faturaTarihi' ? (
-                                                    sortConfig.direction === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
-                                                ) : (
-                                                    <ArrowUpDown className="w-4 h-4 opacity-50" />
-                                                )}
-                                            </div>
+                                        <TableHead className="cursor-pointer text-[10.5px] font-bold uppercase tracking-wide text-slate-500 transition-colors hover:text-foreground" onClick={() => handleSort('faturaTarihi')}>
+                                            <div className="flex items-center gap-1.5">Tarih <SortIcon column="faturaTarihi" /></div>
                                         </TableHead>
-                                        <TableHead className="font-bold py-4">Mal/Hizmet</TableHead>
-                                        <TableHead className="font-bold py-4 text-blue-600">Konteyner/Referans</TableHead>
-                                        <TableHead className="font-bold py-4 text-purple-600">Dosya No</TableHead>
-                                        <TableHead className="font-bold py-4 text-green-600">Müşteri</TableHead>
-                                        <TableHead className="font-bold py-4 text-right">Miktar</TableHead>
-                                        <TableHead className="font-bold py-4 text-right">Birim Fiyat</TableHead>
-                                        <TableHead className="font-bold py-4 text-right">Tutar</TableHead>
-                                        <TableHead className="font-bold py-4 text-right">KDV</TableHead>
-                                        <TableHead className="font-bold py-4 text-right">KDV Tevkifat</TableHead>
-                                        <TableHead className="font-bold py-4 text-right">Vergili Toplam</TableHead>
-                                        <TableHead className="font-bold py-4 text-right">Genel Toplam</TableHead>
+                                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Mal/Hizmet</TableHead>
+                                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "#0284c7" }}>Konteyner/Referans</TableHead>
+                                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "#7c3aed" }}>Dosya No</TableHead>
+                                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "#059669" }}>Müşteri</TableHead>
+                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Miktar</TableHead>
+                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Birim Fiyat</TableHead>
+                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tutar</TableHead>
+                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">KDV</TableHead>
+                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">KDV Tevkifat</TableHead>
+                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Vergili Toplam</TableHead>
+                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Genel Toplam</TableHead>
                                         <TableHead className="w-[50px]"></TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {sortedInvoices.length > 0 ? (
                                         sortedInvoices.map((inv) => (
-                                            <TableRow
-                                                key={inv.id}
-                                                className="hover:bg-primary/5 transition-colors border-border/40 cursor-pointer"
-                                                onClick={() => setSelectedInvoice(inv)}
-                                            >
-                                                <TableCell className="font-bold text-primary">{inv.faturaNo || "N/A"}</TableCell>
-                                                <TableCell className="text-sm text-muted-foreground">{formatDate(inv.faturaTarihi)}</TableCell>
-                                                <TableCell className="font-medium max-w-[200px] truncate">{inv.malHizmet || "-"}</TableCell>
-                                                <TableCell className="font-mono text-blue-600 font-medium">{inv.konteynerler || extractContainerRef(inv.malHizmet)}</TableCell>
-                                                <TableCell className="font-bold text-purple-600">{inv.ilgiliDosyaNo || "-"}</TableCell>
-                                                <TableCell className="font-medium text-green-600 truncate max-w-[150px]">{inv.musteri || extractCustomer(inv.malHizmet)}</TableCell>
-                                                <TableCell className="text-right font-mono">{formatCurrency(inv.miktar)}</TableCell>
-                                                <TableCell className="text-right font-mono text-muted-foreground">{formatCurrency(inv.birimFiyat)}</TableCell>
-                                                <TableCell className="text-right font-bold">{formatCurrency(inv.malHizmetToplamTutarı)}</TableCell>
-                                                <TableCell className="text-right text-muted-foreground">{formatCurrency(inv.kdvTutarı)}</TableCell>
-                                                <TableCell className="text-right text-orange-600/80">{formatCurrency(inv.hesaplananKdvTevkifat20)}</TableCell>
-                                                <TableCell className="text-right text-muted-foreground">{formatCurrency(inv.vergilerDahilToplamTutar)}</TableCell>
-                                                <TableCell className="text-right font-black text-foreground">{formatCurrency(inv.odenecekTutar)}</TableCell>
+                                            <TableRow key={inv.id} className="cursor-pointer" onClick={() => setSelectedInvoice(inv)}>
+                                                <TableCell className="font-bold tabular-nums" style={{ color: "#0284c7" }}>{inv.faturaNo || "N/A"}</TableCell>
+                                                <TableCell className="text-sm text-muted-foreground tabular-nums">{formatDate(inv.faturaTarihi)}</TableCell>
+                                                <TableCell className="max-w-[200px] truncate font-medium">{inv.malHizmet || "-"}</TableCell>
+                                                <TableCell className="font-mono text-[12.5px] font-medium" style={{ color: "#0284c7" }}>{inv.konteynerler || extractContainerRef(inv.malHizmet)}</TableCell>
+                                                <TableCell className="font-bold" style={{ color: "#7c3aed" }}>{inv.ilgiliDosyaNo || "-"}</TableCell>
+                                                <TableCell className="max-w-[150px] truncate font-medium" style={{ color: "#059669" }}>{inv.musteri || extractCustomer(inv.malHizmet)}</TableCell>
+                                                <TableCell className="text-right font-mono tabular-nums">{formatCurrency(inv.miktar)}</TableCell>
+                                                <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{formatCurrency(inv.birimFiyat)}</TableCell>
+                                                <TableCell className="text-right font-bold tabular-nums">{formatCurrency(inv.malHizmetToplamTutarı)}</TableCell>
+                                                <TableCell className="text-right tabular-nums text-muted-foreground">{formatCurrency(inv.kdvTutarı)}</TableCell>
+                                                <TableCell className="text-right tabular-nums" style={{ color: "#d97706" }}>{formatCurrency(inv.hesaplananKdvTevkifat20)}</TableCell>
+                                                <TableCell className="text-right tabular-nums text-muted-foreground">{formatCurrency(inv.vergilerDahilToplamTutar)}</TableCell>
+                                                <TableCell className="text-right font-black tabular-nums text-foreground">{formatCurrency(inv.odenecekTutar)}</TableCell>
                                                 <TableCell className="text-center">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                        onClick={(e) => handleDeleteInvoice(inv.id, e)}
-                                                    >
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={(e) => handleDeleteInvoice(inv.id, e)}>
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
                                                 </TableCell>
@@ -787,9 +773,9 @@ export default function Nakliye() {
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={11} className="h-40 text-center text-muted-foreground">
+                                            <TableCell colSpan={14} className="h-40 text-center text-muted-foreground">
                                                 <div className="flex flex-col items-center gap-2">
-                                                    <AlertCircle className="w-10 h-10 opacity-20" />
+                                                    <AlertCircle className="h-10 w-10 opacity-20" />
                                                     <p>Henüz kayıtlı fatura bulunamadı.</p>
                                                 </div>
                                             </TableCell>
@@ -798,38 +784,60 @@ export default function Nakliye() {
                                 </TableBody>
                             </Table>
                         </div>
-                    </Card>
+                    </div>
+
+                    {/* En Çok Navlun · Müşteri */}
+                    <div className="rounded-[14px] border bg-card p-5">
+                        <h3 className="text-[15px] font-bold">En Çok Navlun · Müşteri</h3>
+                        <p className="mb-4 mt-1 text-xs text-muted-foreground">{yil} toplam ciro payı</p>
+                        <div className="flex flex-col gap-3.5">
+                            {topMusteri.length === 0 && (
+                                <div className="py-6 text-center text-sm text-muted-foreground">Henüz veri yok</div>
+                            )}
+                            {topMusteri.map((m) => (
+                                <div key={m.name}>
+                                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                                        <span className="truncate text-[12.5px] font-semibold text-slate-700" title={m.name}>{m.name}</span>
+                                        <span className="flex-shrink-0 text-[12.5px] font-bold tabular-nums">{formatCurrencyFull(m.value)}</span>
+                                    </div>
+                                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                                        <span className="block h-full rounded-full bg-sky-500" style={{ width: `${m.w}%` }} />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Invoice Details Modal */}
+            {/* ===== Fatura Detay Modalı (korundu) ===== */}
             <Dialog open={!!selectedInvoice} onOpenChange={(open) => !open && setSelectedInvoice(null)}>
-                <DialogContent className="max-w-2xl bg-card border-border/50 shadow-2xl">
+                <DialogContent className="max-w-2xl">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-xl">
-                            <FileText className="w-5 h-5 text-primary" />
+                            <FileText className="h-5 w-5 text-sky-600" />
                             <span>Fatura Detayı</span>
                         </DialogTitle>
                     </DialogHeader>
 
                     {selectedInvoice && (
                         <div className="grid gap-6 py-4">
-                            <div className="bg-muted/30 p-4 rounded-lg border border-border/50 flex flex-col sm:flex-row justify-between items-center gap-4">
-                                <div className="flex flex-col items-center sm:items-start gap-1">
-                                    <span className="text-xs font-bold text-muted-foreground uppercase">Fatura No</span>
-                                    <span className="text-xl font-black font-mono text-primary tracking-tight">{selectedInvoice.faturaNo}</span>
+                            <div className="flex flex-col items-center justify-between gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row">
+                                <div className="flex flex-col items-center gap-1 sm:items-start">
+                                    <span className="text-xs font-bold uppercase text-muted-foreground">Fatura No</span>
+                                    <span className="font-mono text-xl font-black tracking-tight" style={{ color: "#0284c7" }}>{selectedInvoice.faturaNo}</span>
                                 </div>
-                                <div className="h-8 w-px bg-border hidden sm:block"></div>
-                                <div className="flex flex-col items-center sm:items-end gap-1">
-                                    <span className="text-xs font-bold text-muted-foreground uppercase">Tarih</span>
-                                    <span className="text-xl font-bold font-mono tracking-tight">{formatDate(selectedInvoice.faturaTarihi)}</span>
+                                <div className="hidden h-8 w-px bg-border sm:block"></div>
+                                <div className="flex flex-col items-center gap-1 sm:items-end">
+                                    <span className="text-xs font-bold uppercase text-muted-foreground">Tarih</span>
+                                    <span className="font-mono text-xl font-bold tracking-tight">{formatDate(selectedInvoice.faturaTarihi)}</span>
                                 </div>
                             </div>
 
                             {/* Matched Gumruk Info */}
                             {selectedInvoice.ilgiliDosyaNo && (
-                                <div className="bg-purple-600/10 p-3 rounded-lg border border-purple-600/20 text-purple-800 dark:text-purple-300 text-sm font-medium flex items-center justify-center text-center">
-                                    <CheckCircle2 className="w-5 h-5 mr-2 text-purple-600" />
+                                <div className="flex items-center justify-center rounded-lg border border-purple-200 bg-purple-50 p-3 text-center text-sm font-medium text-purple-800 dark:border-purple-900/40 dark:bg-purple-950/20 dark:text-purple-300">
+                                    <CheckCircle2 className="mr-2 h-5 w-5 text-purple-600" />
                                     <span>
                                         {/* Format: 1-DOSYA NO, 2-FİRMA ÜNVAN, 3-GÜMRÜK, 4-DOVİZ KIYMETİ, 5-DOVİZ, 6-TESCİL NO, 7-TESCİL TARİHİ, 8-HOUSE NO */}
                                         {selectedInvoice.ilgiliDosyaNo} - {selectedInvoice.gumrukFirmaUnvan} - {selectedInvoice.gumrukAdi} - {selectedInvoice.gumrukDovizKiymeti} - {selectedInvoice.gumrukDovizCinsi} - {selectedInvoice.gumrukTescilNo} - {selectedInvoice.gumrukTescilTarihi} - {selectedInvoice.eslesenHouseNo}
@@ -838,20 +846,13 @@ export default function Nakliye() {
                             )}
 
                             {/* Editable Fields */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/10 p-4 rounded-xl border border-border/50">
+                            <div className="grid grid-cols-1 gap-4 rounded-xl border bg-muted/10 p-4 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label className="text-xs font-bold uppercase text-muted-foreground">Müşteri</Label>
                                     <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
                                         <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                role="combobox"
-                                                aria-expanded={openCombobox}
-                                                className="w-full justify-between font-normal"
-                                            >
-                                                {editMusteri
-                                                    ? customers.find((c) => c === editMusteri) || editMusteri
-                                                    : "Müşteri Seçiniz..."}
+                                            <Button variant="outline" role="combobox" aria-expanded={openCombobox} className="w-full justify-between font-normal">
+                                                {editMusteri ? customers.find((c) => c === editMusteri) || editMusteri : "Müşteri Seçiniz..."}
                                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                             </Button>
                                         </PopoverTrigger>
@@ -870,12 +871,7 @@ export default function Nakliye() {
                                                                     setOpenCombobox(false);
                                                                 }}
                                                             >
-                                                                <Check
-                                                                    className={cn(
-                                                                        "mr-2 h-4 w-4",
-                                                                        editMusteri === customer ? "opacity-100" : "opacity-0"
-                                                                    )}
-                                                                />
+                                                                <Check className={cn("mr-2 h-4 w-4", editMusteri === customer ? "opacity-100" : "opacity-0")} />
                                                                 {customer}
                                                             </CommandItem>
                                                         ))}
@@ -888,63 +884,58 @@ export default function Nakliye() {
 
                                 <div className="space-y-2">
                                     <Label className="text-xs font-bold uppercase text-muted-foreground">Konteynerler</Label>
-                                    <Input
-                                        value={editKonteynerler}
-                                        onChange={(e) => setEditKonteynerler(e.target.value)}
-                                        placeholder="Konteyner no giriniz..."
-                                        className="font-mono text-sm"
-                                    />
-                                    <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                        <AlertCircle className="w-3 h-3" /> Birden fazla ise virgülle ayırın.
+                                    <Input value={editKonteynerler} onChange={(e) => setEditKonteynerler(e.target.value)} placeholder="Konteyner no giriniz..." className="font-mono text-sm" />
+                                    <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                        <AlertCircle className="h-3 w-3" /> Birden fazla ise virgülle ayırın.
                                     </p>
                                 </div>
                             </div>
 
                             {/* Full Description */}
                             <div className="space-y-2">
-                                <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Mal/Hizmet Açıklaması</h4>
-                                <div className="p-4 bg-muted/50 rounded-lg text-sm leading-relaxed border border-border/50 max-h-[300px] overflow-y-auto whitespace-pre-wrap">
+                                <h4 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Mal/Hizmet Açıklaması</h4>
+                                <div className="max-h-[300px] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/50 p-4 text-sm leading-relaxed">
                                     {selectedInvoice.malHizmet}
                                 </div>
                             </div>
 
                             {/* Financial Summary */}
-                            <div className="bg-muted/30 rounded-lg p-4 border border-border/50 space-y-3">
-                                <div className="flex justify-between items-center text-sm">
+                            <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                                <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Miktar:</span>
-                                    <span className="font-mono font-medium">{formatCurrency(selectedInvoice.miktar)}</span>
+                                    <span className="font-mono font-medium tabular-nums">{formatCurrency(selectedInvoice.miktar)}</span>
                                 </div>
-                                <div className="flex justify-between items-center text-sm">
+                                <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Birim Fiyat:</span>
-                                    <span className="font-mono font-medium">{formatCurrency(selectedInvoice.birimFiyat)}</span>
+                                    <span className="font-mono font-medium tabular-nums">{formatCurrency(selectedInvoice.birimFiyat)}</span>
                                 </div>
-                                <div className="h-px bg-border/50 my-2" />
-                                <div className="flex justify-between items-center">
+                                <div className="my-2 h-px bg-border/50" />
+                                <div className="flex items-center justify-between">
                                     <span className="font-medium">Mal Hizmet Toplamı:</span>
-                                    <span className="font-bold font-mono">{formatCurrency(selectedInvoice.malHizmetToplamTutarı)}</span>
+                                    <span className="font-mono font-bold tabular-nums">{formatCurrency(selectedInvoice.malHizmetToplamTutarı)}</span>
                                 </div>
-                                <div className="flex justify-between items-center text-sm">
+                                <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">KDV Tutarı:</span>
-                                    <span className="font-mono">{formatCurrency(selectedInvoice.kdvTutarı)}</span>
+                                    <span className="font-mono tabular-nums">{formatCurrency(selectedInvoice.kdvTutarı)}</span>
                                 </div>
-                                <div className="flex justify-between items-center text-sm text-orange-600">
+                                <div className="flex items-center justify-between text-sm" style={{ color: "#d97706" }}>
                                     <span>Tevkifat:</span>
-                                    <span className="font-mono">{formatCurrency(selectedInvoice.hesaplananKdvTevkifat20)}</span>
+                                    <span className="font-mono tabular-nums">{formatCurrency(selectedInvoice.hesaplananKdvTevkifat20)}</span>
                                 </div>
-                                <div className="flex justify-between items-center text-sm">
+                                <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Vergili Toplam:</span>
-                                    <span className="font-mono">{formatCurrency(selectedInvoice.vergilerDahilToplamTutar)}</span>
+                                    <span className="font-mono tabular-nums">{formatCurrency(selectedInvoice.vergilerDahilToplamTutar)}</span>
                                 </div>
-                                <div className="h-px bg-border my-2" />
-                                <div className="flex justify-between items-center text-lg bg-primary/5 p-2 -mx-2 rounded">
-                                    <span className="font-bold text-primary">Genel Toplam:</span>
-                                    <span className="font-black font-mono text-foreground">{formatCurrency(selectedInvoice.odenecekTutar)} TVL</span>
+                                <div className="my-2 h-px bg-border" />
+                                <div className="-mx-2 flex items-center justify-between rounded bg-sky-50 p-2 text-lg dark:bg-sky-950/20">
+                                    <span className="font-bold" style={{ color: "#0284c7" }}>Genel Toplam:</span>
+                                    <span className="font-mono font-black tabular-nums text-foreground">{formatCurrency(selectedInvoice.odenecekTutar)} TVL</span>
                                 </div>
                             </div>
-                            <DialogFooter className="gap-2 mt-4">
+                            <DialogFooter className="mt-4 gap-2">
                                 <Button variant="outline" onClick={() => setSelectedInvoice(null)} disabled={updating}>Vazgeç</Button>
                                 <Button onClick={handleUpdate} disabled={updating}>
-                                    {updating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                                    {updating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Değişiklikleri Kaydet
                                 </Button>
                             </DialogFooter>
@@ -952,6 +943,6 @@ export default function Nakliye() {
                     )}
                 </DialogContent>
             </Dialog>
-        </div >
+        </div>
     );
 }
