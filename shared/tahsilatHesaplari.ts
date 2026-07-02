@@ -111,3 +111,84 @@ export const PATTERN_COLOR: Record<RiskPattern, string> = {
   YAVAS_ODEYICI: "bg-orange-500",
   DONUK_KAYIP: "bg-red-600",
 };
+
+// ── Aksiyon Merkezi: ödeme oranı + segment + neden ──────────────────────────
+
+// Yıl içi ödeme oranı (0-1). Fatura yoksa null → oran yorumlanamaz.
+export function odemeOrani(borc: number, alacak: number): number | null {
+  if (borc <= 0) return null;
+  return alacak / borc;
+}
+
+export type TahsilatSegment = "SAGLIKLI" | "BUYUK_RISK" | "KUCUK_NOTR" | "NAKIT_TUZAGI";
+
+export interface SegmentEsikleri {
+  odemeOraniEsik: number; // yüzde (örn. 60)
+  eskiOdemeEsik: number;  // gün (örn. 30)
+}
+
+// İki eksen: kazandırıyor mu (ciro eşiği — çağıran hesaplar) × ödüyor mu (oran + gecikme).
+// Bakiye ≤ 0 olan firma tahsilat konusu değildir.
+export function firmaSegmenti(p: {
+  netBakiye: number;
+  odemeOrani: number | null;
+  gecikme: number;
+  kazandiriyor: boolean;
+  esikler: SegmentEsikleri;
+}): TahsilatSegment {
+  if (p.netBakiye <= 0) return "SAGLIKLI";
+  const oranIyi = p.odemeOrani === null ? true : p.odemeOrani * 100 >= p.esikler.odemeOraniEsik;
+  const oduyor = oranIyi && p.gecikme <= p.esikler.eskiOdemeEsik;
+  if (p.kazandiriyor) return oduyor ? "SAGLIKLI" : "BUYUK_RISK";
+  return oduyor ? "KUCUK_NOTR" : "NAKIT_TUZAGI";
+}
+
+export function kisaTutar(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace(".", ",")}M`;
+  if (abs >= 1_000) return `${Math.round(v / 1_000)}K`;
+  return String(Math.round(v));
+}
+
+// Düz Türkçe gerekçe; parçalar " · " ile birleşir.
+export function nedenCumlesi(p: {
+  gecikme: number;
+  odemeOrani: number | null;
+  hicOdemeYok: boolean;
+  ytdIslemSayisi: number | null;
+  islemAyOrt: number | null;
+  deltaNetBakiye: number | null;
+  eslesmemis: boolean;
+  esikler: SegmentEsikleri;
+}): string {
+  const parca: string[] = [];
+  if (p.hicOdemeYok) parca.push("hiç ödeme yapmamış");
+  else if (p.gecikme >= 9999) parca.push("ödeme kaydı yok");
+  else if (p.gecikme >= 60) parca.push(`${Math.floor(p.gecikme / 30)} aydır ödeme yok`);
+  else if (p.gecikme > p.esikler.eskiOdemeEsik) parca.push(`${p.gecikme} gündür ödeme yok`);
+  if (!p.hicOdemeYok && p.odemeOrani !== null && p.odemeOrani * 100 < p.esikler.odemeOraniEsik) {
+    parca.push(`ödeme oranı %${Math.round(p.odemeOrani * 100)}`);
+  }
+  if (p.ytdIslemSayisi !== null && p.islemAyOrt !== null && p.islemAyOrt < 2) {
+    parca.push(`yılda ${p.ytdIslemSayisi} iş`);
+  }
+  if (p.deltaNetBakiye !== null && p.deltaNetBakiye > 0) {
+    parca.push(`borç büyüyor ▲ ${kisaTutar(p.deltaNetBakiye)}`);
+  }
+  if (p.eslesmemis) parca.push("gümrük eşleşmesi yok");
+  return parca.length ? parca.join(" · ") : "sorun görünmüyor";
+}
+
+export const SEGMENT_LABEL: Record<TahsilatSegment, string> = {
+  SAGLIKLI: "Sağlıklı",
+  BUYUK_RISK: "Büyük Risk",
+  KUCUK_NOTR: "Küçük / Nötr",
+  NAKIT_TUZAGI: "Nakit Tuzağı",
+};
+
+export const SEGMENT_PILL: Record<TahsilatSegment, string> = {
+  SAGLIKLI: "bg-emerald-50 text-emerald-700",
+  BUYUK_RISK: "bg-amber-50 text-amber-700",
+  KUCUK_NOTR: "bg-slate-100 text-slate-600",
+  NAKIT_TUZAGI: "bg-rose-50 text-rose-700",
+};
