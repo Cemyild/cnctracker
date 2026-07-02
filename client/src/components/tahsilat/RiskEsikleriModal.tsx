@@ -22,6 +22,8 @@ export function RiskEsikleriModal({ open, onClose }: { open: boolean; onClose: (
       cokEskiOdemeEsik: ayarlar.cokEskiOdemeEsik,
       eksiPozisyonYuzde: ayarlar.eksiPozisyonYuzde,
       faturaPenceresi: ayarlar.faturaPenceresi,
+      ciroEsik: ayarlar.ciroEsik,
+      odemeOraniEsik: ayarlar.odemeOraniEsik,
     });
   }, [ayarlar]);
 
@@ -51,6 +53,8 @@ export function RiskEsikleriModal({ open, onClose }: { open: boolean; onClose: (
           <div><Label>Çok Eski Ödeme Eşiği (gün)</Label><Input type="number" value={form.cokEskiOdemeEsik || ""} onChange={(e) => setForm({ ...form, cokEskiOdemeEsik: parseInt(e.target.value) })} /></div>
           <div><Label>Eksi Pozisyon Yüzdesi (%)</Label><Input type="number" value={form.eksiPozisyonYuzde || ""} onChange={(e) => setForm({ ...form, eksiPozisyonYuzde: parseInt(e.target.value) })} /></div>
           <div><Label>Fatura Penceresi (gün)</Label><Input type="number" value={form.faturaPenceresi || ""} onChange={(e) => setForm({ ...form, faturaPenceresi: parseInt(e.target.value) })} /></div>
+          <div><Label>Ciro Eşiği — "kazandırıyor" sınırı (yıllık, TL)</Label><Input type="number" value={form.ciroEsik || ""} onChange={(e) => setForm({ ...form, ciroEsik: e.target.value })} /></div>
+          <div><Label>Ödeme Oranı Eşiği — "ödüyor" sınırı (%)</Label><Input type="number" value={form.odemeOraniEsik || ""} onChange={(e) => setForm({ ...form, odemeOraniEsik: parseInt(e.target.value) })} /></div>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose}>İptal</Button>
