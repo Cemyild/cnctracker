@@ -1,22 +1,23 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, TrendingUp, AlertTriangle } from "lucide-react";
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
+import { Loader2, PhoneCall, Wallet, AlertTriangle, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SEGMENT_LABEL, SEGMENT_PILL, kisaTutar, type TahsilatSegment } from "@shared/tahsilatHesaplari";
+import { MusteriDrillDown } from "./MusteriDrillDown";
 
-const SEKTOR_RENKLER = ["#0ea5e9", "#10b981", "#f59e0b", "#dc2626", "#7c3aed", "#06b6d4", "#84cc16", "#ec4899"];
+type SegmentFiltre = TahsilatSegment | "AKSIYON";
 
-const PATTERN_LABEL: Record<string, string> = {
-  SAGLIKLI: "Sağlıklı", VIP_AKTIF_RISK: "VIP Aktif", TAKIP_GEREKEN: "Takip", YAVAS_ODEYICI: "Yavaş", DONUK_KAYIP: "Donuk",
-};
-const PATTERN_PILL: Record<string, string> = {
-  SAGLIKLI: "bg-emerald-50 text-emerald-700",
-  VIP_AKTIF_RISK: "bg-sky-50 text-sky-700",
-  TAKIP_GEREKEN: "bg-yellow-50 text-yellow-700",
-  YAVAS_ODEYICI: "bg-amber-50 text-amber-700",
-  DONUK_KAYIP: "bg-rose-50 text-rose-700",
-};
+const MATRIS: { segment: TahsilatSegment; emoji: string; alt: string; aktifKutu: string }[] = [
+  { segment: "SAGLIKLI", emoji: "🟢", alt: "Kazandırıyor + ödüyor — dokunma", aktifKutu: "ring-emerald-400" },
+  { segment: "BUYUK_RISK", emoji: "🟠", alt: "Kazandırıyor ama ödemiyor — diplomatik takip", aktifKutu: "ring-amber-400" },
+  { segment: "KUCUK_NOTR", emoji: "⚪", alt: "Kazandırmıyor ama ödüyor", aktifKutu: "ring-slate-400" },
+  { segment: "NAKIT_TUZAGI", emoji: "🔴", alt: "Kazandırmıyor + ödemiyor — hedef liste", aktifKutu: "ring-rose-400" },
+];
 
 export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
+  const [filtre, setFiltre] = useState<SegmentFiltre>("AKSIYON");
+  const [drillId, setDrillId] = useState<string | null>(null);
+
   const { data, isLoading } = useQuery<any>({
     queryKey: ["/api/tahsilat/dashboard", mizanId],
     queryFn: async () => {
@@ -31,29 +32,33 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
   if (!data?.mizan) return <div className="text-center text-muted-foreground py-12">Henüz mizan yüklenmemiş.</div>;
 
   const o = data.ozet;
-  const enKritikler = (data.musteriler as any[])
-    .filter((m) => m.netBakiye > 0)
-    .sort((a, b) => {
-      // Önce risk pattern (Donuk > Yavaş > VIP > Takip > Sağlıklı), sonra bakiye
-      const order: Record<string, number> = { DONUK_KAYIP: 0, YAVAS_ODEYICI: 1, VIP_AKTIF_RISK: 2, TAKIP_GEREKEN: 3, SAGLIKLI: 4 };
-      if (order[a.pattern] !== order[b.pattern]) return order[a.pattern] - order[b.pattern];
-      return b.netBakiye - a.netBakiye;
-    })
-    .slice(0, 10);
+  const musteriler = data.musteriler as any[];
+  const segmentOzet = new Map<string, { sayi: number; toplam: number }>(
+    (o.segmentDagilim as any[]).map((s) => [s.segment, { sayi: s.sayi, toplam: s.toplam }])
+  );
 
-  // 5 KPI (accent-bar) — sayı + tutar birlikte korunur
+  const delta = o.toplamNetAlacakDelta as number | null;
   const kpis = [
-    { label: "Toplam Net Alacak", value: fmtTry(o.toplamNetAlacak), sub: `${(data.musteriler as any[]).length} müşteri`, color: "#0ea5e9" },
-    { label: "VIP", value: fmtTry(o.vipBakiyeToplam), sub: `${o.vipSayisi} müşteri`, color: "#0284c7" },
-    { label: "Yavaş Ödeyici", value: fmtTry(o.yavasOdeyiciCiro), sub: `${o.yavasOdeyiciSayisi} müşteri`, color: "#f59e0b" },
-    { label: "Donuk / Kayıp", value: fmtTry(o.donukCiro), sub: `${o.donukSayisi} müşteri`, color: "#dc2626" },
-    { label: "Eksi Pozisyon", value: fmtTry(o.eksiPozisyonToplam), sub: `${o.eksiPozisyonSayisi} müşteri`, color: "#7c3aed" },
+    { label: "Dışarıdaki Nakit", value: fmtTry(o.toplamNetAlacak), sub: `${musteriler.length} müşteri`, color: "#0ea5e9", Icon: Wallet },
+    { label: "Nakit Tuzağında", value: fmtTry(o.nakitTuzagiToplam), sub: `${o.nakitTuzagiSayisi} firma — hedef liste`, color: "#e11d48", Icon: PhoneCall },
+    { label: "Büyük Riskte", value: fmtTry(o.buyukRiskToplam), sub: `${o.buyukRiskSayisi} firma — diplomatik takip`, color: "#f59e0b", Icon: AlertTriangle },
+    {
+      label: "Önceki Mizana Göre",
+      value: delta === null ? "—" : `${delta > 0 ? "▲" : delta < 0 ? "▼" : ""} ${fmtTry(Math.abs(delta))}`,
+      sub: o.oncekiMizanTarihi ? `ref: ${o.oncekiMizanTarihi}` : "önceki mizan yok",
+      color: delta === null ? "#64748b" : delta > 0 ? "#e11d48" : "#10b981",
+      Icon: delta !== null && delta > 0 ? ArrowUpRight : ArrowDownRight,
+    },
   ];
+
+  const liste = musteriler
+    .filter((m) => (filtre === "AKSIYON" ? m.segment === "NAKIT_TUZAGI" || m.segment === "BUYUK_RISK" : m.segment === filtre))
+    .sort((a, b) => b.netBakiye - a.netBakiye);
 
   return (
     <div className="space-y-[18px]">
-      {/* 5 KPI kartı — accent-bar */}
-      <div className="grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-5">
+      {/* 4 nakit KPI — accent-bar */}
+      <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         {kpis.map((k) => (
           <div key={k.label} className="relative overflow-hidden rounded-[14px] border bg-card p-4">
             <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: k.color }} />
@@ -64,63 +69,86 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* En Kritik 10 Müşteri */}
-        <div className="rounded-[14px] border bg-card overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-4 border-b">
-            <AlertTriangle className="w-4 h-4 text-rose-500" />
-            <h3 className="text-[15px] font-bold">En Kritik 10 Müşteri</h3>
-          </div>
-          {enKritikler.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">Risk altında müşteri yok 🎉</div>
-          ) : (
-            <div className="divide-y">
-              {enKritikler.map((m, i) => (
-                <div key={m.musteriId} className="flex items-center justify-between gap-2 px-5 py-3 hover:bg-slate-50 transition-colors">
-                  <div className="min-w-0">
-                    <div className="font-semibold text-sm truncate">{i + 1}. {m.ad}</div>
-                    <div className="text-[10.5px] text-muted-foreground">{m.sektor || "Sektörsüz"} · Gecikme: {m.gecikme >= 9999 ? "—" : `${m.gecikme}g`}</div>
-                  </div>
-                  <div className="text-right tabular-nums shrink-0">
-                    <div className="font-bold text-sm text-orange-700">{fmtTry(m.netBakiye)}</div>
-                    <span className={cn("mt-0.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold", PATTERN_PILL[m.pattern])}>{PATTERN_LABEL[m.pattern] || m.pattern}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Sektör Dağılımı (Net Alacak) */}
-        <div className="rounded-[14px] border bg-card overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-4 border-b">
-            <TrendingUp className="w-4 h-4 text-sky-500" />
-            <h3 className="text-[15px] font-bold">Sektör Dağılımı (Net Alacak)</h3>
-          </div>
-          <div className="p-5">
-            {o.sektorDagilim.length === 0 ? (
-              <div className="text-center text-muted-foreground py-8">Veri yok</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={o.sektorDagilim.filter((s: any) => s.toplam > 0)}
-                    dataKey="toplam"
-                    nameKey="sektor"
-                    cx="50%" cy="50%"
-                    outerRadius={100}
-                    innerRadius={60}
-                    label={(e) => `${e.sektor}: ${(e.percent * 100).toFixed(0)}%`}
-                  >
-                    {o.sektorDagilim.map((_: any, i: number) => <Cell key={i} fill={SEKTOR_RENKLER[i % SEKTOR_RENKLER.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(v: any) => fmtTry(v)} contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0", fontSize: "12px" }} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
+      {/* Segment matrisi — kutuya tıkla → alt liste filtrelenir */}
+      <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+        {MATRIS.map((s) => {
+          const seg = segmentOzet.get(s.segment) || { sayi: 0, toplam: 0 };
+          const aktif = filtre === s.segment;
+          return (
+            <button
+              key={s.segment}
+              onClick={() => setFiltre(aktif ? "AKSIYON" : s.segment)}
+              className={cn(
+                "rounded-[14px] border bg-card p-4 text-left transition-shadow hover:shadow-md",
+                aktif && `ring-2 ${s.aktifKutu}`
+              )}
+            >
+              <div className="text-[13px] font-bold">{s.emoji} {SEGMENT_LABEL[s.segment]}</div>
+              <div className="mt-1.5 text-[18px] font-extrabold tabular-nums">{fmtTry(seg.toplam)}</div>
+              <div className="text-[11.5px] tabular-nums text-muted-foreground">{seg.sayi} firma</div>
+              <div className="mt-1.5 text-[10.5px] leading-snug text-muted-foreground">{s.alt}</div>
+            </button>
+          );
+        })}
       </div>
+
+      {/* Aranacaklar listesi */}
+      <div className="rounded-[14px] border bg-card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-4 border-b">
+          <div className="flex items-center gap-2">
+            <PhoneCall className="w-4 h-4 text-rose-500" />
+            <h3 className="text-[15px] font-bold">
+              {filtre === "AKSIYON" ? "Aranacaklar — Nakit Tuzağı + Büyük Risk" : `${SEGMENT_LABEL[filtre]} Firmalar`}
+            </h3>
+          </div>
+          <span className="text-[12.5px] tabular-nums text-muted-foreground">{liste.length} firma</span>
+        </div>
+        {liste.length === 0 ? (
+          <div className="text-center text-muted-foreground py-10">Bu segmentte firma yok 🎉</div>
+        ) : (
+          <div className="max-h-[560px] overflow-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-50">
+                <tr className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">
+                  <th className="px-5 py-2.5 text-left">Firma</th>
+                  <th className="px-3 py-2.5 text-right">Borç</th>
+                  <th className="px-3 py-2.5 text-right">Ödeme %</th>
+                  <th className="px-3 py-2.5 text-right">Son Ödeme</th>
+                  <th className="px-3 py-2.5 text-right">Yılda İş</th>
+                  <th className="px-3 py-2.5 text-right">Değişim</th>
+                  <th className="px-5 py-2.5 text-left">Neden</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {liste.map((m) => (
+                  <tr key={m.musteriId} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setDrillId(m.musteriId)}>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold truncate max-w-[260px]">{m.ad}</span>
+                        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold", SEGMENT_PILL[m.segment as TahsilatSegment])}>
+                          {SEGMENT_LABEL[m.segment as TahsilatSegment]}
+                        </span>
+                        {m.eslesmemis && <span title="Gümrük eşleşmesi yok" className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">eşleşmemiş</span>}
+                      </div>
+                      <div className="text-[10px] font-mono text-muted-foreground">{m.hesapKodu}</div>
+                    </td>
+                    <td className="px-3 py-3 text-right font-bold tabular-nums text-orange-700 whitespace-nowrap">{fmtTry(m.netBakiye)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{m.odemeOrani === null ? "—" : `%${Math.round(m.odemeOrani * 100)}`}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{m.gecikme >= 9999 ? "hiç" : `${m.gecikme}g önce`}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{m.ytdIslemSayisi === null ? "—" : m.ytdIslemSayisi}</td>
+                    <td className={cn("px-3 py-3 text-right tabular-nums whitespace-nowrap", m.deltaNetBakiye > 0 ? "text-rose-600 font-semibold" : m.deltaNetBakiye < 0 ? "text-emerald-600" : "")}>
+                      {m.deltaNetBakiye === null ? "—" : `${m.deltaNetBakiye > 0 ? "▲" : m.deltaNetBakiye < 0 ? "▼" : ""} ${kisaTutar(Math.abs(m.deltaNetBakiye))}`}
+                    </td>
+                    <td className="px-5 py-3 text-[12px] leading-snug text-muted-foreground">{m.neden}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <MusteriDrillDown musteriId={drillId} onClose={() => setDrillId(null)} />
     </div>
   );
 }
