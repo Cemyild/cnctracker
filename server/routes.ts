@@ -131,6 +131,7 @@ import { parseMizanXlsx } from "./mizanParser";
 import { benzerlikSkoru, ESLESME_AUTO_ESIK, ESLESME_ONERI_ESIK } from "./eslestirme";
 import {
   netBakiye, gecikme, isAktivitesiAcigi, bakiyeFaturaAcigi, riskProfili,
+  odemeOrani, firmaSegmenti, nedenCumlesi,
   type RiskEsikleri,
 } from "@shared/tahsilatHesaplari";
 import { type InsertMusteri, type InsertMizanYukleme, type InsertMizanBakiye, type InsertEslestirmeOneri, musteriler, mizanEslestirmeOnerileri } from "@shared/schema";
@@ -1982,6 +1983,24 @@ export async function registerRoutes(
         ayarlar.faturaPenceresi,
       );
 
+      // Önceki mizan (yalnız AYNI YIL — mizan yıl başında sıfırlanır, DEVİR=0)
+      const tumMizanlar = await storage.getMizanYuklemeleri(); // mizanTarihi desc
+      const oncekiMizan = tumMizanlar.find((x) =>
+        x.mizanTarihi < mizan.mizanTarihi &&
+        x.mizanTarihi.slice(0, 4) === mizan.mizanTarihi.slice(0, 4)
+      ) ?? null;
+      const oncekiBakiyeMap = new Map<string, (typeof bakiyeler)[number]>();
+      if (oncekiMizan) {
+        for (const ob of await storage.getEnSonBakiyelerByMizan(oncekiMizan.id)) {
+          oncekiBakiyeMap.set(ob.musteriId, ob);
+        }
+      }
+      const mizanAyNo = Math.max(1, parseInt(refTarih.slice(5, 7), 10) || 1);
+      const segmentEsikleri = {
+        odemeOraniEsik: ayarlar.odemeOraniEsik,
+        eskiOdemeEsik: ayarlar.eskiOdemeEsik,
+      };
+
       // Her bakiye için risk hesapla
       const detaylar = bakiyeler.map((b) => {
         const m = musteriMap.get(b.musteriId);
@@ -1991,10 +2010,10 @@ export async function registerRoutes(
         const gec = gecikme(b.sonAlacakTarihi, refTarih);
         const isAcik = isAktivitesiAcigi(b.sonBorcTarihi, b.sonAlacakTarihi);
         // Müşterinin tüm gümrük unvanlarının toplamı
-        let son90 = 0, yillik = 0;
+        let son90 = 0, yillik = 0, ytdCiro = 0, ytdIslemSayisi = 0;
         for (const u of (m.gumrukFirmaUnvanlari || [])) {
           const f = faturaMap.get(u);
-          if (f) { son90 += f.son90; yillik += f.yillik; }
+          if (f) { son90 += f.son90; yillik += f.yillik; ytdCiro += f.ytdCiro; ytdIslemSayisi += f.ytdIslemSayisi; }
         }
         const bfa = bakiyeFaturaAcigi(nb, son90);
         const risk = riskProfili({
@@ -2004,6 +2023,32 @@ export async function registerRoutes(
           bakiyeFaturaAcikYuzde: bfa.acikYuzde,
           yillikFaturaToplami: yillik,
           esikler,
+        });
+        // Aksiyon Merkezi sinyalleri
+        const borcNum = Number(b.borc || 0);
+        const alacakNum = Number(b.alacak || 0);
+        const oran = odemeOrani(borcNum, alacakNum);
+        const eslesmemis = (m.gumrukFirmaUnvanlari || []).length === 0;
+        const islemAyOrt = eslesmemis ? null : ytdIslemSayisi / mizanAyNo;
+        // Eşleşmemiş firmada hacim göstergesi mizan BORÇ toplamıdır
+        const kazandiriyor = (eslesmemis ? borcNum : ytdCiro) >= Number(ayarlar.ciroEsik);
+        const onceki = oncekiBakiyeMap.get(b.musteriId);
+        const deltaNetBakiye = onceki
+          ? nb - netBakiye({ sonBakiye: Number(onceki.sonBakiye || 0), sonBakiyeBA: onceki.sonBakiyeBA || "B" })
+          : null;
+        const donemOdeme = onceki ? alacakNum - Number(onceki.alacak || 0) : null;
+        const donemFatura = onceki ? borcNum - Number(onceki.borc || 0) : null;
+        const segment = firmaSegmenti({ netBakiye: nb, odemeOrani: oran, gecikme: gec, kazandiriyor, esikler: segmentEsikleri });
+        const hicOdemeYok = borcNum > 0 && alacakNum === 0;
+        const neden = nedenCumlesi({
+          gecikme: gec,
+          odemeOrani: oran,
+          hicOdemeYok,
+          ytdIslemSayisi: eslesmemis ? null : ytdIslemSayisi,
+          islemAyOrt,
+          deltaNetBakiye,
+          eslesmemis,
+          esikler: segmentEsikleri,
         });
         return {
           musteriId: m.id,
@@ -2020,13 +2065,43 @@ export async function registerRoutes(
           yillikFatura: yillik,
           sonBorcTarihi: b.sonBorcTarihi,
           sonAlacakTarihi: b.sonAlacakTarihi,
+          odemeOrani: oran,
+          ytdCiro,
+          ytdIslemSayisi: eslesmemis ? null : ytdIslemSayisi,
+          islemAyOrt,
+          eslesmemis,
+          kazandiriyor,
+          segment,
+          neden,
+          deltaNetBakiye,
+          donemOdeme,
+          donemFatura,
           ...risk,
         };
       }).filter((x): x is NonNullable<typeof x> => x !== null);
 
       // Özet metrikler
+      const oncekiToplamNetAlacak = oncekiMizan
+        ? Array.from(oncekiBakiyeMap.values())
+            .map((ob) => netBakiye({ sonBakiye: Number(ob.sonBakiye || 0), sonBakiyeBA: ob.sonBakiyeBA || "B" }))
+            .filter((v) => v > 0)
+            .reduce((a, v) => a + v, 0)
+        : null;
+      const toplamNetAlacakSimdi = detaylar.filter((d) => d.netBakiye > 0).reduce((a, d) => a + d.netBakiye, 0);
+      const SEGMENTLER = ["SAGLIKLI", "BUYUK_RISK", "KUCUK_NOTR", "NAKIT_TUZAGI"] as const;
       const ozet = {
-        toplamNetAlacak: detaylar.filter((d) => d.netBakiye > 0).reduce((a, d) => a + d.netBakiye, 0),
+        toplamNetAlacak: toplamNetAlacakSimdi,
+        nakitTuzagiSayisi: detaylar.filter((d) => d.segment === "NAKIT_TUZAGI").length,
+        nakitTuzagiToplam: detaylar.filter((d) => d.segment === "NAKIT_TUZAGI").reduce((a, d) => a + d.netBakiye, 0),
+        buyukRiskSayisi: detaylar.filter((d) => d.segment === "BUYUK_RISK").length,
+        buyukRiskToplam: detaylar.filter((d) => d.segment === "BUYUK_RISK").reduce((a, d) => a + d.netBakiye, 0),
+        oncekiMizanTarihi: oncekiMizan?.mizanTarihi ?? null,
+        toplamNetAlacakDelta: oncekiToplamNetAlacak === null ? null : toplamNetAlacakSimdi - oncekiToplamNetAlacak,
+        segmentDagilim: SEGMENTLER.map((s) => ({
+          segment: s,
+          sayi: detaylar.filter((d) => d.segment === s).length,
+          toplam: detaylar.filter((d) => d.segment === s).reduce((a, d) => a + Math.max(0, d.netBakiye), 0),
+        })),
         vipSayisi: detaylar.filter((d) => d.vipRozeti).length,
         vipBakiyeToplam: detaylar.filter((d) => d.vipRozeti).reduce((a, d) => a + d.netBakiye, 0),
         yavasOdeyiciSayisi: detaylar.filter((d) => d.pattern === "YAVAS_ODEYICI").length,
