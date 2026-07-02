@@ -941,6 +941,8 @@ export const tahsilatAyarlari = pgTable("tahsilat_ayarlari", {
   cokEskiOdemeEsik: integer("cok_eski_odeme_esik").notNull().default(60),
   eksiPozisyonYuzde: integer("eksi_pozisyon_yuzde").notNull().default(20),
   faturaPenceresi: integer("fatura_penceresi").notNull().default(90),
+  ciroEsik: decimal("ciro_esik", { precision: 18, scale: 2 }).notNull().default("500000"),
+  odemeOraniEsik: integer("odeme_orani_esik").notNull().default(60),
   guncellenme: timestamp("guncellenme").defaultNow(),
 });
 

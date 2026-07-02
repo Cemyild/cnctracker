@@ -3194,6 +3194,8 @@ export class DatabaseStorage implements IStorage {
       cokEskiOdemeEsik: 60,
       eksiPozisyonYuzde: 20,
       faturaPenceresi: 90,
+      ciroEsik: "500000",
+      odemeOraniEsik: 60,
     }).returning();
     return created;
   }
