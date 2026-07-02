@@ -1347,11 +1347,29 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
         return String(dateVal);
     };
 
+    // Rapor başlığından dönem tespiti — Ray "Kaynak Poliçe Listesi" gibi
+    // raporların ilk satırında "… 01/06/2026 - 30/06/2026" biçiminde dönem
+    // aralığı bulunur. İki tarih aynı ay/yıla düşüyorsa dönemi döndürür;
+    // tanzim tarihi çözülemeyen satırlar için ay/yıl fallback'i olarak kullanılır.
+    const detectTitlePeriod = (rows: any[][]): { ay: string; yil: number } | null => {
+        for (let r = 0; r < Math.min(rows.length, 5); r++) {
+            for (const cell of rows[r] || []) {
+                if (typeof cell !== "string") continue;
+                const m = cell.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s*-\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                if (m && m[2] === m[5] && m[3] === m[6]) {
+                    return { ay: String(parseInt(m[2])), yil: parseInt(m[3]) };
+                }
+            }
+        }
+        return null;
+    };
+
     // Helper to extract month from dates like "10.01.2025" or Excel serial date.
-    // ayOverride !== "auto" ise tarih çözümlemesi başarısız olduğunda override'a düşer.
-    const extractMonthAndYear = (dateVal: any): {ay: string, yil: number} => {
+    // ayOverride !== "auto" ise tarih çözümlemesi başarısız olduğunda override'a,
+    // o da yoksa rapor başlığından tespit edilen döneme (titlePeriod) düşer.
+    const extractMonthAndYear = (dateVal: any, titlePeriod?: { ay: string; yil: number } | null): {ay: string, yil: number} => {
         const fallback = (): {ay: string, yil: number} =>
-            ayOverride !== "auto" ? { ay: ayOverride, yil } : { ay: "1", yil };
+            ayOverride !== "auto" ? { ay: ayOverride, yil } : (titlePeriod ?? { ay: "1", yil });
 
         if (!dateVal) return fallback();
 
@@ -1398,9 +1416,11 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
 
     // Her field için kabul edilen başlık varyantları (normalize edilmiş hâli)
     const HEADER_SYNONYMS: Record<string, string[]> = {
-        brans:         ["brans", "branch", "branskodu", "branskod"],
+        // "urunadi": Ray "Kaynak Poliçe Listesi" raporunda branş kolonu yok,
+        // ürün adı (NAKLİYAT EMTİA vb.) branş olarak kullanılıyor.
+        brans:         ["brans", "branch", "branskodu", "branskod", "urunadi", "urunad", "urun"],
         policeNo:      ["policeno", "policyno", "policiseno", "polno", "polnumarasi", "polnumara"],
-        sigortali:     ["sigortali", "sigortaliad", "sigortaliunvan", "musteri", "musteriad", "musteriunvan", "insured", "adsoyad", "unvan"],
+        sigortali:     ["sigortaliadi", "sigortali", "sigortaliad", "sigortaliunvan", "musteriadi", "musteri", "musteriad", "musteriunvan", "insured", "adsoyad", "unvan"],
         tanzimTarihi:  ["tanzimtarihi", "tanzim", "duzenleme", "duzenlematarihi", "duzenlematar", "tarih", "policetarihi", "baslangictarihi"],
         netPrim:       ["netprim", "net", "netprimi", "netprimtutari", "primnet"],
         brutPrim:      ["brutprim", "brut", "brutprimi", "brutprimtutari", "primbrut", "toplamprim", "odemekprim"],
@@ -1432,30 +1452,32 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
             const row = rows[r];
             if (!row || row.length < 2) continue;
 
-            const mapping: Record<string, number> = {};
-            // Pass 1: exact match
+            // Skor tabanlı eşleme: birebir eşleşme her zaman kısmi eşleşmeyi,
+            // uzun kısmi eşleşme kısa olanı yener. "İlk eşleşen kolon kazanır"
+            // yaklaşımı Ray listesinde "U Sigortalı No"nun (43. kolon)
+            // "U Sigortalı Adı"ndan (44. kolon) önce sigortali alanını
+            // kapmasına yol açıyordu — sigortalı adı yerine müşteri numarası
+            // kaydediliyordu.
+            const candidates: { field: string; col: number; score: number }[] = [];
             for (let c = 0; c < row.length; c++) {
                 const norm = normalizeHeader(row[c]);
                 if (!norm) continue;
                 for (const [field, list] of Object.entries(synonyms)) {
-                    if (mapping[field] !== undefined) continue;
-                    if (list.includes(norm)) {
-                        mapping[field] = c;
-                        break;
+                    let best = 0;
+                    for (const s of list) {
+                        if (norm === s) best = Math.max(best, 1000 + s.length);
+                        else if (norm.includes(s) || s.includes(norm)) best = Math.max(best, Math.min(s.length, norm.length));
                     }
+                    if (best > 0) candidates.push({ field, col: c, score: best });
                 }
             }
-            // Pass 2: substring match (exact'in kaçırdıklarını yakalar)
-            for (let c = 0; c < row.length; c++) {
-                const norm = normalizeHeader(row[c]);
-                if (!norm) continue;
-                for (const [field, list] of Object.entries(synonyms)) {
-                    if (mapping[field] !== undefined) continue;
-                    if (list.some(s => norm.includes(s) || s.includes(norm))) {
-                        mapping[field] = c;
-                        break;
-                    }
-                }
+            candidates.sort((a, b) => b.score - a.score || a.col - b.col);
+            const mapping: Record<string, number> = {};
+            const usedCols = new Set<number>();
+            for (const cand of candidates) {
+                if (mapping[cand.field] !== undefined || usedCols.has(cand.col)) continue;
+                mapping[cand.field] = cand.col;
+                usedCols.add(cand.col);
             }
 
             const hasRequired = requiredFields.every(f => mapping[f] !== undefined);
@@ -1507,6 +1529,7 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                         return;
                     }
                     const { headerRowIdx, mapping } = detected;
+                    const titlePeriod = detectTitlePeriod(jsonData.slice(0, headerRowIdx + 1));
                     const colOf = (field: keyof typeof HEADER_SYNONYMS, fallback?: number) =>
                         (mapping as any)[field] !== undefined ? (mapping as any)[field] : fallback;
 
@@ -1524,7 +1547,7 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
 
                         const tanzimCol = colOf("tanzimTarihi");
                         const tanzimRaw = tanzimCol !== undefined ? row[tanzimCol] : undefined;
-                        const dateInfo = extractMonthAndYear(tanzimRaw);
+                        const dateInfo = extractMonthAndYear(tanzimRaw, titlePeriod);
 
                         const get = (field: keyof typeof HEADER_SYNONYMS) => {
                             const c = colOf(field);
