@@ -123,14 +123,8 @@ import {
   yillikHesapla,
   belirliAyHesapla,
   PARAMETRELER_2025,
-  bruttenHesapla2026,
-  nettenBruteHesapla2026,
-  PARAMETRELER_2026,
-  type CalisanStatu,
-  type MonthlyCalculation,
-  type MonthlyCalculation2026
 } from "@shared/salaryCalculations";
-import { parseMaasListesiPdf, ayNumaraToKey, type MaasSatiri } from "./bordroParser";
+import { parseUcretPusulasiPdf, ayNumaraToKey } from "./bordroParser";
 import { isGunuSayisi, bakiyeHesapla } from "@shared/izinHesaplari";
 import { type InsertAcilisBakiye, type InsertCalisanIzin } from "@shared/schema";
 import { parseMizanXlsx } from "./mizanParser";
@@ -1249,416 +1243,8 @@ export async function registerRoutes(
   });
 
   // ============================================================================
-  // B ORDRO YÜKLEME VE KAYDETME API'LERİ
+  // HESAPLAMA API'LERİ
   // ============================================================================
-
-  // Bordro PDF/Excel Yükle ve Önizle
-  // Helper to apply branch history.
-  // DB-side DISTINCT ON ile her TC için en son şube tek seferde alınır.
-  const applyBranchHistory = async (newEmployees: any[]) => {
-    try {
-      const branchMap = await storage.getCalisanSubeMap();
-      for (const emp of newEmployees) {
-        if (emp.tcNo && branchMap.has(emp.tcNo)) {
-          emp.sube = branchMap.get(emp.tcNo);
-        }
-      }
-    } catch (e) {
-      console.error("Şube geçmişi uygulanırken hata:", e);
-    }
-    return newEmployees;
-  };
-
-  app.post("/api/bordro/upload", upload.single("excel"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "Dosya yüklenmedi" });
-      }
-
-      // 1. PDF Parsing Logic
-      if (req.file.mimetype === 'application/pdf' || req.file.originalname.toLowerCase().endsWith('.pdf')) {
-        try {
-          const parser = new PDFParse({ data: req.file.buffer });
-          const pdfData = await parser.getText();
-          const text = pdfData.text;
-
-          // Parsing Logic
-          const lines = text.split('\n');
-          const employees: any[] = [];
-
-          let currentEmployee: any = null;
-
-          // Helper to parse Turkish currency "1.234,56" -> 1234.56
-          const parseMoney = (str: string) => {
-            if (!str) return 0;
-            return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
-          };
-
-          let currentOffice = "Merkez";
-
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-
-            // Check for Office Name changes in header lines
-            // Check for Office Name changes in header lines
-            // March PDF: "AKPINAR ... BURSA Merkez" (Merkez Adres might be split)
-            if (line.includes("Merkez Adres") || (line.includes("Merkez") && line.includes("BURSA"))) currentOffice = "Merkez";
-            else if (line.includes("Yönetim") || line.includes("YÖNETİM")) currentOffice = "Yönetim";
-            else if (line.includes("Gemlik")) currentOffice = "Gemlik";
-            else if (line.includes("İstanbul") || line.includes("Istanbul")) currentOffice = "İstanbul";
-
-            // Detect Start of Employee Block: Starts with Date, ends with Name
-            // e.g. "10.01.2025 ... 0 NAME" or "10.01.2025 ... 2,5 NAME"
-            const startsWithDate = /^\d{2}\.\d{2}\.\d{4}/.test(line);
-
-            // Relaxed regex: match ANY digit/symbol chars followed by Name
-            const nameMatch = line.match(/\s+[\d.,]+\s+([A-ZĞÜŞİÖÇ\s]{2,})$/);
-
-            if (startsWithDate && nameMatch) {
-              // Save previous student if exists
-              if (currentEmployee) {
-                employees.push(currentEmployee);
-              }
-
-              // Initialize new employee
-              currentEmployee = {
-                adSoyad: nameMatch[1].trim(),
-                sube: currentOffice,
-                rawLines: []
-              };
-
-              // Try to find Join Date "DD.MM.YYYY" in the same line
-              const dateMatch = line.match(/(\d{2}\.\d{2}\.\d{4})\s+/);
-              if (dateMatch) currentEmployee.isGirisTarihi = dateMatch[1];
-            }
-
-            if (currentEmployee) {
-              // Check for Footer start to prevent massive totals from being included in the last employee
-              if (line.includes("TOPLAM :") || line.includes("TAHAKKUK BİLGİLERİ")) {
-                employees.push(currentEmployee);
-                currentEmployee = null;
-                continue; // Skip the rest of the loop for this line and future lines effectively (as currentEmployee is null)
-              }
-
-              currentEmployee.rawLines.push(line);
-
-              // Try to find TC Identity Number (11 digits) 
-              if (!currentEmployee.tcNo) {
-                const tcMatch = line.match(/^\d{11}$/);
-                if (tcMatch) currentEmployee.tcNo = tcMatch[0];
-              }
-
-              // Try to find Join Date "DD.MM.YYYY"
-              if (!currentEmployee.isGirisTarihi) {
-                const dateMatch = line.match(/(\d{2}\.\d{2}\.\d{4})\s+\d{2}\s+\d{2}/);
-                if (dateMatch) currentEmployee.isGirisTarihi = dateMatch[1];
-              }
-            }
-          }
-          // Push last one
-          if (currentEmployee) employees.push(currentEmployee);
-
-          // Second Pass: Process raw lines to extract financials
-          const parsedData = employees.map(emp => {
-            const allMoney: number[] = [];
-            emp.rawLines.forEach((l: string) => {
-              // Match all numbers like X.XXX,XX
-              const matches = l.match(/\d{1,3}(\.\d{3})*,\d{2}/g);
-              if (matches) {
-                matches.forEach(m => allMoney.push(parseMoney(m)));
-              }
-            });
-
-            // Heuristics:
-            // 1. Find TC line index
-            let tcIndex = -1;
-            for (let i = 0; i < emp.rawLines.length; i++) {
-              if (/^\d{11}$/.test(emp.rawLines[i].trim())) {
-                tcIndex = i;
-                break;
-              }
-            }
-
-            // 2. Brut is locally the first number relative to TC
-            let foundBrut = 0;
-            if (tcIndex !== -1 && tcIndex + 1 < emp.rawLines.length) {
-              // Check next few lines for a valid number
-              // Usually it is immediately next line
-              for (let k = 1; k <= 3; k++) {
-                if (tcIndex + k >= emp.rawLines.length) break;
-                const valStr = emp.rawLines[tcIndex + k];
-                const moneys = valStr.match(/\d{1,3}(\.\d{3})*,\d{2}/g);
-                if (moneys && moneys.length > 0) {
-                  foundBrut = parseMoney(moneys[0]);
-                  break;
-                }
-              }
-            }
-
-            // 3. Fallback to Max if not found, but prefer foundBrut if available
-            // Note: Total Cost is typically the MAX in the list, so picking MAX as Brut is incorrect if Total Cost is present.
-            // If foundBrut is available, we use it.
-            let brut = foundBrut;
-            if (!brut) {
-              // Heuristic Fallback: 2nd largest value? Or just Max if no Total Cost?
-              const maxVal = Math.max(...allMoney, 0);
-              const possibleBrut = allMoney.find(m => m < maxVal && m > maxVal * 0.4);
-              brut = possibleBrut || maxVal; // Risky but fallback
-            }
-
-            // 4. Net is the LAST value that is > 30% of Brut
-            // (Filters out small artifacts at the end)
-            let net = 0;
-            for (let i = allMoney.length - 1; i >= 0; i--) {
-              // Net must be smaller than Brut usually (unless tax rebate etc makes it distinct? No)
-              if (allMoney[i] > brut * 0.30 && (allMoney[i] < brut || brut === 0)) {
-                net = allMoney[i];
-                break;
-              }
-            }
-            if (!net) net = allMoney.length > 0 ? allMoney[allMoney.length - 1] : 0;
-
-            // Status Logic determined by 05510 code and specific names
-            const managers = [
-              "NEŞE YILDIRIM", "CENGİZ ÜNER", "COŞKUN YILDIRIM",
-              "ÖZCAN EREN", "ÖZGÜR KÖSE", "CEM YILDIRIM", "ENİS ÜNER"
-            ];
-
-            let statu = "NORMAL";
-
-            // 1. Check Manager List
-            if (managers.some(m => emp.adSoyad.includes(m))) {
-              statu = "YÖNETİCİ";
-            } else {
-              // 2. Check Kanun No in raw lines
-              const hasNormalCode = emp.rawLines.some((l: string) => l.includes("05510"));
-              const hasRetiredCode = emp.rawLines.some((l: string) => l.includes("00000"));
-
-              if (hasRetiredCode) statu = "EMEKLİ";
-              else if (hasNormalCode) statu = "NORMAL";
-            }
-            // Determine month and year from req.body (from formData) or default
-            const monthVal = req.body.ay ? parseInt(req.body.ay) : 1;
-            const yilVal = req.body.yil ? parseInt(req.body.yil) : 2026;
-
-            // 2026+ için yeni detaylı hesaplama sistemi
-            if (yilVal >= 2026) {
-              const hesaplama = bruttenHesapla2026(
-                brut,
-                statu as CalisanStatu,
-                monthVal,
-                0, // Önizlemede kümülatif matrah 0, kayıtta DB'den çekilecek
-                true // Hazine teşviki var
-              );
-
-              return {
-                tcNo: emp.tcNo || "",
-                adSoyad: emp.adSoyad,
-                statu: statu,
-                sube: emp.sube || "Merkez",
-                isGirisTarihi: emp.isGirisTarihi || "",
-
-                brutUcret: brut,
-                netUcret: net, // PDF'den alınan net (karşılaştırma için)
-                hesaplananNet: hesaplama.netMaas, // Brütten hesaplanan net
-                sgkMatrahi: hesaplama.sgkPrimMatrahi,
-                gelirVergisiMatrahi: hesaplama.gelirVergisiMatrahi,
-                kumulatifVergiMatrahi: hesaplama.kumulatifGelirVergisiMatrahi,
-                gelirVergisi: hesaplama.netGelirVergisi,
-                damgaVergisi: hesaplama.netDamgaVergisi,
-                sigortaKesintisi: hesaplama.sgkIsciPrimi,
-                issizlikSigortasiKesintisi: hesaplama.issizlikIsciPrimi,
-                isverenSgkPayi: hesaplama.sgkIsverenPrimi,
-                isverenIssizlikPayi: hesaplama.issizlikIsverenPrimi,
-                toplamIsverenMaliyeti: hesaplama.toplamIsverenMaliyeti
-              };
-            }
-
-            // 2025 ve öncesi - ESKİ HESAPLAMA AYNEN KALACAK
-            const workerSgkShare = Number((brut - net).toFixed(2));
-            let employerSgkShare = 0;
-
-            if (statu === "NORMAL") {
-              const rate = (monthVal > 1) ? 0.1875 : 0.1775;
-              employerSgkShare = Number((brut * rate).toFixed(2));
-            } else if (statu === "EMEKLİ") {
-              employerSgkShare = Number((brut * 0.2475).toFixed(2));
-            } else if (statu === "YÖNETİCİ") {
-              employerSgkShare = 0;
-            }
-
-            return {
-              tcNo: emp.tcNo || "",
-              adSoyad: emp.adSoyad,
-              statu: statu,
-              sube: emp.sube || "Merkez",
-              isGirisTarihi: emp.isGirisTarihi || "",
-
-              brutUcret: brut,
-              netUcret: net,
-              sgkMatrahi: brut,
-              gelirVergisiMatrahi: 0,
-              kumulatifVergiMatrahi: 0,
-              gelirVergisi: 0,
-              damgaVergisi: 0,
-              sigortaKesintisi: workerSgkShare,
-              issizlikSigortasiKesintisi: 0,
-              isverenSgkPayi: employerSgkShare,
-              isverenIssizlikPayi: 0,
-              toplamIsverenMaliyeti: Number((brut + employerSgkShare).toFixed(2))
-            };
-          });
-
-          const withHistory = await applyBranchHistory(parsedData);
-          return res.json(withHistory);
-
-        } catch (error) {
-          console.error("PDF Parsing error:", error);
-          return res.status(500).json({ error: "PDF işlenirken hata oluştu: " + (error as Error).message });
-        }
-      }
-
-      // 2. Excel Parsing Logic (Fallback)
-      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(sheet) as any[];
-
-      if (data.length === 0) {
-        return res.status(400).json({ error: "Dosya boş" });
-      }
-
-      const parsedData = data.map((row: any) => {
-        const parseNum = (val: any) => {
-          if (typeof val === 'number') return val;
-          if (typeof val === 'string') {
-            let clean = val.replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '');
-            return parseFloat(clean) || 0;
-          }
-          return 0;
-        };
-
-        return {
-          tcNo: String(row["TC No"] || row["TC"] || row["T.C."] || row["tcNo"] || ""),
-          adSoyad: String(row["Ad Soyad"] || row["Adı Soyadı"] || row["Personel Adı"] || row["adSoyad"] || ""),
-          statu: String(row["Statü"] || row["Statu"] || row["Durum"] || "NORMAL").toUpperCase(),
-          sube: String(row["Şube"] || row["Sube"] || row["Bölüm"] || "Bursa"),
-          isGirisTarihi: String(row["İşe Giriş"] || row["İşe Giriş Tarihi"] || row["Giriş Tarihi"] || ""),
-
-          brutUcret: parseNum(row["Brüt Ücret"] || row["Brüt"] || row["Aylık Brüt"] || 0),
-          netUcret: parseNum(row["Net Ücret"] || row["Net"] || row["Aylık Net"] || 0),
-          sgkMatrahi: parseNum(row["SGK Matrahı"] || row["SGK Matrah"] || 0),
-          gelirVergisiMatrahi: parseNum(row["GV Matrahı"] || row["Gelir Vergisi Matrahı"] || 0),
-          kumulatifVergiMatrahi: parseNum(row["Kümülatif GV Matrahı"] || row["Kümülatif Vergi Matrahı"] || 0),
-          gelirVergisi: parseNum(row["Gelir Vergisi"] || row["Kesilen GV"] || 0),
-          damgaVergisi: parseNum(row["Damga Vergisi"] || row["Kesilen DV"] || 0),
-          sigortaKesintisi: parseNum(row["SGK İşçi Payı"] || row["İşçi SGK"] || 0),
-          issizlikSigortasiKesintisi: parseNum(row["İşsizlik İşçi Payı"] || row["İşçi İşsizlik"] || 0),
-          isverenSgkPayi: parseNum(row["SGK İşveren Payı"] || row["İşveren SGK"] || 0),
-          isverenIssizlikPayi: parseNum(row["İşsizlik İşveren Payı"] || row["İşveren İşsizlik"] || 0),
-          toplamIsverenMaliyeti: parseNum(row["Toplam İşveren Maliyeti"] || row["İşveren Maliyeti"] || 0)
-        };
-      }).filter(p => p.adSoyad && p.adSoyad.length > 2);
-
-      const withHistory = await applyBranchHistory(parsedData);
-      res.json(withHistory);
-    } catch (error) {
-      console.error("Bordro yükleme hatası:", error);
-      res.status(500).json({ error: "Dosya işlenirken hata oluştu" });
-    }
-  });
-
-  // Bordro Verilerini Kaydet (Toplu)
-  app.post("/api/bordro/save", async (req, res) => {
-    try {
-      const { ay, yil, data } = req.body;
-
-      if (!ay || !yil || !data || !Array.isArray(data)) {
-        return res.status(400).json({ error: "Geçersiz veri formatı" });
-      }
-
-      const ayNum = parseInt(ay);
-      const yilNum = parseInt(yil);
-
-      // 1. O ay ve yıla ait eski kayıtları sil
-      await storage.deleteCalisanlar(String(ay), yilNum);
-
-      // 2026+ için yeni hesaplama sistemi
-      if (yilNum >= 2026) {
-        // Önceki ayların verilerini çek (kümülatif matrah hesabı için)
-        const tumOncekiVeriler = await storage.getCalisanlar(undefined, yilNum);
-
-        // TC bazında kümülatif matrah hesapla
-        const kumulatifMatrahlar: { [tcNo: string]: number } = {};
-        for (const kayit of tumOncekiVeriler) {
-          const kayitAy = parseInt(kayit.ay);
-          if (kayitAy < ayNum) {
-            const tcNo = kayit.tcNo;
-            const matrah = Number(kayit.gelirVergisiMatrahi || 0);
-            kumulatifMatrahlar[tcNo] = (kumulatifMatrahlar[tcNo] || 0) + matrah;
-          }
-        }
-
-        // Her çalışan için detaylı hesaplama yap
-        const calisanlarVerisi = data.map((item: any) => {
-          const tcNo = item.tcNo;
-          const kumulatifMatrah = kumulatifMatrahlar[tcNo] || 0;
-          const brutUcret = Number(item.brutUcret || 0);
-          const statu = (item.statu || "NORMAL") as CalisanStatu;
-
-          // 2026 hesaplama fonksiyonunu kullan
-          const hesaplama = bruttenHesapla2026(
-            brutUcret,
-            statu,
-            ayNum,
-            kumulatifMatrah,
-            true // Hazine teşviki var
-          );
-
-          return {
-            tcNo: item.tcNo,
-            adSoyad: item.adSoyad,
-            statu: item.statu,
-            sube: item.sube || "Merkez",
-            isGirisTarihi: item.isGirisTarihi || "",
-            ay: String(ay),
-            yil: yilNum,
-
-            brutUcret: String(brutUcret.toFixed(2)),
-            netUcret: String(hesaplama.netMaas.toFixed(2)),
-            sgkMatrahi: String(hesaplama.sgkPrimMatrahi.toFixed(2)),
-            gelirVergisiMatrahi: String(hesaplama.gelirVergisiMatrahi.toFixed(2)),
-            kumulatifVergiMatrahi: String((kumulatifMatrah + hesaplama.gelirVergisiMatrahi).toFixed(2)),
-            gelirVergisi: String(hesaplama.netGelirVergisi.toFixed(2)),
-            damgaVergisi: String(hesaplama.netDamgaVergisi.toFixed(2)),
-            sigortaKesintisi: String(hesaplama.sgkIsciPrimi.toFixed(2)),
-            issizlikSigortasiKesintisi: String(hesaplama.issizlikIsciPrimi.toFixed(2)),
-            isverenSgkPayi: String(hesaplama.sgkIsverenPrimi.toFixed(2)),
-            isverenIssizlikPayi: String(hesaplama.issizlikIsverenPrimi.toFixed(2)),
-            toplamIsverenMaliyeti: String(hesaplama.toplamIsverenMaliyeti.toFixed(2))
-          };
-        });
-
-        const saved = await storage.insertCalisanlar(calisanlarVerisi);
-        return res.json({ success: true, count: saved.length });
-      }
-
-      // 2025 ve öncesi - ESKİ HESAPLAMA AYNEN KALACAK
-      const calisanlarVerisi = data.map((item: any) => ({
-        ...item,
-        ay: String(ay),
-        yil: yilNum,
-      }));
-
-      const saved = await storage.insertCalisanlar(calisanlarVerisi);
-
-      res.json({ success: true, count: saved.length });
-    } catch (error) {
-      console.error("Bordro kaydetme hatası:", error);
-      res.status(500).json({ error: "Veriler kaydedilirken hata oluştu" });
-    }
-  });
-
 
   // Hesaplama parametrelerini getir
   app.get("/api/calculations/parameters", async (_req, res) => {
@@ -1684,108 +1270,55 @@ export async function registerRoutes(
   });
 
   // ============================================================================
-  // BORDRO MAAŞ LİSTESİ (PDF parse → calisanlar upsert)
+  // BORDRO YÜKLE — ÜCRET PUSULASI (tek yükleme akışı)
+  // "ÜCRET BORDROSU, PUANTAJ CETVELİ ve ÜCRET PUSULASI" PDF'i: her sayfa 1 kişi.
+  // Tüm maaş değerleri belgeden okunur; sadece işveren SGK/işsizlik payı
+  // sigorta matrahı × yasal oran − belgedeki teşvik tutarından türetilir.
   // ============================================================================
 
-  // PDF'i yükle, parse et, önizleme döner. Henüz DB'ye yazma yapmaz.
-  // İstemci sonuçları gözden geçirip /api/bordro/maas-listesi/save'e gönderir.
-  app.post("/api/bordro/maas-listesi/upload", uploadBordroMemory.single("pdf"), async (req, res) => {
+  // PDF'i yükle, parse et, önizleme döner. Henüz DB'ye yazmaz.
+  app.post("/api/bordro/pusula/upload", uploadBordroMemory.single("pdf"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "PDF dosyası gönderilmedi." });
       if (!req.file.mimetype.includes("pdf")) {
         return res.status(400).json({ error: "Sadece PDF kabul edilir." });
       }
 
-      const parsed = await parseMaasListesiPdf(req.file.buffer);
-
-      // Her satır için brüt + işveren payını arkada hesapla.
-      // Kümülatif matrah: önceki ayların DB'deki gelirVergisiMatrahi toplamı.
-      const ayKey = ayNumaraToKey(parsed.ay);
-      const ayNum = parsed.ay;
-      const yilNum = parsed.yil;
-
-      // Aynı yılın tüm önceki ay verilerini tek seferde çek (N+1 önleme)
-      const tumOnceki = await storage.getCalisanlar(undefined, yilNum);
-      const kumulatifMap: Record<string, number> = {};
-      for (const k of tumOnceki) {
-        const ay = parseInt(k.ay, 10);
-        if (Number.isFinite(ay) && ay < ayNum) {
-          kumulatifMap[k.tcNo] = (kumulatifMap[k.tcNo] || 0) + Number(k.gelirVergisiMatrahi || 0);
-        }
-      }
-
-      const onizleme = parsed.tumSatirlar.map((s) => {
-        const kumulatif = kumulatifMap[s.tcNo] || 0;
-        const brut = nettenBruteHesapla2026(s.netTutar, s.statu, ayNum, kumulatif, true);
-        const detay = bruttenHesapla2026(brut, s.statu, ayNum, kumulatif, true);
-
-        return {
-          tcNo: s.tcNo,
-          adSoyad: s.adSoyad,
-          sube: s.sube,
-          statu: s.statu,
-          iban: s.iban,
-          telefon: s.telefon,
-
-          netUcret: s.netTutar, // PDF'ten gelen kesin net
-          brutUcret: brut,
-          hesaplananNet: detay.netMaas, // doğrulama için
-          fark: Math.abs(detay.netMaas - s.netTutar),
-
-          sgkMatrahi: detay.sgkPrimMatrahi,
-          gelirVergisiMatrahi: detay.gelirVergisiMatrahi,
-          kumulatifVergiMatrahi: kumulatif,
-          gelirVergisi: detay.netGelirVergisi,
-          damgaVergisi: detay.netDamgaVergisi,
-          sigortaKesintisi: detay.sgkIsciPrimi,
-          issizlikSigortasiKesintisi: detay.issizlikIsciPrimi,
-          isverenSgkPayi: detay.sgkIsverenPrimi,
-          isverenIssizlikPayi: detay.issizlikIsverenPrimi,
-          toplamIsverenMaliyeti: detay.toplamIsverenMaliyeti,
-        };
-      });
+      const parsed = await parseUcretPusulasiPdf(req.file.buffer);
 
       // Şube bazlı özet
       const subeOzet: Record<string, {
         kisi: number; net: number; brut: number; isverenMaliyeti: number;
       }> = {};
-      for (const o of onizleme) {
-        const k = o.sube || "Bilinmiyor";
+      for (const s of parsed.satirlar) {
+        const k = s.sube || "Bilinmiyor";
         if (!subeOzet[k]) subeOzet[k] = { kisi: 0, net: 0, brut: 0, isverenMaliyeti: 0 };
         subeOzet[k].kisi++;
-        subeOzet[k].net += o.netUcret;
-        subeOzet[k].brut += o.brutUcret;
-        subeOzet[k].isverenMaliyeti += o.toplamIsverenMaliyeti;
+        subeOzet[k].net += s.netUcret;
+        subeOzet[k].brut += s.brutToplam;
+        subeOzet[k].isverenMaliyeti += s.toplamIsverenMaliyeti;
       }
 
       res.json({
-        ay: ayNum,
-        ayKey,
-        yil: yilNum,
+        ay: parsed.ay,
+        ayKey: ayNumaraToKey(parsed.ay),
+        yil: parsed.yil,
         toplamKisi: parsed.toplamKisi,
-        pdfToplamNet: parsed.toplamNet,
-        sayfalar: parsed.sayfalar.map((s) => ({
-          sayfaNo: s.sayfaNo,
-          sube: s.sube,
-          statu: s.statu,
-          firmaUnvani: s.firmaUnvani,
-          sgkIsyeriNo: s.sgkIsyeriNo,
-          adres: s.adres,
-          kisi: s.satirlar.length,
-          toplam: s.toplam,
-        })),
+        toplamNet: parsed.toplamNet,
+        toplamBrut: parsed.toplamBrut,
+        toplamIsverenMaliyeti: parsed.toplamIsverenMaliyeti,
         subeOzet,
-        onizleme,
+        atlananSayfalar: parsed.atlananSayfalar,
+        onizleme: parsed.satirlar,
       });
     } catch (error) {
-      console.error("Maaş Listesi parse hatası:", error);
+      console.error("Ücret Pusulası parse hatası:", error);
       res.status(400).json({ error: (error as Error).message || "PDF işlenirken hata oluştu." });
     }
   });
 
-  // Onaylanmış önizleme verisini calisanlar tablosuna upsert eder.
-  // Aynı PDF'i ayrıca arşive de kaydeder (opsiyonel: ham PDF base64).
-  app.post("/api/bordro/maas-listesi/save", uploadBordroMemory.single("pdf"), async (req, res) => {
+  // Onaylanmış önizleme verisini calisanlar tablosuna upsert eder; PDF'i arşive yazar.
+  app.post("/api/bordro/pusula/save", uploadBordroMemory.single("pdf"), async (req, res) => {
     try {
       const payload = JSON.parse(req.body.payload || "{}");
       const { ay, yil, kayitlar } = payload as {
@@ -1798,20 +1331,19 @@ export async function registerRoutes(
 
       const ayKey = ayNumaraToKey(ay);
 
-      // Çalışan kayıtlarını upsert et
       const insertVerileri = kayitlar.map((k) => ({
         tcNo: String(k.tcNo),
         adSoyad: String(k.adSoyad),
         isGirisTarihi: k.isGirisTarihi || null,
-        brutUcret: String(k.brutUcret ?? 0),
+        brutUcret: String(k.brutToplam ?? k.brutUcret ?? 0),
         netUcret: String(k.netUcret ?? 0),
-        sgkMatrahi: String(k.sgkMatrahi ?? 0),
-        gelirVergisiMatrahi: String(k.gelirVergisiMatrahi ?? 0),
-        kumulatifVergiMatrahi: String(k.kumulatifVergiMatrahi ?? 0),
+        sgkMatrahi: String(k.sigortaMatrahi ?? 0),
+        gelirVergisiMatrahi: String(k.vergiMatrahi ?? 0),
+        kumulatifVergiMatrahi: String(k.devredenVergiMatrahi ?? 0),
         gelirVergisi: String(k.gelirVergisi ?? 0),
         damgaVergisi: String(k.damgaVergisi ?? 0),
-        sigortaKesintisi: String(k.sigortaKesintisi ?? 0),
-        issizlikSigortasiKesintisi: String(k.issizlikSigortasiKesintisi ?? 0),
+        sigortaKesintisi: String(k.sgkIsciPrimi ?? 0),
+        issizlikSigortasiKesintisi: String(k.issizlikIsciPrimi ?? 0),
         isverenSgkPayi: String(k.isverenSgkPayi ?? 0),
         isverenIssizlikPayi: String(k.isverenIssizlikPayi ?? 0),
         toplamIsverenMaliyeti: String(k.toplamIsverenMaliyeti ?? 0),
@@ -1823,15 +1355,15 @@ export async function registerRoutes(
 
       const sonuc = await storage.upsertCalisanlarToplu(insertVerileri);
 
-      // PDF'i de arşive yaz (varsa)
+      // PDF'i arşive yaz (varsa)
       let bordroDosyaId: string | null = null;
       if (req.file) {
         const fixedName = fixUploadFilename(req.file.originalname);
         const archiveDir = path.join(process.cwd(), "uploads", "bordro", String(yil), ayKey);
         if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
-        // Filesystem güvenliği için sanitize et (UTF-8 saklı, sadece path-tehlikeli karakterler kaldırılır)
+        // Filesystem güvenliği için sanitize (UTF-8 saklı, sadece path-tehlikeli karakterler kaldırılır)
         const safeForFs = fixedName.replace(/[\\/:*?"<>|]/g, "_");
-        const filename = `maas-listesi-${Date.now()}-${safeForFs}`;
+        const filename = `pusula-${Date.now()}-${safeForFs}`;
         const filepath = path.join(archiveDir, filename);
         await fs.promises.writeFile(filepath, req.file.buffer);
 
@@ -1841,7 +1373,7 @@ export async function registerRoutes(
           filepath,
           sizeBytes: req.file.size,
           md5Hash: md5,
-          tip: "maas-listesi",
+          tip: "pusula",
           ay,
           yil,
           kayitSayisi: kayitlar.length,
@@ -1857,7 +1389,7 @@ export async function registerRoutes(
         bordroDosyaId,
       });
     } catch (error) {
-      console.error("Maaş Listesi kaydetme hatası:", error);
+      console.error("Ücret Pusulası kaydetme hatası:", error);
       res.status(500).json({ error: (error as Error).message || "Kaydedilirken hata oluştu." });
     }
   });

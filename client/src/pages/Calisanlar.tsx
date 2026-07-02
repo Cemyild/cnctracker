@@ -232,18 +232,11 @@ export default function Calisanlar() {
 
 
 
-    // Upload Dialog State (eski Bordro Yükle — Excel/PDF heuristic)
-    const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
-    const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-    const [previewData, setPreviewData] = useState<any[]>([]);
-    const [isUploading, setIsUploading] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-
-    // Maaş Listesi PDF parse state'leri (yeni, sağlam yöntem)
-    const [maasListesiOpen, setMaasListesiOpen] = useState(false);
-    const [maasListesiFile, setMaasListesiFile] = useState<File | null>(null);
-    const [maasListesiPreview, setMaasListesiPreview] = useState<any | null>(null);
-    const [maasListesiBusy, setMaasListesiBusy] = useState(false);
+    // Bordro Yükle — Ücret Pusulası PDF state'leri (tek yükleme akışı)
+    const [pusulaOpen, setPusulaOpen] = useState(false);
+    const [pusulaFile, setPusulaFile] = useState<File | null>(null);
+    const [pusulaPreview, setPusulaPreview] = useState<any | null>(null);
+    const [pusulaBusy, setPusulaBusy] = useState(false);
 
     // Bordro Arşivi state'leri (sadece dosya saklama)
     const [arsivOpen, setArsivOpen] = useState(false);
@@ -373,115 +366,59 @@ export default function Calisanlar() {
     const isYonetici = selectedPerson?.statu === 'YÖNETİCİ';
     const isEmekli = selectedPerson?.statu === 'EMEKLİ';
 
-    // File Upload Handler
-    const handleFileUpload = async () => {
-        if (!uploadedFile) return;
-
-        setIsUploading(true);
-        const formData = new FormData();
-        formData.append("excel", uploadedFile);
-        formData.append("ay", selectedAy);
-
-        try {
-            const response = await fetch("/api/bordro/upload", {
-                method: "POST",
-                body: formData
-            });
-
-            if (!response.ok) throw new Error("Yükleme başarısız");
-
-            const data = await response.json();
-            setPreviewData(data);
-        } catch (error) {
-            console.error(error);
-            toast({ variant: "destructive", title: "Hata", description: "Dosya yüklenirken hata oluştu" });
-        } finally {
-            setIsUploading(false);
-        }
-    };
-
-    const handleSaveBordro = async () => {
-        if (previewData.length === 0) return;
-
-        setIsSaving(true);
-        try {
-            const response = await fetch("/api/bordro/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    ay: selectedAy === "toplam" ? "1" : selectedAy,
-                    yil: selectedYil,
-                    data: previewData
-                })
-            });
-
-            if (!response.ok) throw new Error("Kaydetme başarısız");
-
-            toast({ title: "Başarılı", description: "Bordro kaydedildi." });
-            setUploadDialogOpen(false);
-            setUploadedFile(null);
-            setPreviewData([]);
-            fetchCalisanlar();
-        } catch (error) {
-            console.error(error);
-            toast({ variant: "destructive", title: "Hata", description: "Kaydedilirken hata oluştu" });
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
     // ========================================================================
-    // MAAŞ LİSTESİ PDF (yeni sağlam yöntem)
+    // BORDRO YÜKLE — ÜCRET PUSULASI PDF (tek yükleme akışı)
+    // Tüm değerler belgeden okunur; işveren payları arkada türetilir.
     // ========================================================================
 
-    const handleMaasListesiUpload = async () => {
-        if (!maasListesiFile) return;
-        setMaasListesiBusy(true);
-        setMaasListesiPreview(null);
+    const handlePusulaUpload = async () => {
+        if (!pusulaFile) return;
+        setPusulaBusy(true);
+        setPusulaPreview(null);
         const fd = new FormData();
-        fd.append("pdf", maasListesiFile);
+        fd.append("pdf", pusulaFile);
         try {
-            const res = await fetch("/api/bordro/maas-listesi/upload", { method: "POST", body: fd });
+            const res = await fetch("/api/bordro/pusula/upload", { method: "POST", body: fd });
             const json = await res.json();
             if (!res.ok) throw new Error(json.error || "Önizleme hatası");
-            setMaasListesiPreview(json);
+            setPusulaPreview(json);
             toast({ title: "Parse başarılı", description: `${json.toplamKisi} kişi okundu — ${ayNumarasiToAd(json.ay)} ${json.yil}` });
         } catch (err: any) {
             toast({ variant: "destructive", title: "Hata", description: err.message });
         } finally {
-            setMaasListesiBusy(false);
+            setPusulaBusy(false);
         }
     };
 
-    const handleMaasListesiSave = async () => {
-        if (!maasListesiPreview || !maasListesiFile) return;
-        setMaasListesiBusy(true);
+    const handlePusulaSave = async () => {
+        if (!pusulaPreview || !pusulaFile) return;
+        setPusulaBusy(true);
         const fd = new FormData();
-        fd.append("pdf", maasListesiFile);
+        fd.append("pdf", pusulaFile);
         fd.append("payload", JSON.stringify({
-            ay: maasListesiPreview.ay,
-            yil: maasListesiPreview.yil,
-            kayitlar: maasListesiPreview.onizleme,
+            ay: pusulaPreview.ay,
+            yil: pusulaPreview.yil,
+            kayitlar: pusulaPreview.onizleme,
         }));
         try {
-            const res = await fetch("/api/bordro/maas-listesi/save", { method: "POST", body: fd });
+            const res = await fetch("/api/bordro/pusula/save", { method: "POST", body: fd });
             const json = await res.json();
             if (!res.ok) throw new Error(json.error || "Kaydetme hatası");
             toast({
                 title: "Kaydedildi",
                 description: `${json.inserted} yeni, ${json.updated} güncelleme — toplam ${json.toplam} kayıt`,
             });
-            setMaasListesiOpen(false);
-            setMaasListesiFile(null);
-            setMaasListesiPreview(null);
+            setPusulaOpen(false);
+            setPusulaFile(null);
+            setPusulaPreview(null);
             // Eğer yüklenen ay/yıl şu an ekrandaysa veriyi tazele
-            if (maasListesiPreview.ay === parseInt(selectedAy) && maasListesiPreview.yil === selectedYil) {
+            if (pusulaPreview.ay === parseInt(selectedAy) && pusulaPreview.yil === selectedYil) {
                 fetchCalisanlar();
             }
         } catch (err: any) {
             toast({ variant: "destructive", title: "Hata", description: err.message });
         } finally {
-            setMaasListesiBusy(false);
+            setPusulaBusy(false);
         }
     };
 
@@ -809,30 +746,21 @@ export default function Calisanlar() {
                                     </DropdownMenu>
 
                                     <Button
-                                        onClick={() => setMaasListesiOpen(true)}
+                                        onClick={() => setPusulaOpen(true)}
                                         className="h-[38px] rounded-[9px] border-0 bg-emerald-600 text-white hover:bg-emerald-700"
-                                        title="Maaş Listesi PDF (sadece net ödemeler) - sağlam parser, brüt arkada hesaplanır"
+                                        title="Ücret Pusulası PDF yükle — tüm değerler belgeden okunur"
                                     >
                                         <FileUp className="mr-2 h-4 w-4" />
-                                        Maaş Listesi (PDF)
+                                        Bordro Yükle
                                     </Button>
                                     <Button
                                         onClick={() => setArsivOpen(true)}
                                         variant="outline"
                                         className="h-[38px] rounded-[9px]"
-                                        title="Detaylı Bordro PDF arşivi - parse yok, denetim için saklanır"
+                                        title="Yüklenmiş PDF arşivi — denetim için saklanır, indirilebilir"
                                     >
                                         <FileText className="mr-2 h-4 w-4" />
-                                        Bordro Arşivi
-                                    </Button>
-                                    <Button
-                                        onClick={() => setUploadDialogOpen(true)}
-                                        variant="outline"
-                                        className="h-[38px] rounded-[9px] opacity-80"
-                                        title="Eski yöntem (Excel veya bordro PDF heuristic parse)"
-                                    >
-                                        <Upload className="mr-2 h-4 w-4" />
-                                        Bordro Yükle (Eski)
+                                        Arşiv
                                     </Button>
                                 </>
                             )}
@@ -1058,92 +986,19 @@ export default function Calisanlar() {
                     )}
                 </DialogContent>
             </Dialog>
-            {/* Upload Dialog */}
-            <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-                <DialogContent className="sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>Bordro Yükle - {ayNumarasiToAd(parseInt(selectedAy))} {selectedYil}</DialogTitle>
-                    </DialogHeader>
-
-                    <div className="space-y-6 py-4">
-                        {/* File Input */}
-                        <div className="flex items-end gap-4 p-4 border rounded-xl bg-muted/20">
-                            <div className="flex-1 space-y-2">
-                                <Label>Bordro Dosyası Seç (Excel veya PDF)</Label>
-                                <Input
-                                    type="file"
-                                    accept=".xlsx, .xls, .pdf"
-                                    onChange={(e) => setUploadedFile(e.target.files?.[0] || null)}
-                                />
-                            </div>
-                            <Button disabled={!uploadedFile || isUploading} onClick={handleFileUpload}>
-                                {isUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
-                                Önizle
-                            </Button>
-                        </div>
-
-                        {/* Preview Table */}
-                        {previewData.length > 0 && (
-                            <div className="border rounded-xl overflow-hidden">
-                                <div className="p-2 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-600 text-sm font-bold flex items-center gap-2">
-                                    <Info className="w-4 h-4" />
-                                    Bu veriler henüz kaydedilmemiştir. Lütfen kontrol edip onaylayın.
-                                </div>
-                                <div className="max-h-[400px] overflow-auto">
-                                    <Table>
-                                        <TableHeader className="bg-muted">
-                                            <TableRow>
-                                                <TableHead>Ad Soyad</TableHead>
-                                                <TableHead>Brüt</TableHead>
-                                                <TableHead>Net</TableHead>
-                                                <TableHead>İşçi SGK</TableHead>
-                                                <TableHead>İşveren SGK</TableHead>
-                                                <TableHead>Toplam Maliyet</TableHead>
-                                                <TableHead>Şube</TableHead>
-                                                <TableHead>Statü</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {previewData.map((row, i) => (
-                                                <TableRow key={i}>
-                                                    <TableCell className="font-medium">{row.adSoyad}</TableCell>
-                                                    <TableCell>{formatCurrency(row.brutUcret)}</TableCell>
-                                                    <TableCell className="font-bold text-green-600">{formatCurrency(row.netUcret)}</TableCell>
-                                                    <TableCell className="text-orange-600">{formatCurrency(row.sigortaKesintisi)}</TableCell>
-                                                    <TableCell className="text-purple-600">{formatCurrency(row.isverenSgkPayi)}</TableCell>
-                                                    <TableCell className="font-bold text-red-600">{formatCurrency(row.toplamIsverenMaliyeti)}</TableCell>
-                                                    <TableCell><Badge variant="outline">{row.sube}</Badge></TableCell>
-                                                    <TableCell><Badge variant="outline">{row.statu}</Badge></TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </div>
-                                <div className="p-4 border-t bg-muted/20 flex justify-end gap-2">
-                                    <Button variant="outline" onClick={() => setPreviewData([])}>İptal</Button>
-                                    <Button onClick={handleSaveBordro} disabled={isSaving}>
-                                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                                        Verileri Kaydet ve Onayla
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </DialogContent>
-            </Dialog>
 
             {/* ============================================================ */}
-            {/* MAAŞ LİSTESİ PDF DIALOG (yeni sağlam yöntem) */}
+            {/* BORDRO YÜKLE — ÜCRET PUSULASI DIALOG (tek yükleme akışı) */}
             {/* ============================================================ */}
-            <Dialog open={maasListesiOpen} onOpenChange={(o) => {
-                setMaasListesiOpen(o);
-                if (!o) { setMaasListesiFile(null); setMaasListesiPreview(null); }
+            <Dialog open={pusulaOpen} onOpenChange={(o) => {
+                setPusulaOpen(o);
+                if (!o) { setPusulaFile(null); setPusulaPreview(null); }
             }}>
-                <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
+                <DialogContent className="sm:max-w-[1250px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <FileUp className="w-5 h-5 text-green-600" />
-                            Maaş Listesi PDF Yükle
+                            <FileUp className="w-5 h-5 text-emerald-600" />
+                            Bordro Yükle — Ücret Pusulası PDF
                         </DialogTitle>
                     </DialogHeader>
 
@@ -1152,9 +1007,10 @@ export default function Calisanlar() {
                             <div className="flex items-start gap-2">
                                 <Info className="w-4 h-4 mt-0.5 text-blue-500 shrink-0" />
                                 <div className="text-muted-foreground">
-                                    Sadece <strong>"Personel Maaş Listesi"</strong> (net ödenecek tutarları gösteren) PDF'i yükleyin.
-                                    Ay/yıl PDF'in başlığından otomatik okunur. Şube ve yönetici tespiti de otomatik yapılır.
-                                    Brüt + işveren payları arkada hesaplanır.
+                                    <strong>"ÜCRET BORDROSU, PUANTAJ CETVELİ ve ÜCRET PUSULASI"</strong> başlıklı,
+                                    her sayfada 1 çalışan olan PDF'i yükleyin. Brüt, net, vergiler ve kesintiler
+                                    doğrudan belgeden okunur; ay/yıl, şube ve statü otomatik tespit edilir.
+                                    İşveren SGK payı sigorta matrahı ile belgedeki teşvik tutarından hesaplanır.
                                 </div>
                             </div>
                         </div>
@@ -1165,45 +1021,39 @@ export default function Calisanlar() {
                                 <Input
                                     type="file"
                                     accept=".pdf"
-                                    onChange={(e) => { setMaasListesiFile(e.target.files?.[0] || null); setMaasListesiPreview(null); }}
+                                    onChange={(e) => { setPusulaFile(e.target.files?.[0] || null); setPusulaPreview(null); }}
                                 />
                             </div>
-                            <Button disabled={!maasListesiFile || maasListesiBusy} onClick={handleMaasListesiUpload}>
-                                {maasListesiBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <FileUp className="w-4 h-4 mr-2" />}
+                            <Button disabled={!pusulaFile || pusulaBusy} onClick={handlePusulaUpload}>
+                                {pusulaBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <FileUp className="w-4 h-4 mr-2" />}
                                 Önizle
                             </Button>
                         </div>
 
-                        {maasListesiPreview && (
+                        {pusulaPreview && (
                             <>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                                    {maasListesiPreview.sayfalar.map((s: any) => (
-                                        <Card key={s.sayfaNo} className="p-3">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Building2 className="w-4 h-4 text-primary" />
-                                                <span className="font-bold text-sm">{s.sube}</span>
-                                                {s.statu === "YÖNETİCİ" && (
-                                                    <Badge variant="outline" className="text-[10px] py-0 h-4">YÖNETİCİ</Badge>
-                                                )}
+                                {pusulaPreview.atlananSayfalar?.length > 0 && (
+                                    <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm">
+                                        <div className="flex items-start gap-2">
+                                            <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-600 shrink-0" />
+                                            <div>
+                                                <div className="font-semibold text-amber-700">
+                                                    {pusulaPreview.atlananSayfalar.length} sayfa okunamadı — bu kişiler kaydedilmeyecek:
+                                                </div>
+                                                <ul className="mt-1 text-muted-foreground list-disc list-inside">
+                                                    {pusulaPreview.atlananSayfalar.map((a: any) => (
+                                                        <li key={a.sayfaNo}>Sayfa {a.sayfaNo}: {a.sebep}</li>
+                                                    ))}
+                                                </ul>
                                             </div>
-                                            <div className="space-y-1 text-xs text-muted-foreground">
-                                                <div>{s.kisi} kişi</div>
-                                                <div>Toplam: <strong className="text-green-600">{formatCurrency(s.toplam)}</strong></div>
-                                                {!s.sgkIsyeriNo && (
-                                                    <div className="text-amber-600 flex items-center gap-1 mt-1">
-                                                        <AlertTriangle className="w-3 h-3" />
-                                                        SGK İşyeri No yok
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </Card>
-                                    ))}
-                                </div>
+                                        </div>
+                                    </div>
+                                )}
 
                                 <Card className="p-4 bg-muted/30">
                                     <div className="font-bold mb-2 flex items-center gap-2">
                                         <Calculator className="w-4 h-4" />
-                                        Hesaplanan Özet — {ayNumarasiToAd(maasListesiPreview.ay)} {maasListesiPreview.yil}
+                                        Şube Özeti — {ayNumarasiToAd(pusulaPreview.ay)} {pusulaPreview.yil}
                                     </div>
                                     <Table className="text-sm">
                                         <TableHeader>
@@ -1216,7 +1066,7 @@ export default function Calisanlar() {
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {Object.entries(maasListesiPreview.subeOzet).map(([sube, o]: any) => (
+                                            {Object.entries(pusulaPreview.subeOzet).map(([sube, o]: any) => (
                                                 <TableRow key={sube}>
                                                     <TableCell className="font-medium">{sube}</TableCell>
                                                     <TableCell className="text-right tabular-nums">{o.kisi}</TableCell>
@@ -1226,6 +1076,15 @@ export default function Calisanlar() {
                                                 </TableRow>
                                             ))}
                                         </TableBody>
+                                        <TableFooter>
+                                            <TableRow>
+                                                <TableCell className="font-bold">TOPLAM</TableCell>
+                                                <TableCell className="text-right tabular-nums font-bold">{pusulaPreview.toplamKisi}</TableCell>
+                                                <TableCell className="text-right tabular-nums font-bold text-green-700">{formatCurrency(pusulaPreview.toplamNet)}</TableCell>
+                                                <TableCell className="text-right tabular-nums font-bold text-blue-700">{formatCurrency(pusulaPreview.toplamBrut)}</TableCell>
+                                                <TableCell className="text-right tabular-nums font-bold text-red-700">{formatCurrency(pusulaPreview.toplamIsverenMaliyeti)}</TableCell>
+                                            </TableRow>
+                                        </TableFooter>
                                     </Table>
                                 </Card>
 
@@ -1241,8 +1100,9 @@ export default function Calisanlar() {
                                                     <TableHead>Ad Soyad</TableHead>
                                                     <TableHead>Şube</TableHead>
                                                     <TableHead>Statü</TableHead>
-                                                    <TableHead className="text-right">Net</TableHead>
                                                     <TableHead className="text-right">Brüt</TableHead>
+                                                    <TableHead className="text-right">Net</TableHead>
+                                                    <TableHead className="text-right">Gelir V.</TableHead>
                                                     <TableHead className="text-right">İşçi SGK</TableHead>
                                                     <TableHead className="text-right">İşv. SGK</TableHead>
                                                     <TableHead className="text-right">Maliyet</TableHead>
@@ -1250,23 +1110,24 @@ export default function Calisanlar() {
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
-                                                {maasListesiPreview.onizleme.map((r: any, i: number) => (
+                                                {pusulaPreview.onizleme.map((r: any, i: number) => (
                                                     <TableRow key={i}>
                                                         <TableCell className="font-medium">{r.adSoyad}</TableCell>
                                                         <TableCell><Badge variant="outline" className="text-[10px]">{r.sube}</Badge></TableCell>
                                                         <TableCell><Badge variant={r.statu === "YÖNETİCİ" ? "default" : "outline"} className="text-[10px]">{r.statu}</Badge></TableCell>
+                                                        <TableCell className="text-right tabular-nums text-blue-600">{formatCurrency(r.brutToplam)}</TableCell>
                                                         <TableCell className="text-right tabular-nums text-green-600 font-semibold">{formatCurrency(r.netUcret)}</TableCell>
-                                                        <TableCell className="text-right tabular-nums text-blue-600">{formatCurrency(r.brutUcret)}</TableCell>
-                                                        <TableCell className="text-right tabular-nums text-orange-600">{formatCurrency(r.sigortaKesintisi)}</TableCell>
+                                                        <TableCell className="text-right tabular-nums text-slate-600">{formatCurrency(r.gelirVergisi)}</TableCell>
+                                                        <TableCell className="text-right tabular-nums text-orange-600">{formatCurrency(r.sgkIsciPrimi)}</TableCell>
                                                         <TableCell className="text-right tabular-nums text-purple-600">{formatCurrency(r.isverenSgkPayi)}</TableCell>
                                                         <TableCell className="text-right tabular-nums text-red-600 font-semibold">{formatCurrency(r.toplamIsverenMaliyeti)}</TableCell>
                                                         <TableCell>
-                                                            {r.fark < 0.05 ? (
-                                                                <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
-                                                            ) : (
-                                                                <span className="text-amber-600 text-[10px]" title={`Fark: ${r.fark.toFixed(2)}`}>
-                                                                    ±{r.fark.toFixed(2)}
+                                                            {r.uyarilar?.length > 0 ? (
+                                                                <span title={r.uyarilar.join("\n")}>
+                                                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
                                                                 </span>
+                                                            ) : (
+                                                                <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
                                                             )}
                                                         </TableCell>
                                                     </TableRow>
@@ -1276,13 +1137,13 @@ export default function Calisanlar() {
                                     </div>
                                     <div className="p-3 border-t bg-muted/20 flex justify-between items-center">
                                         <div className="text-sm text-muted-foreground">
-                                            <strong>{maasListesiPreview.toplamKisi}</strong> kişi · PDF Net Toplamı: <strong>{formatCurrency(maasListesiPreview.pdfToplamNet)}</strong>
+                                            <strong>{pusulaPreview.toplamKisi}</strong> kişi · Net Toplam: <strong>{formatCurrency(pusulaPreview.toplamNet)}</strong>
                                         </div>
                                         <div className="flex gap-2">
-                                            <Button variant="outline" onClick={() => { setMaasListesiPreview(null); setMaasListesiFile(null); }}>İptal</Button>
-                                            <Button onClick={handleMaasListesiSave} disabled={maasListesiBusy} className="bg-green-600 hover:bg-green-700">
-                                                {maasListesiBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                                                Kaydet ({maasListesiPreview.toplamKisi} kişi)
+                                            <Button variant="outline" onClick={() => { setPusulaPreview(null); setPusulaFile(null); }}>İptal</Button>
+                                            <Button onClick={handlePusulaSave} disabled={pusulaBusy} className="bg-emerald-600 hover:bg-emerald-700">
+                                                {pusulaBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+                                                Kaydet ({pusulaPreview.toplamKisi} kişi)
                                             </Button>
                                         </div>
                                     </div>
@@ -1387,8 +1248,8 @@ export default function Calisanlar() {
                                                 <TableRow key={d.id}>
                                                     <TableCell className="font-medium truncate max-w-[280px]" title={d.filename}>{d.filename}</TableCell>
                                                     <TableCell>
-                                                        <Badge variant={d.tip === "maas-listesi" ? "default" : "outline"}>
-                                                            {d.tip === "maas-listesi" ? "Maaş Listesi" : "Bordro"}
+                                                        <Badge variant={d.tip === "pusula" || d.tip === "maas-listesi" ? "default" : "outline"}>
+                                                            {d.tip === "pusula" ? "Pusula" : d.tip === "maas-listesi" ? "Maaş Listesi" : "Bordro"}
                                                         </Badge>
                                                     </TableCell>
                                                     <TableCell>{d.ay && d.yil ? `${ayNumarasiToAd(d.ay)} ${d.yil}` : "-"}</TableCell>
