@@ -41,7 +41,7 @@ export interface IStorage {
   // çağrılarını azaltmak için. Bunlar DB'den binlerce satır yerine
   // yalnızca ihtiyaç duyulan kolonları/aggregate'leri çeker.
   getDistinctGumrukUnvanlar(): Promise<string[]>;
-  getGumrukFirmaFaturaAggregate(refDateStr: string, faturaPenceresiDays: number): Promise<Map<string, { son90: number; yillik: number }>>;
+  getGumrukFirmaFaturaAggregate(refDateStr: string, faturaPenceresiDays: number): Promise<Map<string, { son90: number; yillik: number; ytdCiro: number; ytdIslemSayisi: number }>>;
   getGumrukHouseNoVerileri(): Promise<GumrukVerisi[]>;
   getGumrukVerileriByFirma(firma: string): Promise<GumrukVerisi[]>;
   insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]>;
@@ -405,7 +405,7 @@ export class DatabaseStorage implements IStorage {
   async getGumrukFirmaFaturaAggregate(
     refDateStr: string,
     faturaPenceresiDays: number,
-  ): Promise<Map<string, { son90: number; yillik: number }>> {
+  ): Promise<Map<string, { son90: number; yillik: number; ytdCiro: number; ytdIslemSayisi: number }>> {
     const result: any = await db.execute(sql`
       SELECT
         firma_unvan AS firma,
@@ -420,18 +420,31 @@ export class DatabaseStorage implements IStorage {
                BETWEEN (${refDateStr}::date - INTERVAL '365 days')
                    AND ${refDateStr}::date
           THEN COALESCE(top_fatura_tutar, 0)
-          ELSE 0 END), 0) AS yillik
+          ELSE 0 END), 0) AS yillik,
+        COALESCE(SUM(CASE
+          WHEN to_date(fatura_tarihi, 'DD.MM.YYYY')
+               BETWEEN date_trunc('year', ${refDateStr}::date)::date
+                   AND ${refDateStr}::date
+          THEN COALESCE(mal_bedeli, 0)
+          ELSE 0 END), 0) AS ytd_ciro,
+        COALESCE(SUM(CASE
+          WHEN to_date(fatura_tarihi, 'DD.MM.YYYY')
+               BETWEEN date_trunc('year', ${refDateStr}::date)::date
+                   AND ${refDateStr}::date
+          THEN 1 ELSE 0 END), 0) AS ytd_islem
       FROM gumruk_verileri
       WHERE firma_unvan IS NOT NULL
         AND fatura_tarihi ~ '^[0-9]{2}\\.[0-9]{2}\\.[0-9]{4}$'
       GROUP BY firma_unvan
     `);
-    const map = new Map<string, { son90: number; yillik: number }>();
-    const rows = (result.rows ?? result) as Array<{ firma: string; son90: any; yillik: any }>;
+    const map = new Map<string, { son90: number; yillik: number; ytdCiro: number; ytdIslemSayisi: number }>();
+    const rows = (result.rows ?? result) as Array<{ firma: string; son90: any; yillik: any; ytd_ciro: any; ytd_islem: any }>;
     for (const r of rows) {
       map.set(r.firma, {
         son90: Number(r.son90 ?? 0),
         yillik: Number(r.yillik ?? 0),
+        ytdCiro: Number(r.ytd_ciro ?? 0),
+        ytdIslemSayisi: Number(r.ytd_islem ?? 0),
       });
     }
     return map;
