@@ -8,6 +8,7 @@ import { Loader2, Settings, Download as DownloadIcon, ArrowUp, ArrowDown, ArrowU
 import { cn } from "@/lib/utils";
 import { RiskEsikleriModal } from "./RiskEsikleriModal";
 import { MusteriDrillDown } from "./MusteriDrillDown";
+import { SEGMENT_LABEL, SEGMENT_PILL, kisaTutar, type TahsilatSegment } from "@shared/tahsilatHesaplari";
 
 const PATTERN_LABEL: Record<string, string> = {
   SAGLIKLI: "Sağlıklı", VIP_AKTIF_RISK: "VIP Aktif", TAKIP_GEREKEN: "Takip", YAVAS_ODEYICI: "Yavaş", DONUK_KAYIP: "Donuk",
@@ -70,8 +71,15 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
 
   const exportCsv = () => {
     const escape = (v: any) => { const s = String(v ?? ""); return s.includes(";") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s; };
-    const rows = filtered.map((m) => [m.hesapKodu, m.ad, m.sektor || "", m.netBakiye.toFixed(2), m.gecikme, m.isAktivitesiAcigi, m.bakiyeFaturaAcikYuzde.toFixed(1), PATTERN_LABEL[m.pattern]]);
-    const csv = "﻿" + [["Hesap Kodu", "Ad", "Sektör", "Net Bakiye", "Gecikme", "İş Akt. Açığı", "Bakiye-Fatura %", "Risk"], ...rows].map((r) => r.map(escape).join(";")).join("\r\n");
+    const rows = filtered.map((m) => [
+      m.hesapKodu, m.ad, m.sektor || "", m.netBakiye.toFixed(2), m.gecikme, m.isAktivitesiAcigi,
+      m.bakiyeFaturaAcikYuzde.toFixed(1), PATTERN_LABEL[m.pattern],
+      m.odemeOrani === null ? "" : (m.odemeOrani * 100).toFixed(0),
+      m.islemAyOrt === null ? "" : m.islemAyOrt.toFixed(1),
+      SEGMENT_LABEL[m.segment as TahsilatSegment] || "",
+      m.deltaNetBakiye === null ? "" : m.deltaNetBakiye.toFixed(2),
+    ]);
+    const csv = "﻿" + [["Hesap Kodu", "Ad", "Sektör", "Net Bakiye", "Gecikme", "İş Akt. Açığı", "Bakiye-Fatura %", "Risk", "Ödeme %", "İşlem/Ay", "Segment", "Değişim"], ...rows].map((r) => r.map(escape).join(";")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `tahsilat-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
@@ -142,12 +150,16 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
                 <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("gecikme")}>Gecikme <SortIcon f="gecikme" /></TableHead>
                 <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("isAktivitesiAcigi")}>İş Akt. <SortIcon f="isAktivitesiAcigi" /></TableHead>
                 <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("bakiyeFaturaAcikYuzde")}>Bakiye-Fatura % <SortIcon f="bakiyeFaturaAcikYuzde" /></TableHead>
+                <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("odemeOrani")}>Ödeme % <SortIcon f="odemeOrani" /></TableHead>
+                <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("islemAyOrt")}>İşlem/Ay <SortIcon f="islemAyOrt" /></TableHead>
+                <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("deltaNetBakiye")}>Değişim <SortIcon f="deltaNetBakiye" /></TableHead>
+                <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Segment</TableHead>
                 <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Risk</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {!filtered.length ? (
-                <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Filtreye uyan müşteri yok</TableCell></TableRow>
+                <TableRow><TableCell colSpan={13} className="text-center py-8 text-muted-foreground">Filtreye uyan müşteri yok</TableCell></TableRow>
               ) : filtered.map((m) => (
                 <TableRow key={m.musteriId} className="cursor-pointer hover:bg-slate-50" onClick={() => setDrillId(m.musteriId)}>
                   <TableCell>
@@ -161,6 +173,14 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
                   <TableCell className="text-right tabular-nums">{m.gecikme >= 9999 ? "—" : `${m.gecikme}g`}</TableCell>
                   <TableCell className={`text-right tabular-nums ${m.isAktivitesiAcigi > 0 ? "text-red-600" : ""}`}>{m.isAktivitesiAcigi}g</TableCell>
                   <TableCell className={`text-right tabular-nums ${m.bakiyeFaturaAcikYuzde > 20 ? "text-red-600 font-semibold" : ""}`}>{m.bakiyeFaturaAcikYuzde >= 999 ? "—" : `${m.bakiyeFaturaAcikYuzde.toFixed(0)}%`}</TableCell>
+                  <TableCell className="text-right tabular-nums">{m.odemeOrani === null ? "—" : `%${Math.round(m.odemeOrani * 100)}`}</TableCell>
+                  <TableCell className="text-right tabular-nums">{m.islemAyOrt === null ? "—" : m.islemAyOrt.toFixed(1)}</TableCell>
+                  <TableCell className={cn("text-right tabular-nums whitespace-nowrap", m.deltaNetBakiye > 0 ? "text-rose-600 font-semibold" : m.deltaNetBakiye < 0 ? "text-emerald-600" : "")}>
+                    {m.deltaNetBakiye === null ? "—" : `${m.deltaNetBakiye > 0 ? "▲" : m.deltaNetBakiye < 0 ? "▼" : ""} ${kisaTutar(Math.abs(m.deltaNetBakiye))}`}
+                  </TableCell>
+                  <TableCell>
+                    <span className={cn("inline-block rounded-full px-2.5 py-0.5 text-[10.5px] font-bold whitespace-nowrap", SEGMENT_PILL[m.segment as TahsilatSegment])}>{SEGMENT_LABEL[m.segment as TahsilatSegment]}</span>
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <span className={cn("inline-block rounded-full px-2.5 py-0.5 text-[10.5px] font-bold", PATTERN_BG[m.pattern])}>{PATTERN_LABEL[m.pattern]}</span>
