@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 
@@ -25,7 +24,7 @@ export function TahsilatTrend() {
 
   const fmtTry = (v: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(v);
 
-  if (l1 || l2) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (l1 || l2) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-sky-500" /></div>;
   if (!mizanList?.length) return <div className="text-center text-muted-foreground py-12">Henüz mizan yüklenmemiş.</div>;
   if (!dashboardListesi?.length) return <div className="text-center text-muted-foreground py-12">Trend için en az 1 mizan gerekli.</div>;
 
@@ -39,38 +38,38 @@ export function TahsilatTrend() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader><CardTitle>📈 Toplam Net Alacak Trendi</CardTitle></CardHeader>
-        <CardContent>
+      <div className="rounded-[14px] border bg-card p-5">
+        <h3 className="text-[15px] font-bold">📈 Toplam Net Alacak Trendi</h3>
+        <div className="mt-4">
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="tarih" tick={{ fontSize: 11 }} />
               <YAxis tickFormatter={(v) => v >= 1_000_000 ? `${(v/1_000_000).toFixed(1)}M` : `${(v/1000).toFixed(0)}K`} tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(v: any) => fmtTry(v)} />
+              <Tooltip formatter={(v: any) => fmtTry(v)} contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0", fontSize: "12px" }} />
               <Legend />
-              <Line type="monotone" dataKey="toplam" stroke="#3b82f6" strokeWidth={2} name="Toplam Net Alacak" />
+              <Line type="monotone" dataKey="toplam" stroke="#0ea5e9" strokeWidth={2} name="Toplam Net Alacak" />
             </LineChart>
           </ResponsiveContainer>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader><CardTitle>⚠ Risk Altındaki Ciro</CardTitle></CardHeader>
-        <CardContent>
+      <div className="rounded-[14px] border bg-card p-5">
+        <h3 className="text-[15px] font-bold">⚠ Risk Altındaki Ciro</h3>
+        <div className="mt-4">
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="tarih" tick={{ fontSize: 11 }} />
               <YAxis tickFormatter={(v) => v >= 1_000_000 ? `${(v/1_000_000).toFixed(1)}M` : `${(v/1000).toFixed(0)}K`} tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(v: any) => fmtTry(v)} />
+              <Tooltip formatter={(v: any) => fmtTry(v)} contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0", fontSize: "12px" }} />
               <Legend />
-              <Line type="monotone" dataKey="yavas" stroke="#f97316" strokeWidth={2} name="Yavaş Ödeyici Ciro" />
+              <Line type="monotone" dataKey="yavas" stroke="#f59e0b" strokeWidth={2} name="Yavaş Ödeyici Ciro" />
               <Line type="monotone" dataKey="donuk" stroke="#dc2626" strokeWidth={2} name="Donuk Ciro" />
             </LineChart>
           </ResponsiveContainer>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

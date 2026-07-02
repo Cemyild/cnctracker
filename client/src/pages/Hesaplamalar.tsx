@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,62 +13,96 @@ import * as XLSX from "xlsx";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Calisan, SalaryPlan } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 function formatCurrency(amount: number) {
     return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(amount);
 }
 
 export default function Hesaplamalar() {
+    const [tab, setTab] = useState("maas");
+
+    const TABS = [
+        { id: "maas", label: "Maaş Hesaplama (Tekil)" },
+        { id: "2026-plan", label: "2026 Planlama (Toplu)" },
+        { id: "2026-monthly", label: "2026 Aylık" },
+        { id: "yemek", label: "Yemek Kartı" },
+        { id: "tarife", label: "Tarife" },
+    ];
+
     return (
-        <div className="flex-1 space-y-4 p-8 pt-6">
-            <div className="flex items-center justify-between space-y-2">
-                <h2 className="text-3xl font-bold tracking-tight">Hesaplamalar</h2>
+        <div className="min-h-full bg-slate-50 dark:bg-background">
+            <div className="px-6 pb-12 lg:px-8">
+                <Tabs value={tab} onValueChange={setTab} className="w-full">
+                    {/* ===== STICKY HEADER + TABS ===== */}
+                    <div className="sticky top-0 z-20 border-b border-border/70 bg-slate-50/90 pt-5 backdrop-blur dark:bg-background/90">
+                        <div className="flex flex-wrap items-end justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-[11px] bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400">
+                                    <Calculator className="h-[22px] w-[22px]" strokeWidth={1.8} />
+                                </div>
+                                <div>
+                                    <h1 className="text-[21px] font-extrabold tracking-tight">Hesaplamalar</h1>
+                                    <p className="mt-0.5 text-[12.5px] text-muted-foreground">Maaş, planlama ve tarife hesaplama araçları</p>
+                                </div>
+                            </div>
+                        </div>
+                        {/* Tab barı — aktif tab inset alt çizgi */}
+                        <div className="mt-3.5 flex flex-wrap gap-1">
+                            {TABS.map((t) => (
+                                <button
+                                    key={t.id}
+                                    onClick={() => setTab(t.id)}
+                                    className={cn(
+                                        "rounded-t-lg px-3.5 py-2.5 text-[13.5px] transition-colors",
+                                        tab === t.id
+                                            ? "font-bold text-foreground shadow-[inset_0_-2px_0_#0ea5e9]"
+                                            : "font-semibold text-muted-foreground hover:text-foreground"
+                                    )}
+                                >
+                                    {t.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <TabsContent value="maas" className="mt-5">
+                        <SalaryCalculator />
+                    </TabsContent>
+
+                    <TabsContent value="2026-plan" className="mt-5">
+                        <SalaryPlanning2026 />
+                    </TabsContent>
+
+                    <TabsContent value="2026-monthly" className="mt-5">
+                        <SalaryMonthly2026 />
+                    </TabsContent>
+
+                    <TabsContent value="yemek" className="mt-5">
+                        <div className="flex flex-col items-center justify-center gap-4 rounded-[14px] border bg-card p-12 text-center">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-600">
+                                <Calculator className="h-6 w-6" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-foreground">Yemek Kartı Hesaplama</h3>
+                            <p className="max-w-sm text-sm text-muted-foreground">
+                                Bu modül henüz geliştirme aşamasındadır. Yakında kullanıma açılacaktır.
+                            </p>
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="tarife" className="mt-5">
+                        <div className="flex flex-col items-center justify-center gap-4 rounded-[14px] border bg-card p-12 text-center">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 text-violet-600">
+                                <Calculator className="h-6 w-6" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-foreground">Gümrük Tarife Hesaplama</h3>
+                            <p className="max-w-sm text-sm text-muted-foreground">
+                                Bu modül henüz geliştirme aşamasındadır. Yakında kullanıma açılacaktır.
+                            </p>
+                        </div>
+                    </TabsContent>
+                </Tabs>
             </div>
-            <Tabs defaultValue="maas" className="space-y-4">
-                <TabsList>
-                        <TabsTrigger value="maas">Maaş Hesaplama (Tekil)</TabsTrigger>
-                        <TabsTrigger value="2026-plan">2026 Planlama (Toplu)</TabsTrigger>
-                        <TabsTrigger value="2026-monthly">2026 Aylık</TabsTrigger>
-                        <TabsTrigger value="yemek">Yemek Kartı</TabsTrigger>
-                    <TabsTrigger value="tarife">Tarife</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="maas">
-                    <SalaryCalculator />
-                </TabsContent>
-
-                <TabsContent value="2026-plan">
-                    <SalaryPlanning2026 />
-                </TabsContent>
-
-                <TabsContent value="2026-monthly">
-                    <SalaryMonthly2026 />
-                </TabsContent>
-
-                <TabsContent value="yemek">
-                    <div className="flex flex-col items-center justify-center p-8 text-center space-y-4">
-                        <div className="bg-orange-100 p-3 rounded-full">
-                            <Calculator className="h-6 w-6 text-orange-600" />
-                        </div>
-                        <h3 className="text-lg font-medium text-slate-900">Yemek Kartı Hesaplama</h3>
-                        <p className="text-sm text-slate-500 max-w-sm">
-                            Bu modül henüz geliştirme aşamasındadır. Yakında kullanıma açılacaktır.
-                        </p>
-                    </div>
-                </TabsContent>
-
-                <TabsContent value="tarife">
-                    <div className="flex flex-col items-center justify-center p-8 text-center space-y-4">
-                        <div className="bg-purple-100 p-3 rounded-full">
-                            <Calculator className="h-6 w-6 text-purple-600" />
-                        </div>
-                        <h3 className="text-lg font-medium text-slate-900">Gümrük Tarife Hesaplama</h3>
-                        <p className="text-sm text-slate-500 max-w-sm">
-                            Bu modül henüz geliştirme aşamasındadır. Yakında kullanıma açılacaktır.
-                        </p>
-                    </div>
-                </TabsContent>
-            </Tabs>
         </div>
     );
 }
@@ -432,13 +466,13 @@ function SalaryPlanning2026() {
     if (isLoading) return <div>Yükleniyor...</div>;
 
     return (
-        <Card className="border-t-4 border-t-purple-600 shadow-lg">
-            <div className="p-6 border-b bg-slate-50/50 flex justify-between items-center">
+        <Card className="rounded-[14px] border bg-card shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b bg-slate-50/60 p-5">
                 <div>
-                    <h2 className="text-xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
+                    <h2 className="text-[15px] font-extrabold tracking-tight text-foreground">
                         2026 Maaş Planlaması
                     </h2>
-                    <p className="text-sm text-muted-foreground mt-1">
+                    <p className="mt-1 text-[12.5px] text-muted-foreground">
                         Aralık 2025 personel listesi baz alınmıştır.
                     </p>
                 </div>
@@ -474,20 +508,20 @@ function SalaryPlanning2026() {
                 </div>
             </div>
 
-            <div className="p-0">
+            <div className="overflow-x-auto">
                 <Table>
-                    <TableHeader className="bg-slate-100">
-                        <TableRow>
-                            <TableHead className="w-[200px]">Ad Soyad</TableHead>
-                            <TableHead className="w-[150px]">Çalışan Tipi</TableHead>
-                            <TableHead className="w-[150px]">2025 Net Maaş</TableHead>
-                            <TableHead className="w-[150px]">2026 Net Maaş</TableHead>
-                            <TableHead className="w-[100px] text-center">Fark %</TableHead>
-                            <TableHead className="w-[150px] text-right">Yıllık Toplam Brüt</TableHead>
-                            <TableHead className="w-[150px] text-right">Yıllık İşveren Payı</TableHead>
-                            <TableHead className="w-[150px] text-right text-slate-500">2025 Yıllık Maliyet</TableHead>
-                            <TableHead className="w-[150px] text-right">2026 Yıllık Maliyet</TableHead>
-                            <TableHead className="w-[100px] text-center">Değişim %</TableHead>
+                    <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                            <TableHead className="w-[200px] text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Ad Soyad</TableHead>
+                            <TableHead className="w-[150px] text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Çalışan Tipi</TableHead>
+                            <TableHead className="w-[150px] text-[10.5px] font-bold uppercase tracking-wide text-slate-500">2025 Net Maaş</TableHead>
+                            <TableHead className="w-[150px] text-[10.5px] font-bold uppercase tracking-wide text-slate-500">2026 Net Maaş</TableHead>
+                            <TableHead className="w-[100px] text-center text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Fark %</TableHead>
+                            <TableHead className="w-[150px] text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Yıllık Toplam Brüt</TableHead>
+                            <TableHead className="w-[150px] text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Yıllık İşveren Payı</TableHead>
+                            <TableHead className="w-[150px] text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">2025 Yıllık Maliyet</TableHead>
+                            <TableHead className="w-[150px] text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">2026 Yıllık Maliyet</TableHead>
+                            <TableHead className="w-[100px] text-center text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Değişim %</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -641,7 +675,7 @@ function SalaryPlanning2026() {
                 </Table>
             </div>
             
-            <div className="p-4 bg-slate-50 border-t flex justify-end">
+            <div className="flex justify-end gap-2 border-t bg-slate-50/60 p-4">
                 <Button onClick={handleExportExcel} variant="outline" className="mr-2 border-green-600 text-green-700 hover:bg-green-50">
                     <Download className="mr-2 h-4 w-4" />
                     Excel İndir
@@ -689,7 +723,7 @@ function SalaryCalculator() {
         <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-12">
                 {/* Sol Panel: Ayarlar ve Girişler */}
-                <Card className="col-span-12 lg:col-span-3">
+                <Card className="col-span-12 rounded-[14px] border bg-card lg:col-span-3">
                     <CardHeader>
                         <CardTitle>Parametreler</CardTitle>
                         <CardDescription>Hesaplama kriterlerini belirleyin.</CardDescription>
@@ -774,7 +808,7 @@ function SalaryCalculator() {
                 </Card>
 
                 {/* Sağ Panel: Yıllık Izgara */}
-                <Card className="col-span-12 lg:col-span-9 overflow-hidden">
+                <Card className="col-span-12 overflow-hidden rounded-[14px] border bg-card lg:col-span-9">
                     <CardHeader>
                         <CardTitle>Yıllık Bordro Simülasyonu (2026)</CardTitle>
                         <CardDescription>Ay bazlı detaylı hesaplama tablosu</CardDescription>
@@ -782,10 +816,10 @@ function SalaryCalculator() {
                     <CardContent className="overflow-x-auto">
                         <Table className="w-auto min-w-full text-xs">
                             <TableHeader>
-                                <TableRow>
-                                    <TableHead className="w-[100px] sticky left-0 bg-background z-10 font-bold border-r">KALEMLER</TableHead>
-                                    {months.map(m => <TableHead key={m} className="text-center min-w-[100px]">{m}</TableHead>)}
-                                    <TableHead className="text-center font-bold bg-muted/20">TOPLAM</TableHead>
+                                <TableRow className="hover:bg-transparent">
+                                    <TableHead className="sticky left-0 z-10 w-[100px] border-r bg-background text-[10.5px] font-bold uppercase tracking-wide text-slate-500">KALEMLER</TableHead>
+                                    {months.map(m => <TableHead key={m} className="min-w-[100px] text-center text-[10.5px] font-bold uppercase tracking-wide text-slate-500">{m}</TableHead>)}
+                                    <TableHead className="bg-slate-50 text-center text-[10.5px] font-bold uppercase tracking-wide text-slate-500">TOPLAM</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -1002,11 +1036,11 @@ function SalaryMonthly2026() {
     if (loadingEmployees || loadingPlans) return <div className="p-8 text-center text-muted-foreground italic">Yükleniyor...</div>;
 
     return (
-        <Card className="border-t-4 border-t-indigo-600 shadow-lg">
-            <CardHeader className="bg-slate-50/50 border-b">
-                <div className="flex justify-between items-center">
+        <Card className="rounded-[14px] border bg-card shadow-sm">
+            <CardHeader className="border-b bg-slate-50/60">
+                <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
-                        <CardTitle className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                        <CardTitle className="text-[15px] font-extrabold tracking-tight text-foreground">
                             2026 Aylık Toplam Maliyet Planı
                         </CardTitle>
                         <CardDescription>Planlanan maaşlara göre her ay için işveren maliyet kırılımı</CardDescription>
@@ -1027,15 +1061,15 @@ function SalaryMonthly2026() {
                     </div>
                 </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="overflow-x-auto p-0">
                 <Table>
-                    <TableHeader className="bg-slate-100">
-                        <TableRow>
-                            <TableHead className="w-[150px]">Ay</TableHead>
-                            <TableHead className="text-right">Tpl. Net Maaş</TableHead>
-                            <TableHead className="text-right">Tpl. Brüt Maaş</TableHead>
-                            <TableHead className="text-right">Tpl. SGK/İşsizlik (İşveren)</TableHead>
-                            <TableHead className="text-right font-bold text-indigo-700">Toplam İşveren Maliyeti</TableHead>
+                    <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                            <TableHead className="w-[150px] text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Ay</TableHead>
+                            <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tpl. Net Maaş</TableHead>
+                            <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tpl. Brüt Maaş</TableHead>
+                            <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tpl. SGK/İşsizlik (İşveren)</TableHead>
+                            <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-violet-600">Toplam İşveren Maliyeti</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1045,7 +1079,7 @@ function SalaryMonthly2026() {
                                 <TableCell className="text-right">{formatCurrency(row.totalNet)}</TableCell>
                                 <TableCell className="text-right">{formatCurrency(row.totalGross)}</TableCell>
                                 <TableCell className="text-right">{formatCurrency(row.totalEmployerShare)}</TableCell>
-                                <TableCell className="text-right font-bold text-indigo-700">{formatCurrency(row.totalCost)}</TableCell>
+                                <TableCell className="text-right font-bold tabular-nums text-violet-700">{formatCurrency(row.totalCost)}</TableCell>
                             </TableRow>
                         ))}
                     </TableBody>
@@ -1055,7 +1089,7 @@ function SalaryMonthly2026() {
                             <TableCell className="text-right">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalNet, 0))}</TableCell>
                             <TableCell className="text-right">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalGross, 0))}</TableCell>
                             <TableCell className="text-right">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalEmployerShare, 0))}</TableCell>
-                            <TableCell className="text-right text-lg text-indigo-900">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalCost, 0))}</TableCell>
+                            <TableCell className="text-right text-lg tabular-nums text-violet-900">{formatCurrency(monthlyAggregation.reduce((a, b) => a + b.totalCost, 0))}</TableCell>
                         </TableRow>
                     </TableFooter>
                 </Table>

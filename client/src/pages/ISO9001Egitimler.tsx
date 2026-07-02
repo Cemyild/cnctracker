@@ -8,8 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 type IsoPersonel = {
   id: string;
@@ -53,10 +54,21 @@ type PersonelKart = {
 const emptyPersonelForm = { ad: "", pozisyon: "", departman: "" };
 const emptyEgitimForm = { baslik: "", egitimTarihi: "", sure: "", egitimci: "", aciklama: "" };
 
+// Personel avatar renk paleti (referanstan) — [zemin, metin]
+const avatarPalette: [string, string][] = [
+  ["bg-sky-100 dark:bg-sky-950/40", "text-sky-700 dark:text-sky-300"],
+  ["bg-violet-100 dark:bg-violet-950/40", "text-violet-700 dark:text-violet-300"],
+  ["bg-emerald-100 dark:bg-emerald-950/40", "text-emerald-700 dark:text-emerald-300"],
+  ["bg-amber-100 dark:bg-amber-950/40", "text-amber-700 dark:text-amber-300"],
+  ["bg-rose-100 dark:bg-rose-950/40", "text-rose-700 dark:text-rose-300"],
+];
+const getInitials = (ad: string) => ad.trim().split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
+
 export default function ISO9001Egitimler() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  const [tab, setTab] = useState("egitimler");
   const [expandedEgitimId, setExpandedEgitimId] = useState<string | null>(null);
   const [egitimModal, setEgitimModal] = useState<{ open: boolean; editing: Egitim | null }>({ open: false, editing: null });
   const [egitimForm, setEgitimForm] = useState(emptyEgitimForm);
@@ -224,203 +236,301 @@ export default function ISO9001Egitimler() {
 
   const alreadyAddedIds = new Set(katilimcilar.map(k => k.personelId));
 
+  // KPI değerleri listelerden türetilir
+  const toplamKatilim = egitimlerList.reduce((a, e) => a + (e.katilimciSayisi || 0), 0);
+  const kpis = [
+    { label: "Toplam Eğitim", value: egitimlerList.length, sub: "kayıtlı oturum", color: "#0ea5e9" },
+    { label: "Personel", value: personellerList.length, sub: "eğitim havuzu", color: "#7c3aed" },
+    { label: "Toplam Katılım", value: toplamKatilim, sub: "kişi × eğitim", color: "#0f766e" },
+    { label: "Şablon Sorusu", value: sorularList.length, sub: "değerlendirme anketi", color: "#d97706" },
+  ];
+
+  const TABS = [
+    { id: "egitimler", label: "Eğitimler", count: egitimlerList.length },
+    { id: "personeller", label: "Personeller", count: personellerList.length },
+    { id: "sablon", label: "Değerlendirme Şablonu", count: sorularList.length },
+  ];
+
   return (
-    <div className="p-6">
-      <div className="flex items-center gap-3 mb-6">
-        <GraduationCap className="w-7 h-7 text-primary" />
-        <h2 className="text-2xl font-semibold">Eğitim Kayıtları</h2>
-      </div>
-
-      <Tabs defaultValue="egitimler">
-        <TabsList className="mb-4">
-          <TabsTrigger value="egitimler">Eğitimler</TabsTrigger>
-          <TabsTrigger value="personeller">Personeller</TabsTrigger>
-          <TabsTrigger value="sablon">Değerlendirme Şablonu</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="egitimler">
-          <div className="flex justify-end mb-3">
-            <Button onClick={() => { setEgitimForm(emptyEgitimForm); setEgitimSertifika(null); setEgitimModal({ open: true, editing: null }); }}>
-              <Plus className="w-4 h-4 mr-2" /> Yeni Eğitim
-            </Button>
-          </div>
-          <div className="border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="w-6 p-3"></th>
-                  <th className="text-left p-3 font-medium">Başlık</th>
-                  <th className="text-left p-3 font-medium">Tarih</th>
-                  <th className="text-left p-3 font-medium">Süre</th>
-                  <th className="text-left p-3 font-medium">Eğitimci</th>
-                  <th className="text-left p-3 font-medium">Katılımcı</th>
-                  <th className="text-left p-3 font-medium">Sertifika</th>
-                  <th className="text-left p-3 font-medium">İşlemler</th>
-                </tr>
-              </thead>
-              <tbody>
-                {egitimlerList.length === 0 && (
-                  <tr><td colSpan={8} className="p-6 text-center text-muted-foreground">Henüz eğitim yok</td></tr>
+    <div className="min-h-full bg-slate-50 dark:bg-background">
+      <div className="px-6 pb-12 lg:px-8">
+        <Tabs value={tab} onValueChange={setTab} className="w-full">
+          {/* ===== STICKY HEADER + TABS ===== */}
+          <div className="sticky top-0 z-20 border-b border-border/70 bg-slate-50/90 pt-5 backdrop-blur dark:bg-background/90">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-[11px] bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400">
+                  <GraduationCap className="h-[22px] w-[22px]" strokeWidth={1.8} />
+                </div>
+                <div>
+                  <h1 className="text-[21px] font-extrabold tracking-tight">Eğitim Kayıtları</h1>
+                  <p className="mt-0.5 text-[12.5px] text-muted-foreground">ISO 9001 · eğitimler, katılımcılar ve değerlendirme şablonu</p>
+                </div>
+              </div>
+              <div className="flex items-center">
+                {tab === "egitimler" && (
+                  <Button
+                    className="h-[38px] bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                    onClick={() => { setEgitimForm(emptyEgitimForm); setEgitimSertifika(null); setEgitimModal({ open: true, editing: null }); }}
+                  >
+                    <Plus className="w-4 h-4 mr-2" /> Yeni Eğitim
+                  </Button>
                 )}
-                {egitimlerList.map(egitim => {
-                  const isExpanded = expandedEgitimId === egitim.id;
-                  return (
-                    <>
-                      <tr key={egitim.id} className="border-t hover:bg-muted/20 cursor-pointer" onClick={() => setExpandedEgitimId(isExpanded ? null : egitim.id)}>
-                        <td className="p-3 text-muted-foreground">
-                          {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                {tab === "personeller" && (
+                  <Button
+                    className="h-[38px] bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                    onClick={() => { setPersonelForm(emptyPersonelForm); setPersonelModal({ open: true, editing: null }); }}
+                  >
+                    <Plus className="w-4 h-4 mr-2" /> Yeni Personel
+                  </Button>
+                )}
+                {tab === "sablon" && (
+                  <Button
+                    className="h-[38px] bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                    onClick={() => { setSoruForm({ soru: "", tip: "puan_1_5" }); setSoruModal({ open: true, editing: null }); }}
+                  >
+                    <Plus className="w-4 h-4 mr-2" /> Soru Ekle
+                  </Button>
+                )}
+              </div>
+            </div>
+            {/* Tab barı — aktif tab inset alt çizgi + sayı rozeti */}
+            <div className="mt-3.5 flex gap-1">
+              {TABS.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-t-lg px-3.5 py-2.5 text-[13.5px] transition-colors",
+                    tab === t.id
+                      ? "font-bold text-foreground shadow-[inset_0_-2px_0_#0ea5e9]"
+                      : "font-semibold text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {t.label}
+                  <span className={cn(
+                    "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[10.5px] font-extrabold tabular-nums",
+                    tab === t.id ? "bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300" : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+                  )}>
+                    {t.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* KPI şeridi — listelerden türetilir */}
+          <div className="mt-5 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+            {kpis.map((k) => (
+              <div key={k.label} className="relative overflow-hidden rounded-[14px] border bg-card p-4">
+                <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: k.color }} />
+                <div className="pl-2 text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground leading-tight">{k.label}</div>
+                <div className="mt-2 pl-2 text-[24px] font-extrabold tracking-tight tabular-nums">{k.value}</div>
+                <div className="mt-0.5 pl-2 text-[11.5px] text-muted-foreground">{k.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          <TabsContent value="egitimler" className="mt-4">
+            <div className="rounded-[14px] border bg-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[900px]">
+                  <thead>
+                    <tr className="border-b bg-slate-50 dark:bg-muted/40">
+                      <th className="w-8 px-4 py-3"></th>
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Başlık</th>
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tarih</th>
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Süre</th>
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Eğitimci</th>
+                      <th className="text-center px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Katılımcı</th>
+                      <th className="text-center px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Sertifika</th>
+                      <th className="text-right px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">İşlemler</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {egitimlerList.length === 0 && (
+                      <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">Henüz eğitim yok</td></tr>
+                    )}
+                    {egitimlerList.map(egitim => {
+                      const isExpanded = expandedEgitimId === egitim.id;
+                      return (
+                        <>
+                          <tr key={egitim.id} className="border-b hover:bg-slate-50 dark:hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => setExpandedEgitimId(isExpanded ? null : egitim.id)}>
+                            <td className="px-4 py-3 text-slate-400">
+                              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            </td>
+                            <td className="px-4 py-3 text-[13.5px] font-bold text-slate-800 dark:text-slate-100">{egitim.baslik}</td>
+                            <td className="px-4 py-3 text-muted-foreground tabular-nums">{egitim.egitimTarihi}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{egitim.sure ?? "—"}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{egitim.egitimci ?? "—"}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="inline-block rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700 tabular-nums dark:bg-sky-950/50 dark:text-sky-300">{egitim.katilimciSayisi} kişi</span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {egitim.sertifikaDosyaYolu
+                                ? <a href={egitim.sertifikaDosyaYolu} target="_blank" rel="noreferrer" className="text-[12px] font-semibold text-sky-600 hover:underline" onClick={e => e.stopPropagation()}>İndir</a>
+                                : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                            </td>
+                            <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                              <div className="flex justify-end gap-1">
+                                <Button size="sm" variant="ghost" title="Değerlendirme Linki Kopyala" onClick={() => copyLink(egitim.id)}>
+                                  <LinkIcon className="w-4 h-4" />
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => { setEgitimForm({ baslik: egitim.baslik, egitimTarihi: egitim.egitimTarihi, sure: egitim.sure ?? "", egitimci: egitim.egitimci ?? "", aciklama: egitim.aciklama ?? "" }); setEgitimSertifika(null); setEgitimModal({ open: true, editing: egitim }); }}>
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button size="sm" variant="ghost" className="text-rose-500 hover:text-rose-700"
+                                  onClick={() => { if (confirm("Bu eğitim ve tüm verileri silinecek. Emin misiniz?")) deleteEgitimMutation.mutate(egitim.id); }}>
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr key={`${egitim.id}-expanded`} className="border-b bg-slate-50 dark:bg-muted/20">
+                              <td colSpan={8} className="px-4 py-4 pl-12">
+                                <div className="flex items-center justify-between mb-3">
+                                  <span className="text-[11.5px] text-muted-foreground">
+                                    Katılımcılar (<strong className="text-foreground">{egitim.katilimciSayisi}</strong>) · <strong className="text-foreground">{egitim.degerlendirmeSayisi}</strong> değerlendirme dolduruldu
+                                  </span>
+                                  <Button size="sm" variant="outline" onClick={() => { setKatilimciModal({ open: true, egitimId: egitim.id }); setSelectedPersonelIds([]); }}>
+                                    <Plus className="w-3 h-3 mr-1" /> Katılımcı Ekle
+                                  </Button>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {katilimcilar.map(k => (
+                                    <div key={k.id} className="flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs text-slate-600 dark:text-slate-300">
+                                      <User className="w-3 h-3 text-slate-400" />
+                                      {k.personel.ad}
+                                      <button className="ml-1 text-slate-400 hover:text-rose-500"
+                                        onClick={() => removeKatilimciMutation.mutate({ egitimId: egitim.id, personelId: k.personelId })}>×</button>
+                                    </div>
+                                  ))}
+                                  {katilimcilar.length === 0 && <span className="text-xs text-muted-foreground">Henüz katılımcı yok</span>}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="personeller" className="mt-4">
+            <div className="rounded-[14px] border bg-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[720px]">
+                  <thead>
+                    <tr className="border-b bg-slate-50 dark:bg-muted/40">
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Ad</th>
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Pozisyon</th>
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Departman</th>
+                      <th className="text-center px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Eğitim Sayısı</th>
+                      <th className="text-right px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">İşlemler</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {personellerList.length === 0 && (
+                      <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Henüz personel yok</td></tr>
+                    )}
+                    {personellerList.map((p, i) => {
+                      const [avatarBg, avatarFg] = avatarPalette[i % avatarPalette.length];
+                      return (
+                        <tr key={p.id} className="border-b hover:bg-slate-50 dark:hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <span className={cn("flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-extrabold", avatarBg, avatarFg)}>{getInitials(p.ad)}</span>
+                              <span className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{p.ad}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{p.pozisyon ?? "—"}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{p.departman ?? "—"}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="inline-block rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 tabular-nums dark:bg-slate-800 dark:text-slate-300">{p.egitimSayisi} eğitim</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex justify-end gap-1">
+                              <Button size="sm" variant="ghost" onClick={() => setKartModal({ open: true, personelId: p.id })}>
+                                <User className="w-4 h-4 mr-1" /> Kart
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => { setPersonelForm({ ad: p.ad, pozisyon: p.pozisyon ?? "", departman: p.departman ?? "" }); setPersonelModal({ open: true, editing: p }); }}>
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="text-rose-500 hover:text-rose-700"
+                                onClick={() => { if (confirm("Bu personel silinecek. Emin misiniz?")) deletePersonelMutation.mutate(p.id); }}>
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="sablon" className="mt-4">
+            <div className="rounded-[14px] border bg-card overflow-hidden">
+              <div className="px-5 py-4 border-b">
+                <h3 className="text-[15px] font-bold">Değerlendirme Şablonu</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">eğitim sonrası katılımcılara gönderilen anket soruları</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="border-b bg-slate-50 dark:bg-muted/40">
+                      <th className="text-left px-5 py-3 w-16 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Sıra</th>
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Soru</th>
+                      <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tip</th>
+                      <th className="text-right px-4 py-3 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">İşlemler</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorularList.length === 0 && (
+                      <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Henüz soru yok</td></tr>
+                    )}
+                    {[...sorularList].sort((a, b) => a.sira - b.sira).map((soru, idx, arr) => (
+                      <tr key={soru.id} className="border-b last:border-b-0 hover:bg-slate-50 dark:hover:bg-muted/30 transition-colors">
+                        <td className="px-5 py-3">
+                          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-[12px] font-extrabold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{soru.sira}</span>
                         </td>
-                        <td className="p-3 font-medium">{egitim.baslik}</td>
-                        <td className="p-3 text-muted-foreground">{egitim.egitimTarihi}</td>
-                        <td className="p-3 text-muted-foreground">{egitim.sure ?? "—"}</td>
-                        <td className="p-3 text-muted-foreground">{egitim.egitimci ?? "—"}</td>
-                        <td className="p-3"><Badge variant="secondary">{egitim.katilimciSayisi} kişi</Badge></td>
-                        <td className="p-3">
-                          {egitim.sertifikaDosyaYolu
-                            ? <a href={egitim.sertifikaDosyaYolu} target="_blank" rel="noreferrer" className="text-primary underline text-xs" onClick={e => e.stopPropagation()}>İndir</a>
-                            : <span className="text-muted-foreground">—</span>}
+                        <td className="px-4 py-3 text-[13px] text-slate-800 dark:text-slate-100">{soru.soru}</td>
+                        <td className="px-4 py-3">
+                          <span className={cn(
+                            "inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold",
+                            soru.tip === "puan_1_5" ? "bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                          )}>
+                            {soru.tip === "puan_1_5" ? "1-5 Puan" : "Açık Metin"}
+                          </span>
                         </td>
-                        <td className="p-3" onClick={e => e.stopPropagation()}>
-                          <div className="flex gap-1">
-                            <Button size="sm" variant="ghost" title="Değerlendirme Linki Kopyala" onClick={() => copyLink(egitim.id)}>
-                              <LinkIcon className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => { setEgitimForm({ baslik: egitim.baslik, egitimTarihi: egitim.egitimTarihi, sure: egitim.sure ?? "", egitimci: egitim.egitimci ?? "", aciklama: egitim.aciklama ?? "" }); setEgitimSertifika(null); setEgitimModal({ open: true, editing: egitim }); }}>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1">
+                            <Button size="sm" variant="ghost" disabled={idx === 0} onClick={() => moveSoru(soru, "up")}><ArrowUp className="w-3 h-3" /></Button>
+                            <Button size="sm" variant="ghost" disabled={idx === arr.length - 1} onClick={() => moveSoru(soru, "down")}><ArrowDown className="w-3 h-3" /></Button>
+                            <Button size="sm" variant="ghost" onClick={() => { setSoruForm({ soru: soru.soru, tip: soru.tip }); setSoruModal({ open: true, editing: soru }); }}>
                               <Pencil className="w-4 h-4" />
                             </Button>
-                            <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700"
-                              onClick={() => { if (confirm("Bu eğitim ve tüm verileri silinecek. Emin misiniz?")) deleteEgitimMutation.mutate(egitim.id); }}>
+                            <Button size="sm" variant="ghost" className="text-rose-500 hover:text-rose-700"
+                              onClick={() => { if (confirm("Bu soru silinecek. Emin misiniz?")) deleteSoruMutation.mutate(soru.id); }}>
                               <Trash2 className="w-4 h-4" />
                             </Button>
                           </div>
                         </td>
                       </tr>
-                      {isExpanded && (
-                        <tr key={`${egitim.id}-expanded`} className="border-t bg-muted/10">
-                          <td colSpan={8} className="p-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-medium text-muted-foreground">
-                                Katılımcılar ({egitim.katilimciSayisi}) · {egitim.degerlendirmeSayisi} değerlendirme
-                              </span>
-                              <Button size="sm" variant="outline" onClick={() => { setKatilimciModal({ open: true, egitimId: egitim.id }); setSelectedPersonelIds([]); }}>
-                                <Plus className="w-3 h-3 mr-1" /> Katılımcı Ekle
-                              </Button>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {katilimcilar.map(k => (
-                                <div key={k.id} className="flex items-center gap-1 bg-background border rounded-full px-3 py-1 text-xs">
-                                  <User className="w-3 h-3" />
-                                  {k.personel.ad}
-                                  <button className="ml-1 text-muted-foreground hover:text-red-500"
-                                    onClick={() => removeKatilimciMutation.mutate({ egitimId: egitim.id, personelId: k.personelId })}>×</button>
-                                </div>
-                              ))}
-                              {katilimcilar.length === 0 && <span className="text-xs text-muted-foreground">Henüz katılımcı yok</span>}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="personeller">
-          <div className="flex justify-end mb-3">
-            <Button onClick={() => { setPersonelForm(emptyPersonelForm); setPersonelModal({ open: true, editing: null }); }}>
-              <Plus className="w-4 h-4 mr-2" /> Yeni Personel
-            </Button>
-          </div>
-          <div className="border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-3 font-medium">Ad</th>
-                  <th className="text-left p-3 font-medium">Pozisyon</th>
-                  <th className="text-left p-3 font-medium">Departman</th>
-                  <th className="text-left p-3 font-medium">Eğitim Sayısı</th>
-                  <th className="text-left p-3 font-medium">İşlemler</th>
-                </tr>
-              </thead>
-              <tbody>
-                {personellerList.length === 0 && (
-                  <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">Henüz personel yok</td></tr>
-                )}
-                {personellerList.map(p => (
-                  <tr key={p.id} className="border-t hover:bg-muted/20">
-                    <td className="p-3 font-medium">{p.ad}</td>
-                    <td className="p-3 text-muted-foreground">{p.pozisyon ?? "—"}</td>
-                    <td className="p-3 text-muted-foreground">{p.departman ?? "—"}</td>
-                    <td className="p-3"><Badge variant="secondary">{p.egitimSayisi} eğitim</Badge></td>
-                    <td className="p-3">
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => setKartModal({ open: true, personelId: p.id })}>
-                          <User className="w-4 h-4 mr-1" /> Kart
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setPersonelForm({ ad: p.ad, pozisyon: p.pozisyon ?? "", departman: p.departman ?? "" }); setPersonelModal({ open: true, editing: p }); }}>
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700"
-                          onClick={() => { if (confirm("Bu personel silinecek. Emin misiniz?")) deletePersonelMutation.mutate(p.id); }}>
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="sablon">
-          <div className="flex justify-end mb-3">
-            <Button onClick={() => { setSoruForm({ soru: "", tip: "puan_1_5" }); setSoruModal({ open: true, editing: null }); }}>
-              <Plus className="w-4 h-4 mr-2" /> Soru Ekle
-            </Button>
-          </div>
-          <div className="border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-3 font-medium w-12">Sıra</th>
-                  <th className="text-left p-3 font-medium">Soru</th>
-                  <th className="text-left p-3 font-medium">Tip</th>
-                  <th className="text-left p-3 font-medium">İşlemler</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorularList.length === 0 && (
-                  <tr><td colSpan={4} className="p-6 text-center text-muted-foreground">Henüz soru yok</td></tr>
-                )}
-                {[...sorularList].sort((a, b) => a.sira - b.sira).map((soru, idx, arr) => (
-                  <tr key={soru.id} className="border-t hover:bg-muted/20">
-                    <td className="p-3 text-muted-foreground">{soru.sira}</td>
-                    <td className="p-3">{soru.soru}</td>
-                    <td className="p-3"><Badge variant="outline">{soru.tip === "puan_1_5" ? "1-5 Puan" : "Açık Metin"}</Badge></td>
-                    <td className="p-3">
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" disabled={idx === 0} onClick={() => moveSoru(soru, "up")}><ArrowUp className="w-3 h-3" /></Button>
-                        <Button size="sm" variant="ghost" disabled={idx === arr.length - 1} onClick={() => moveSoru(soru, "down")}><ArrowDown className="w-3 h-3" /></Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setSoruForm({ soru: soru.soru, tip: soru.tip }); setSoruModal({ open: true, editing: soru }); }}>
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700"
-                          onClick={() => { if (confirm("Bu soru silinecek. Emin misiniz?")) deleteSoruMutation.mutate(soru.id); }}>
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </TabsContent>
-      </Tabs>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
 
       {/* Eğitim Modal */}
       <Dialog open={egitimModal.open} onOpenChange={open => { if (!open) setEgitimModal({ open: false, editing: null }); }}>

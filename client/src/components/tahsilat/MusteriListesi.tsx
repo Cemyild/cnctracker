@@ -1,20 +1,24 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Settings, Download as DownloadIcon, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Loader2, Settings, Download as DownloadIcon, ArrowUp, ArrowDown, ArrowUpDown, Search } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { RiskEsikleriModal } from "./RiskEsikleriModal";
 import { MusteriDrillDown } from "./MusteriDrillDown";
 
 const PATTERN_LABEL: Record<string, string> = {
   SAGLIKLI: "Sağlıklı", VIP_AKTIF_RISK: "VIP Aktif", TAKIP_GEREKEN: "Takip", YAVAS_ODEYICI: "Yavaş", DONUK_KAYIP: "Donuk",
 };
+// Soft zemin + koyu metin pill (palette hizası): DONUK rose, YAVAS amber, VIP sky, TAKIP sarı, SAGLIKLI emerald
 const PATTERN_BG: Record<string, string> = {
-  SAGLIKLI: "bg-green-500", VIP_AKTIF_RISK: "bg-blue-600", TAKIP_GEREKEN: "bg-yellow-500", YAVAS_ODEYICI: "bg-orange-500", DONUK_KAYIP: "bg-red-600",
+  SAGLIKLI: "bg-emerald-50 text-emerald-700",
+  VIP_AKTIF_RISK: "bg-sky-50 text-sky-700",
+  TAKIP_GEREKEN: "bg-yellow-50 text-yellow-700",
+  YAVAS_ODEYICI: "bg-amber-50 text-amber-700",
+  DONUK_KAYIP: "bg-rose-50 text-rose-700",
 };
 
 export function MusteriListesi({ mizanId }: { mizanId?: string }) {
@@ -73,17 +77,18 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
     const a = document.createElement("a"); a.href = url; a.download = `tahsilat-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   };
 
-  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-sky-500" /></div>;
   if (!data?.mizan) return <div className="text-center text-muted-foreground py-12">Henüz mizan yüklenmemiş. Üstten "Mizan Yükle" ile başla.</div>;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3 p-4 rounded-lg border bg-muted/20">
-        <div className="flex flex-wrap gap-3">
+      {/* Filtre çubuğu */}
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-[14px] border bg-card p-4">
+        <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="text-xs text-muted-foreground">Risk</label>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Risk</label>
             <Select value={patternFilter} onValueChange={setPatternFilter}>
-              <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="mt-1 h-[38px] w-[150px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="HEPSI">Hepsi</SelectItem>
                 <SelectItem value="SAGLIKLI">Sağlıklı</SelectItem>
@@ -95,9 +100,9 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
             </Select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Sektör</label>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Sektör</label>
             <Select value={sektorFilter} onValueChange={setSektorFilter}>
-              <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="mt-1 h-[38px] w-[180px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="HEPSI">Hepsi</SelectItem>
                 {sektorler.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -105,68 +110,71 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
             </Select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Ara</label>
-            <Input placeholder="Müşteri / hesap kodu" value={search} onChange={(e) => setSearch(e.target.value)} className="w-[200px]" />
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Ara</label>
+            <div className="relative mt-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input placeholder="Müşteri / hesap kodu" value={search} onChange={(e) => setSearch(e.target.value)} className="h-[38px] w-[220px] pl-9" />
+            </div>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!filtered.length}>
+        <div className="flex items-center gap-2">
+          <span className="mr-1 text-[12.5px] tabular-nums text-muted-foreground">{filtered.length} müşteri</span>
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!filtered.length} className="h-[38px] rounded-[9px]">
             <DownloadIcon className="w-3.5 h-3.5 mr-1.5" /> CSV
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setEsikOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => setEsikOpen(true)} className="h-[38px] rounded-[9px]">
             <Settings className="w-3.5 h-3.5 mr-1.5" /> Risk Eşikleri
           </Button>
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <div className="max-h-[600px] overflow-y-auto">
-            <Table className="text-sm">
-              <TableHeader className="sticky top-0 bg-muted z-10">
-                <TableRow>
-                  <TableHead>Müşteri</TableHead>
-                  <TableHead>Sektör</TableHead>
-                  <TableHead className="text-right cursor-pointer" onClick={() => handleSort("netBakiye")}>Net Bakiye <SortIcon f="netBakiye" /></TableHead>
-                  <TableHead>Son Borç</TableHead>
-                  <TableHead>Son Ödeme</TableHead>
-                  <TableHead className="text-right cursor-pointer" onClick={() => handleSort("gecikme")}>Gecikme <SortIcon f="gecikme" /></TableHead>
-                  <TableHead className="text-right cursor-pointer" onClick={() => handleSort("isAktivitesiAcigi")}>İş Akt. <SortIcon f="isAktivitesiAcigi" /></TableHead>
-                  <TableHead className="text-right cursor-pointer" onClick={() => handleSort("bakiyeFaturaAcikYuzde")}>Bakiye-Fatura % <SortIcon f="bakiyeFaturaAcikYuzde" /></TableHead>
-                  <TableHead>Risk</TableHead>
+      {/* Müşteri tablosu */}
+      <div className="rounded-[14px] border bg-card overflow-hidden">
+        <div className="max-h-[600px] overflow-auto">
+          <Table className="text-sm">
+            <TableHeader className="sticky top-0 z-10 bg-slate-50">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Müşteri</TableHead>
+                <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Sektör</TableHead>
+                <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("netBakiye")}>Net Bakiye <SortIcon f="netBakiye" /></TableHead>
+                <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Son Borç</TableHead>
+                <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Son Ödeme</TableHead>
+                <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("gecikme")}>Gecikme <SortIcon f="gecikme" /></TableHead>
+                <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("isAktivitesiAcigi")}>İş Akt. <SortIcon f="isAktivitesiAcigi" /></TableHead>
+                <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("bakiyeFaturaAcikYuzde")}>Bakiye-Fatura % <SortIcon f="bakiyeFaturaAcikYuzde" /></TableHead>
+                <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Risk</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!filtered.length ? (
+                <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Filtreye uyan müşteri yok</TableCell></TableRow>
+              ) : filtered.map((m) => (
+                <TableRow key={m.musteriId} className="cursor-pointer hover:bg-slate-50" onClick={() => setDrillId(m.musteriId)}>
+                  <TableCell>
+                    <div className="font-medium">{m.ad}</div>
+                    <div className="text-[10px] font-mono text-muted-foreground tabular-nums">{m.hesapKodu}</div>
+                  </TableCell>
+                  <TableCell className="text-xs">{m.sektor || "-"}</TableCell>
+                  <TableCell className={`text-right tabular-nums whitespace-nowrap font-semibold ${m.netBakiye < 0 ? "text-blue-600" : "text-orange-700"}`}>{fmtTry(m.netBakiye)}</TableCell>
+                  <TableCell className="text-xs tabular-nums">{m.sonBorcTarihi || "-"}</TableCell>
+                  <TableCell className="text-xs tabular-nums">{m.sonAlacakTarihi || "-"}</TableCell>
+                  <TableCell className="text-right tabular-nums">{m.gecikme >= 9999 ? "—" : `${m.gecikme}g`}</TableCell>
+                  <TableCell className={`text-right tabular-nums ${m.isAktivitesiAcigi > 0 ? "text-red-600" : ""}`}>{m.isAktivitesiAcigi}g</TableCell>
+                  <TableCell className={`text-right tabular-nums ${m.bakiyeFaturaAcikYuzde > 20 ? "text-red-600 font-semibold" : ""}`}>{m.bakiyeFaturaAcikYuzde >= 999 ? "—" : `${m.bakiyeFaturaAcikYuzde.toFixed(0)}%`}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <span className={cn("inline-block rounded-full px-2.5 py-0.5 text-[10.5px] font-bold", PATTERN_BG[m.pattern])}>{PATTERN_LABEL[m.pattern]}</span>
+                      {m.vipRozeti && <span title="VIP">🌟</span>}
+                      {m.yuksekBakiyeRozeti && <span title="Yüksek Bakiye">💰</span>}
+                      {m.eksiPozisyonRozeti && <span title="Eksi Pozisyon">⚡</span>}
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {!filtered.length ? (
-                  <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Filtreye uyan müşteri yok</TableCell></TableRow>
-                ) : filtered.map((m) => (
-                  <TableRow key={m.musteriId} className="cursor-pointer hover:bg-accent/40" onClick={() => setDrillId(m.musteriId)}>
-                    <TableCell>
-                      <div className="font-medium">{m.ad}</div>
-                      <div className="text-[10px] text-muted-foreground tabular-nums">{m.hesapKodu}</div>
-                    </TableCell>
-                    <TableCell className="text-xs">{m.sektor || "-"}</TableCell>
-                    <TableCell className={`text-right tabular-nums whitespace-nowrap font-semibold ${m.netBakiye < 0 ? "text-blue-600" : "text-orange-700"}`}>{fmtTry(m.netBakiye)}</TableCell>
-                    <TableCell className="text-xs tabular-nums">{m.sonBorcTarihi || "-"}</TableCell>
-                    <TableCell className="text-xs tabular-nums">{m.sonAlacakTarihi || "-"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{m.gecikme >= 9999 ? "—" : `${m.gecikme}g`}</TableCell>
-                    <TableCell className={`text-right tabular-nums ${m.isAktivitesiAcigi > 0 ? "text-red-600" : ""}`}>{m.isAktivitesiAcigi}g</TableCell>
-                    <TableCell className={`text-right tabular-nums ${m.bakiyeFaturaAcikYuzde > 20 ? "text-red-600 font-semibold" : ""}`}>{m.bakiyeFaturaAcikYuzde >= 999 ? "—" : `${m.bakiyeFaturaAcikYuzde.toFixed(0)}%`}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Badge className={PATTERN_BG[m.pattern]}>{PATTERN_LABEL[m.pattern]}</Badge>
-                        {m.vipRozeti && <span title="VIP">🌟</span>}
-                        {m.yuksekBakiyeRozeti && <span title="Yüksek Bakiye">💰</span>}
-                        {m.eksiPozisyonRozeti && <span title="Eksi Pozisyon">⚡</span>}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
 
       <RiskEsikleriModal open={esikOpen} onClose={() => setEsikOpen(false)} />
       <MusteriDrillDown musteriId={drillId} onClose={() => setDrillId(null)} />

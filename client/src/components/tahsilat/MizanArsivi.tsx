@@ -1,8 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2, Trash2, Archive } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface MizanRow {
@@ -33,27 +32,32 @@ export function MizanArsivi() {
     qc.invalidateQueries({ queryKey: ["/api/tahsilat/dashboard"] });
   };
 
-  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-sky-500" /></div>;
   if (!list?.length) return <div className="text-center text-muted-foreground py-12">Henüz mizan yüklenmemiş.</div>;
 
   return (
-    <Card>
-      <CardContent className="p-0">
+    <div className="rounded-[14px] border bg-card overflow-hidden">
+      <div className="flex items-center gap-2 border-b px-5 py-4">
+        <Archive className="w-4 h-4 text-sky-500" />
+        <h3 className="text-[15px] font-bold">Mizan Arşivi</h3>
+        <span className="ml-auto text-xs tabular-nums text-muted-foreground">{list.length} mizan</span>
+      </div>
+      <div className="overflow-x-auto">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Mizan Tarihi</TableHead>
-              <TableHead>Dosya</TableHead>
-              <TableHead className="text-right">Müşteri Sayısı</TableHead>
-              <TableHead className="text-right">Toplam Net Bakiye</TableHead>
-              <TableHead className="text-right">Boyut</TableHead>
-              <TableHead>Yükleme</TableHead>
-              <TableHead className="w-[80px]">İşlem</TableHead>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Mizan Tarihi</TableHead>
+              <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Dosya</TableHead>
+              <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Müşteri Sayısı</TableHead>
+              <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Toplam Net Bakiye</TableHead>
+              <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Boyut</TableHead>
+              <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Yükleme</TableHead>
+              <TableHead className="w-[80px] text-[10.5px] font-bold uppercase tracking-wide text-slate-500">İşlem</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {list.map((m) => (
-              <TableRow key={m.id}>
+              <TableRow key={m.id} className="hover:bg-slate-50">
                 <TableCell className="font-medium tabular-nums">{m.mizanTarihi}</TableCell>
                 <TableCell className="truncate max-w-[300px]" title={m.filename}>{m.filename}</TableCell>
                 <TableCell className="text-right tabular-nums">{m.kayitSayisi}</TableCell>
@@ -69,7 +73,7 @@ export function MizanArsivi() {
             ))}
           </TableBody>
         </Table>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

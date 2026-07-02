@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Settings } from "lucide-react";
 
 export function RiskEsikleriModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: ayarlar } = useQuery<any>({ queryKey: ["/api/tahsilat/ayarlar"], enabled: open });
@@ -38,7 +38,12 @@ export function RiskEsikleriModal({ open, onClose }: { open: boolean; onClose: (
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader><DialogTitle>Risk Eşikleri</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-sky-50 text-sky-600"><Settings className="h-[18px] w-[18px]" /></span>
+            Risk Eşikleri
+          </DialogTitle>
+        </DialogHeader>
         <div className="space-y-3 py-2">
           <div><Label>VIP Müşteri Eşiği (yıllık fatura, TL)</Label><Input type="number" value={form.vipEsik || ""} onChange={(e) => setForm({ ...form, vipEsik: e.target.value })} /></div>
           <div><Label>Yüksek Bakiye Eşiği (TL)</Label><Input type="number" value={form.yuksekBakiyeEsik || ""} onChange={(e) => setForm({ ...form, yuksekBakiyeEsik: e.target.value })} /></div>

@@ -82,7 +82,12 @@ export function MizanYukleModal({ open, onClose }: { open: boolean; onClose: () 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Mizan Yükle</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-sky-50 text-sky-600"><Upload className="h-[18px] w-[18px]" /></span>
+            Mizan Yükle
+          </DialogTitle>
+        </DialogHeader>
         <div className="space-y-4 py-2">
           <div>
             <Label>Mizan Tarihi (boş bırakılırsa dosya adından çıkarılır)</Label>
@@ -104,14 +109,14 @@ export function MizanYukleModal({ open, onClose }: { open: boolean; onClose: () 
             </Button>
           ) : (
             <div className="space-y-3 border-t pt-3">
-              <div className="text-sm font-semibold">Önizleme:</div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>📅 Mizan tarihi: <strong>{onizleme.mizanTarihi}</strong></div>
-                <div>📊 Müşteri sayısı: <strong>{onizleme.kayitSayisi}</strong></div>
-                <div>➕ Yeni müşteri: <strong className="text-green-600">{onizleme.yeniMusteri}</strong></div>
-                <div>🔄 Güncellenecek: <strong className="text-blue-600">{onizleme.mevcutMusteri}</strong></div>
-                <div>💰 Toplam borç: <strong>{fmtTry(onizleme.toplamBorc)}</strong></div>
-                <div>💵 Toplam alacak: <strong>{fmtTry(onizleme.toplamAlacak)}</strong></div>
+              <div className="text-sm font-semibold">Önizleme</div>
+              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+                <div className="rounded-[11px] border bg-card p-3"><div className="text-[11px] text-muted-foreground">📅 Mizan tarihi</div><div className="mt-0.5 font-bold tabular-nums">{onizleme.mizanTarihi}</div></div>
+                <div className="rounded-[11px] border bg-card p-3"><div className="text-[11px] text-muted-foreground">📊 Müşteri sayısı</div><div className="mt-0.5 font-bold tabular-nums">{onizleme.kayitSayisi}</div></div>
+                <div className="rounded-[11px] border bg-card p-3"><div className="text-[11px] text-muted-foreground">➕ Yeni müşteri</div><div className="mt-0.5 font-bold tabular-nums text-emerald-600">{onizleme.yeniMusteri}</div></div>
+                <div className="rounded-[11px] border bg-card p-3"><div className="text-[11px] text-muted-foreground">🔄 Güncellenecek</div><div className="mt-0.5 font-bold tabular-nums text-sky-600">{onizleme.mevcutMusteri}</div></div>
+                <div className="rounded-[11px] border bg-card p-3"><div className="text-[11px] text-muted-foreground">💰 Toplam borç</div><div className="mt-0.5 font-bold tabular-nums">{fmtTry(onizleme.toplamBorc)}</div></div>
+                <div className="rounded-[11px] border bg-card p-3"><div className="text-[11px] text-muted-foreground">💵 Toplam alacak</div><div className="mt-0.5 font-bold tabular-nums">{fmtTry(onizleme.toplamAlacak)}</div></div>
               </div>
               {onizleme.uyarilar.length > 0 && (
                 <div className="rounded border border-yellow-500/30 bg-yellow-500/5 p-3 text-sm">

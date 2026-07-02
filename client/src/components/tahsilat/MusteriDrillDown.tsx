@@ -52,7 +52,7 @@ export function MusteriDrillDown({ musteriId, onClose }: { musteriId: string | n
 
             <div className="space-y-4 py-2">
               {/* Trend grafiği */}
-              <Card>
+              <Card className="rounded-[14px]">
                 <CardContent className="p-4">
                   <div className="text-sm font-semibold mb-2">📈 Bakiye Geçmişi</div>
                   {data.timeline.length === 0 ? (
@@ -66,8 +66,8 @@ export function MusteriDrillDown({ musteriId, onClose }: { musteriId: string | n
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="tarih" tick={{ fontSize: 11 }} />
                         <YAxis tickFormatter={(v) => v >= 1_000_000 ? `${(v/1_000_000).toFixed(1)}M` : `${(v/1000).toFixed(0)}K`} tick={{ fontSize: 11 }} />
-                        <Tooltip formatter={(v: any) => fmtTry(v)} />
-                        <Line type="monotone" dataKey="bakiye" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} />
+                        <Tooltip formatter={(v: any) => fmtTry(v)} contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0", fontSize: "12px" }} />
+                        <Line type="monotone" dataKey="bakiye" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 4 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   )}
@@ -75,7 +75,7 @@ export function MusteriDrillDown({ musteriId, onClose }: { musteriId: string | n
               </Card>
 
               {/* Eşleşen gümrük unvanları */}
-              <Card>
+              <Card className="rounded-[14px]">
                 <CardContent className="p-4">
                   <div className="text-sm font-semibold mb-2">🔗 Eşleşen Gümrük Unvanları</div>
                   {(data.musteri.gumrukFirmaUnvanlari || []).length === 0 ? (
@@ -94,26 +94,26 @@ export function MusteriDrillDown({ musteriId, onClose }: { musteriId: string | n
               </Card>
 
               {/* Tüm bakiye kayıtları */}
-              <Card>
+              <Card className="rounded-[14px]">
                 <CardContent className="p-0">
                   <div className="text-sm font-semibold p-4 pb-2">📋 Tüm Mizan Kayıtları ({data.timeline.length})</div>
-                  <div className="max-h-[300px] overflow-y-auto">
+                  <div className="max-h-[300px] overflow-auto">
                     <Table className="text-xs">
-                      <TableHeader className="sticky top-0 bg-muted">
-                        <TableRow>
-                          <TableHead>Tarih</TableHead>
-                          <TableHead className="text-right">Borç</TableHead>
-                          <TableHead className="text-right">Alacak</TableHead>
-                          <TableHead className="text-right">Net Bakiye</TableHead>
-                          <TableHead>Son Borç</TableHead>
-                          <TableHead>Son Ödeme</TableHead>
+                      <TableHeader className="sticky top-0 bg-slate-50">
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tarih</TableHead>
+                          <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Borç</TableHead>
+                          <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Alacak</TableHead>
+                          <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Net Bakiye</TableHead>
+                          <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Son Borç</TableHead>
+                          <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Son Ödeme</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {[...data.timeline].reverse().map((t: any) => {
                           const nb = (t.sonBakiyeBA === "A" ? -1 : 1) * Number(t.sonBakiye);
                           return (
-                            <TableRow key={t.id}>
+                            <TableRow key={t.id} className="hover:bg-slate-50">
                               <TableCell className="font-medium tabular-nums">{t.mizanTarihi}</TableCell>
                               <TableCell className="text-right tabular-nums">{fmtTry(Number(t.borc))}</TableCell>
                               <TableCell className="text-right tabular-nums">{fmtTry(Number(t.alacak))}</TableCell>

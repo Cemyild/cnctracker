@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
-import { BackgroundPaths } from "@/components/BackgroundPaths";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { Users, Wallet, Loader2, Search, Building2, TrendingUp, Filter, User, Info, Calendar, Hash, ArrowUpDown, ArrowUp, ArrowDown, Calculator, Percent, AlertCircle, Banknote, Upload, Save, X, FileText, Download, Trash2, FileUp, CheckCircle2, AlertTriangle, History } from "lucide-react";
+import { Users, Wallet, Loader2, Search, Building2, TrendingUp, Filter, User, Info, Calendar, Hash, ArrowUpDown, ArrowUp, ArrowDown, Calculator, Percent, AlertCircle, Banknote, Upload, Plus, Save, X, FileText, Download, Trash2, FileUp, CheckCircle2, AlertTriangle, History } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { subeler } from "@shared/schema";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -225,6 +225,9 @@ export default function Calisanlar() {
     const [selectedAy, setSelectedAy] = useState<string>("1");
     const [selectedYil, setSelectedYil] = useState<number>(2026);
     const [hazineTesvikiVar, setHazineTesvikiVar] = useState(true);
+
+    // Ana sekme (Maaşlar / İzinler) — kontrollü state, tasarım sistemi tab barı
+    const [activeTab, setActiveTab] = useState<"maaslar" | "izinler">("maaslar");
 
 
 
@@ -543,407 +546,397 @@ export default function Calisanlar() {
     };
 
     const renderTable = (items: any[]) => (
-        <Table>
-            <TableHeader className="bg-muted/30">
-                <TableRow>
-                    <TableHead className="font-bold py-4">T.C. Kimlik No</TableHead>
-                    <TableHead
-                        className="font-bold py-4 text-primary cursor-pointer hover:bg-primary/5 transition-colors"
-                        onClick={() => handleSort('adSoyad')}
-                    >
-                        <div className="flex items-center gap-2">
-                            Adı Soyadı
-                            {sortConfig?.key === 'adSoyad' ? (
-                                sortConfig.direction === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
-                            ) : <ArrowUpDown className="w-4 h-4 opacity-30" />}
-                        </div>
-                    </TableHead>
-                    <TableHead className="font-bold py-4">Statü</TableHead>
-                    <TableHead className="font-bold py-4">İşe Giriş</TableHead>
-                    <TableHead className="font-bold py-4 text-right">Hesaplanan Brüt</TableHead>
-                    <TableHead className="font-bold py-4 text-right text-green-600">Net Ücret</TableHead>
-                    <TableHead className="font-bold py-4 text-right text-orange-600">İşçi SGK Payı</TableHead>
-                    <TableHead className="font-bold py-4 text-right text-purple-600">İşveren SGK</TableHead>
-                    <TableHead className="font-bold py-4 text-right text-red-600">Toplam Maliyet</TableHead>
-                    <TableHead className="font-bold py-4 text-center">Şube</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {items.map((person) => (
-                    <TableRow key={person.id} className="hover:bg-primary/5 transition-colors border-border/40">
-                        <TableCell className="font-mono text-sm text-muted-foreground">{person.tcNo}</TableCell>
-                        <TableCell
-                            className="font-bold text-base cursor-pointer hover:text-primary transition-colors flex items-center gap-2"
-                            onClick={() => openModal(person)}
+        <div className="overflow-x-auto">
+            <Table className="min-w-[1000px]">
+                <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">T.C. Kimlik No</TableHead>
+                        <TableHead
+                            className="cursor-pointer text-[10.5px] font-bold uppercase tracking-wide text-slate-500 transition-colors hover:text-slate-700"
+                            onClick={() => handleSort('adSoyad')}
                         >
-                            {person.adSoyad}
-                            <Info className="w-3 h-3 opacity-30" />
-                        </TableCell>
-                        <TableCell>
-                            <Badge
-                                className={`
-                                    font-bold text-[10px] uppercase px-2 py-0.5 rounded-full
-                                    ${person.statu === 'NORMAL' ? 'bg-green-500/10 text-green-600 border-green-500/20' :
-                                        person.statu === 'EMEKLİ' ? 'bg-orange-500/10 text-orange-600 border-orange-500/20' :
-                                            'bg-purple-500/10 text-purple-600 border-purple-500/20'}
-                                `}
-                                variant="outline"
-                            >
-                                {person.statu || 'NORMAL'}
-                            </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm font-medium">{person.isGirisTarihi || "-"}</TableCell>
-                        <TableCell className="text-right font-bold text-blue-600/80 cursor-pointer" onClick={() => handleBrutClick(person)}>
-                            {editingBrutId === person.id ? (
-                                <Input
-                                    className="h-8 w-32 text-right font-bold"
-                                    value={editingBrutVal}
-                                    onChange={(e) => setEditingBrutVal(e.target.value)}
-                                    autoFocus
-                                    onBlur={() => handleBrutSave(person)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleBrutSave(person);
-                                        if (e.key === 'Escape') setEditingBrutId(null);
-                                    }}
-                                />
-                            ) : (
-                                formatCurrency(person.brutUcret)
-                            )}
-                        </TableCell>
-                        <TableCell className="text-right font-black text-green-600 text-base cursor-pointer" onClick={() => handleNetClick(person)}>
-                            {editingNetId === person.id ? (
-                                <Input
-                                    className="h-8 w-32 text-right font-bold text-green-600"
-                                    value={editingNetVal}
-                                    onChange={(e) => setEditingNetVal(e.target.value)}
-                                    autoFocus
-                                    onBlur={() => handleNetSave(person)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleNetSave(person);
-                                        if (e.key === 'Escape') setEditingNetId(null);
-                                    }}
-                                />
-                            ) : (
-                                getDisplayNet(person)
-                            )}
-                        </TableCell>
-                        <TableCell className="text-right font-bold text-orange-600/80">
-                            {formatCurrency(person.sigortaKesintisi)}
-                        </TableCell>
-                        <TableCell className="text-right font-bold text-purple-600/80">
-                            {formatCurrency(person.isverenSgkPayi)}
-                        </TableCell>
-                        <TableCell className="text-right font-black text-red-600">
-                            {formatCurrency(parseFloat(person.brutUcret || "0") + parseFloat(person.isverenSgkPayi || "0"))}
-                        </TableCell>
-                        <TableCell className="text-center">
-                            <Select
-                                value={person.sube || "Merkez"}
-                                onValueChange={(newVal) => {
-                                    // Optimistic update
-                                    const newData = [...data];
-                                    const index = newData.findIndex(p => p.id === person.id);
-                                    if (index > -1) {
-                                        newData[index] = { ...newData[index], sube: newVal };
-                                        setData(newData);
-                                    }
-
-                                    // API Call
-                                    fetch(`/api/calisanlar/${person.id}`, {
-                                        method: 'PATCH',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ sube: newVal })
-                                    }).then(res => {
-                                        if (!res.ok) {
-                                            toast({ variant: "destructive", title: "Hata", description: "Şube güncellenemedi" });
-                                            // Revert if needed, but for now simple error toast
-                                        } else {
-                                            toast({ title: "Başarılı", description: "Şube güncellendi" });
-                                        }
-                                    }).catch(err => {
-                                        console.error(err);
-                                        toast({ variant: "destructive", title: "Hata", description: "Bağlantı hatası" });
-                                    });
-                                }}
-                            >
-                                <SelectTrigger className="h-8 border-none bg-transparent hover:bg-muted/50 justify-center font-bold text-primary">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {subeler.map(s => (
-                                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                                    ))}
-                                    <SelectItem value="Merkez">Merkez</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </TableCell>
+                            <span className="flex items-center gap-1.5">
+                                Adı Soyadı
+                                {sortConfig?.key === 'adSoyad' ? (
+                                    sortConfig.direction === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />
+                                ) : <ArrowUpDown className="h-3.5 w-3.5 opacity-30" />}
+                            </span>
+                        </TableHead>
+                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Statü</TableHead>
+                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">İşe Giriş</TableHead>
+                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Hesaplanan Brüt</TableHead>
+                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide" style={{ color: '#16a34a' }}>Net Ücret</TableHead>
+                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide" style={{ color: '#ea580c' }}>İşçi SGK Payı</TableHead>
+                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide" style={{ color: '#7c3aed' }}>İşveren SGK</TableHead>
+                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide" style={{ color: '#dc2626' }}>Toplam Maliyet</TableHead>
+                        <TableHead className="text-center text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Şube</TableHead>
                     </TableRow>
-                ))}
-            </TableBody>
-            <TableFooter className="bg-muted/50 border-t-2 border-primary/20">
-                <TableRow className="hover:bg-muted/50">
-                    <TableCell colSpan={4} className="text-right font-black text-lg text-primary">GENEL TOPLAM:</TableCell>
-                    <TableCell className="text-right font-black text-blue-600 text-lg">{formatCurrency(stats.toplamBrut)}</TableCell>
-                    <TableCell className="text-right font-black text-green-600 text-lg">{formatCurrency(stats.toplamNet)}</TableCell>
-                    <TableCell className="text-right font-black text-orange-600 text-lg">{formatCurrency(stats.toplamSigortaKesintisi)}</TableCell>
-                    <TableCell className="text-right font-black text-purple-600 text-lg">{formatCurrency(stats.toplamIsverenPayi)}</TableCell>
-                    <TableCell className="text-right font-black text-red-600 text-lg">{formatCurrency(stats.toplamIsverenMaliyeti)}</TableCell>
-                    <TableCell></TableCell>
-                </TableRow>
-            </TableFooter>
-        </Table>
-    );
-
-    return (
-        <div className="relative min-h-screen pb-20">
-            <BackgroundPaths />
-
-            <div className="relative z-10 p-6 lg:p-8 max-w-[1600px] mx-auto">
-              <Tabs defaultValue="maaslar" className="w-full">
-                <TabsList className="mb-6">
-                  <TabsTrigger value="maaslar" className="gap-2">
-                    <Wallet className="w-4 h-4" /> Maaşlar
-                  </TabsTrigger>
-                  <TabsTrigger value="izinler" className="gap-2">
-                    <Calendar className="w-4 h-4" /> İzinler
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="maaslar" className="space-y-8">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                    <div>
-                        <h2 className="text-4xl font-black tracking-tight bg-gradient-to-r from-foreground to-foreground/50 bg-clip-text text-transparent">Personel Portalı</h2>
-                        <p className="text-muted-foreground text-lg">Şirket personeli genel listesi ve yönetimi.</p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-4 bg-background/30 backdrop-blur-xl p-2 rounded-2xl border border-white/10 shadow-2xl">
-                        {/* Yıl Seçici */}
-                        <Select value={String(selectedYil)} onValueChange={(val) => setSelectedYil(parseInt(val))}>
-                            <SelectTrigger className="w-[100px] border-none bg-white/5">
-                                <SelectValue placeholder="Yıl" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="2024">2024</SelectItem>
-                                <SelectItem value="2025">2025</SelectItem>
-                                <SelectItem value="2026">2026</SelectItem>
-                                <SelectItem value="2027">2027</SelectItem>
-                            </SelectContent>
-                        </Select>
-
-                        {/* Ay Seçici */}
-                        <Select value={selectedAy} onValueChange={setSelectedAy}>
-                            <SelectTrigger className="w-[140px] border-none bg-white/5">
-                                <Calendar className="w-4 h-4 mr-2" />
-                                <SelectValue placeholder="Dönem Seç" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(ay => (
-                                    <SelectItem key={ay} value={String(ay)}>
-                                        {ayNumarasiToAd(ay)}
-                                    </SelectItem>
-                                ))}
-                                <SelectItem value="toplam" className="font-bold border-t mt-1 pt-2">
-                                    📊 Yıllık Toplam
-                                </SelectItem>
-                            </SelectContent>
-                        </Select>
-
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                            <Input
-                                placeholder="İsim veya TC ile ara..."
-                                className="pl-10 w-[240px] border-none bg-white/5 focus-visible:ring-primary/30"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                            />
-                        </div>
-
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="outline" className="w-[160px] border-none bg-white/5 justify-between font-normal">
-                                    <div className="flex items-center">
-                                        <Filter className="w-4 h-4 mr-2" />
-                                        {selectedSubeler.length === 0 ? "Tüm Şubeler" : `${selectedSubeler.length} Şube Seçili`}
-                                    </div>
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent className="w-56" align="end">
-                                <DropdownMenuLabel>Şubeler</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuCheckboxItem
-                                    checked={selectedSubeler.length === 0}
-                                    onCheckedChange={(checked) => {
-                                        if (checked) setSelectedSubeler([]);
-                                    }}
+                </TableHeader>
+                <TableBody>
+                    {items.map((person) => {
+                        const statu = person.statu || 'NORMAL';
+                        const statuColors: Record<string, [string, string]> = {
+                            'YÖNETİCİ': ['#ede9fe', '#6d28d9'],
+                            'EMEKLİ': ['#fef3c7', '#92400e'],
+                            'NORMAL': ['#f1f5f9', '#475569'],
+                        };
+                        const [stBg, stFg] = statuColors[statu] || statuColors['NORMAL'];
+                        return (
+                            <TableRow key={person.id} className="hover:bg-slate-50">
+                                <TableCell className="font-mono text-xs text-muted-foreground">{person.tcNo}</TableCell>
+                                <TableCell
+                                    className="cursor-pointer font-semibold text-slate-800 transition-colors hover:text-sky-600"
+                                    onClick={() => openModal(person)}
                                 >
-                                    Tüm Şubeler
-                                </DropdownMenuCheckboxItem>
-                                {subeler.map((s) => (
-                                    <DropdownMenuCheckboxItem
-                                        key={s}
-                                        checked={selectedSubeler.includes(s)}
-                                        onCheckedChange={(checked) => {
-                                            if (checked) {
-                                                setSelectedSubeler([...selectedSubeler, s]);
-                                            } else {
-                                                setSelectedSubeler(selectedSubeler.filter((item) => item !== s));
+                                    <span className="flex items-center gap-1.5">
+                                        {person.adSoyad}
+                                        <Info className="h-3 w-3 opacity-30" />
+                                    </span>
+                                </TableCell>
+                                <TableCell>
+                                    <span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase" style={{ background: stBg, color: stFg }}>
+                                        {statu}
+                                    </span>
+                                </TableCell>
+                                <TableCell className="text-sm text-slate-600">{person.isGirisTarihi || "-"}</TableCell>
+                                <TableCell className="cursor-pointer text-right font-semibold tabular-nums" style={{ color: '#0284c7' }} onClick={() => handleBrutClick(person)}>
+                                    {editingBrutId === person.id ? (
+                                        <Input
+                                            className="h-8 w-32 text-right font-bold"
+                                            value={editingBrutVal}
+                                            onChange={(e) => setEditingBrutVal(e.target.value)}
+                                            autoFocus
+                                            onBlur={() => handleBrutSave(person)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') handleBrutSave(person);
+                                                if (e.key === 'Escape') setEditingBrutId(null);
+                                            }}
+                                        />
+                                    ) : (
+                                        formatCurrency(person.brutUcret)
+                                    )}
+                                </TableCell>
+                                <TableCell className="cursor-pointer text-right font-bold tabular-nums" style={{ color: '#16a34a' }} onClick={() => handleNetClick(person)}>
+                                    {editingNetId === person.id ? (
+                                        <Input
+                                            className="h-8 w-32 text-right font-bold text-green-600"
+                                            value={editingNetVal}
+                                            onChange={(e) => setEditingNetVal(e.target.value)}
+                                            autoFocus
+                                            onBlur={() => handleNetSave(person)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') handleNetSave(person);
+                                                if (e.key === 'Escape') setEditingNetId(null);
+                                            }}
+                                        />
+                                    ) : (
+                                        getDisplayNet(person)
+                                    )}
+                                </TableCell>
+                                <TableCell className="text-right font-semibold tabular-nums" style={{ color: '#ea580c' }}>
+                                    {formatCurrency(person.sigortaKesintisi)}
+                                </TableCell>
+                                <TableCell className="text-right font-semibold tabular-nums" style={{ color: '#7c3aed' }}>
+                                    {formatCurrency(person.isverenSgkPayi)}
+                                </TableCell>
+                                <TableCell className="text-right font-bold tabular-nums" style={{ color: '#dc2626' }}>
+                                    {formatCurrency(parseFloat(person.brutUcret || "0") + parseFloat(person.isverenSgkPayi || "0"))}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                    <Select
+                                        value={person.sube || "Merkez"}
+                                        onValueChange={(newVal) => {
+                                            // Optimistic update
+                                            const newData = [...data];
+                                            const index = newData.findIndex(p => p.id === person.id);
+                                            if (index > -1) {
+                                                newData[index] = { ...newData[index], sube: newVal };
+                                                setData(newData);
                                             }
+
+                                            // API Call
+                                            fetch(`/api/calisanlar/${person.id}`, {
+                                                method: 'PATCH',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ sube: newVal })
+                                            }).then(res => {
+                                                if (!res.ok) {
+                                                    toast({ variant: "destructive", title: "Hata", description: "Şube güncellenemedi" });
+                                                    // Revert if needed, but for now simple error toast
+                                                } else {
+                                                    toast({ title: "Başarılı", description: "Şube güncellendi" });
+                                                }
+                                            }).catch(err => {
+                                                console.error(err);
+                                                toast({ variant: "destructive", title: "Hata", description: "Bağlantı hatası" });
+                                            });
                                         }}
                                     >
-                                        {s}
-                                    </DropdownMenuCheckboxItem>
-                                ))}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                        <Button
-                            onClick={() => setMaasListesiOpen(true)}
-                            className="bg-green-600 hover:bg-green-700 text-white border-0 ml-2"
-                            title="Maaş Listesi PDF (sadece net ödemeler) - sağlam parser, brüt arkada hesaplanır"
-                        >
-                            <FileUp className="w-4 h-4 mr-2" />
-                            Maaş Listesi (PDF)
-                        </Button>
-                        <Button
-                            onClick={() => setArsivOpen(true)}
-                            variant="outline"
-                            className="border-blue-500/30 hover:bg-blue-500/10"
-                            title="Detaylı Bordro PDF arşivi - parse yok, denetim için saklanır"
-                        >
-                            <FileText className="w-4 h-4 mr-2" />
-                            Bordro Arşivi
-                        </Button>
-                        <Button
-                            onClick={() => setUploadDialogOpen(true)}
-                            variant="outline"
-                            className="opacity-70"
-                            title="Eski yöntem (Excel veya bordro PDF heuristic parse)"
-                        >
-                            <Upload className="w-4 h-4 mr-2" />
-                            Bordro Yükle (Eski)
-                        </Button>
+                                        <SelectTrigger className="mx-auto h-8 w-[130px] justify-center border-none bg-transparent font-semibold text-sky-600 hover:bg-slate-100">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {subeler.map(s => (
+                                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                                            ))}
+                                            <SelectItem value="Merkez">Merkez</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </TableCell>
+                            </TableRow>
+                        );
+                    })}
+                </TableBody>
+                <TableFooter>
+                    <TableRow className="bg-slate-50 hover:bg-slate-50">
+                        <TableCell colSpan={4} className="text-right font-black text-sky-700">GENEL TOPLAM</TableCell>
+                        <TableCell className="text-right font-black tabular-nums" style={{ color: '#0284c7' }}>{formatCurrency(stats.toplamBrut)}</TableCell>
+                        <TableCell className="text-right font-black tabular-nums" style={{ color: '#16a34a' }}>{formatCurrency(stats.toplamNet)}</TableCell>
+                        <TableCell className="text-right font-black tabular-nums" style={{ color: '#ea580c' }}>{formatCurrency(stats.toplamSigortaKesintisi)}</TableCell>
+                        <TableCell className="text-right font-black tabular-nums" style={{ color: '#7c3aed' }}>{formatCurrency(stats.toplamIsverenPayi)}</TableCell>
+                        <TableCell className="text-right font-black tabular-nums" style={{ color: '#dc2626' }}>{formatCurrency(stats.toplamIsverenMaliyeti)}</TableCell>
+                        <TableCell></TableCell>
+                    </TableRow>
+                </TableFooter>
+            </Table>
+        </div>
+    );
+
+    // KPI kart tanımları (accent-bar) — değerler mevcut stats objesinden gelir
+    const kpis = [
+        { label: "Aktif Personel", value: String(stats.toplamPersonel), sub: "bordrolu personel", color: "#0ea5e9" },
+        { label: "Genel Net Toplam", value: formatCurrency(stats.toplamNet), sub: "ödenen net", color: "#16a34a" },
+        { label: "Genel Brüt Toplam", value: formatCurrency(stats.toplamBrut), sub: "hesaplanan brüt", color: "#0284c7" },
+        { label: "Toplam İşveren Payı", value: formatCurrency(stats.toplamIsverenPayi), sub: "SGK + işsizlik", color: "#7c3aed" },
+        { label: "Toplam İşveren Maliyeti", value: formatCurrency(stats.toplamIsverenMaliyeti), sub: "brüt + işveren payı", color: "#dc2626" },
+    ];
+
+    const donemLabel = selectedAy === "toplam"
+        ? `${selectedYil} Yıllık Toplam`
+        : `${ayNumarasiToAd(parseInt(selectedAy))} ${selectedYil}`;
+
+    return (
+        <div className="min-h-full bg-slate-50 dark:bg-background">
+            <div className="px-6 pb-12 lg:px-8">
+                {/* ===== STICKY HEADER + TAB BAR ===== */}
+                <div className="sticky top-0 z-20 border-b border-border/70 bg-slate-50/90 pt-5 backdrop-blur dark:bg-background/90">
+                    <div className="flex flex-wrap items-end justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-[11px] bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400">
+                                <Users className="h-[22px] w-[22px]" strokeWidth={1.8} />
+                            </div>
+                            <div>
+                                <h1 className="text-[21px] font-extrabold tracking-tight">Personel Portalı</h1>
+                                <p className="mt-0.5 text-[12.5px] text-muted-foreground">Şirket personeli genel listesi, maaş ve izin yönetimi</p>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            {/* Yıl / Ay seçici */}
+                            <div className="flex items-center gap-2 rounded-[11px] border bg-card p-1.5 shadow-sm">
+                                <Select value={String(selectedYil)} onValueChange={(val) => setSelectedYil(parseInt(val))}>
+                                    <SelectTrigger className="h-[34px] w-[92px]"><SelectValue placeholder="Yıl" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="2024">2024</SelectItem>
+                                        <SelectItem value="2025">2025</SelectItem>
+                                        <SelectItem value="2026">2026</SelectItem>
+                                        <SelectItem value="2027">2027</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <Select value={selectedAy} onValueChange={setSelectedAy}>
+                                    <SelectTrigger className="h-[34px] w-[148px]">
+                                        <Calendar className="mr-1.5 h-4 w-4" />
+                                        <SelectValue placeholder="Dönem" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(ay => (
+                                            <SelectItem key={ay} value={String(ay)}>{ayNumarasiToAd(ay)}</SelectItem>
+                                        ))}
+                                        <SelectItem value="toplam" className="mt-1 border-t pt-2 font-bold">📊 Yıllık Toplam</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {/* Maaşlar sekmesine özel kontroller: arama, şube filtresi, 3 yükleme butonu */}
+                            {activeTab === "maaslar" && (
+                                <>
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                        <Input
+                                            placeholder="İsim veya TC ile ara..."
+                                            className="h-[38px] w-[210px] rounded-[9px] pl-9 text-[13px]"
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                        />
+                                    </div>
+
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="outline" className="h-[38px] w-[150px] justify-between rounded-[9px] font-normal">
+                                                <span className="flex items-center">
+                                                    <Filter className="mr-2 h-4 w-4" />
+                                                    {selectedSubeler.length === 0 ? "Tüm Şubeler" : `${selectedSubeler.length} Şube`}
+                                                </span>
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent className="w-56" align="end">
+                                            <DropdownMenuLabel>Şubeler</DropdownMenuLabel>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuCheckboxItem
+                                                checked={selectedSubeler.length === 0}
+                                                onCheckedChange={(checked) => {
+                                                    if (checked) setSelectedSubeler([]);
+                                                }}
+                                            >
+                                                Tüm Şubeler
+                                            </DropdownMenuCheckboxItem>
+                                            {subeler.map((s) => (
+                                                <DropdownMenuCheckboxItem
+                                                    key={s}
+                                                    checked={selectedSubeler.includes(s)}
+                                                    onCheckedChange={(checked) => {
+                                                        if (checked) {
+                                                            setSelectedSubeler([...selectedSubeler, s]);
+                                                        } else {
+                                                            setSelectedSubeler(selectedSubeler.filter((item) => item !== s));
+                                                        }
+                                                    }}
+                                                >
+                                                    {s}
+                                                </DropdownMenuCheckboxItem>
+                                            ))}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+
+                                    <Button
+                                        onClick={() => setMaasListesiOpen(true)}
+                                        className="h-[38px] rounded-[9px] border-0 bg-emerald-600 text-white hover:bg-emerald-700"
+                                        title="Maaş Listesi PDF (sadece net ödemeler) - sağlam parser, brüt arkada hesaplanır"
+                                    >
+                                        <FileUp className="mr-2 h-4 w-4" />
+                                        Maaş Listesi (PDF)
+                                    </Button>
+                                    <Button
+                                        onClick={() => setArsivOpen(true)}
+                                        variant="outline"
+                                        className="h-[38px] rounded-[9px]"
+                                        title="Detaylı Bordro PDF arşivi - parse yok, denetim için saklanır"
+                                    >
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        Bordro Arşivi
+                                    </Button>
+                                    <Button
+                                        onClick={() => setUploadDialogOpen(true)}
+                                        variant="outline"
+                                        className="h-[38px] rounded-[9px] opacity-80"
+                                        title="Eski yöntem (Excel veya bordro PDF heuristic parse)"
+                                    >
+                                        <Upload className="mr-2 h-4 w-4" />
+                                        Bordro Yükle (Eski)
+                                    </Button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Tab barı — aktif tab inset alt çizgi */}
+                    <div className="mt-3.5 flex gap-1">
+                        {([
+                            { id: "maaslar", label: "Maaşlar", Icon: Wallet },
+                            { id: "izinler", label: "İzinler", Icon: Calendar },
+                        ] as const).map((t) => (
+                            <button
+                                key={t.id}
+                                onClick={() => setActiveTab(t.id)}
+                                className={cn(
+                                    "inline-flex items-center gap-2 rounded-t-lg px-3.5 py-2.5 text-[13.5px] transition-colors",
+                                    activeTab === t.id
+                                        ? "font-bold text-foreground shadow-[inset_0_-2px_0_#0ea5e9]"
+                                        : "font-semibold text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                <t.Icon className="h-4 w-4" />
+                                {t.label}
+                            </button>
+                        ))}
                     </div>
                 </div>
 
-                {/* Dönem Bilgisi */}
-                <div className="text-center">
-                    <Badge className="text-lg px-4 py-2 bg-primary/10 text-primary border-primary/20">
-                        <Calendar className="w-5 h-5 mr-2" />
-                        {selectedAy === "toplam" ? `${selectedYil} Yıllık Toplam` : `${ayNumarasiToAd(parseInt(selectedAy))} ${selectedYil}`}
-                    </Badge>
-                </div>
+                {/* ===================== MAAŞLAR ===================== */}
+                {activeTab === "maaslar" && (
+                    <div className="mt-5 space-y-4">
+                        {/* 5 KPI kartı — accent-bar */}
+                        <div className="grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-5">
+                            {kpis.map((k) => (
+                                <div key={k.label} className="relative overflow-hidden rounded-[14px] border bg-card p-4">
+                                    <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: k.color }} />
+                                    <div className="pl-2 text-[10.5px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{k.label}</div>
+                                    <div className="mt-2 pl-2 text-[21px] font-extrabold tracking-tight tabular-nums">{k.value}</div>
+                                    <div className="mt-0.5 pl-2 text-[11.5px] text-muted-foreground">{k.sub}</div>
+                                </div>
+                            ))}
+                        </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                    {/* 1. Aktif Personel */}
-                    <Card className="bg-background/40 backdrop-blur-xl border-primary/20 shadow-lg p-5">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">Aktif Personel</p>
-                                <h3 className="text-2xl font-black">{stats.toplamPersonel}</h3>
+                        {/* Maaş Listesi tablosu */}
+                        <div className="overflow-hidden rounded-[14px] border bg-card">
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-4">
+                                <div>
+                                    <h3 className="text-[15px] font-bold">Maaş Listesi</h3>
+                                    <p className="text-xs text-muted-foreground">Net veya brüt ücrete tıklayarak düzenle · SGK ve maliyet arkada yeniden hesaplanır</p>
+                                </div>
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3 py-1 text-[12px] font-bold text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                                    <Calendar className="h-3.5 w-3.5" />
+                                    {donemLabel}
+                                </span>
                             </div>
-                            <Users className="w-6 h-6 text-primary" />
+                            {loading ? (
+                                <div className="flex flex-col items-center justify-center gap-3 py-20">
+                                    <Loader2 className="h-9 w-9 animate-spin text-sky-500" />
+                                    <p className="text-sm font-semibold text-muted-foreground">Personel verileri yükleniyor...</p>
+                                </div>
+                            ) : (
+                                renderTable(sortedAndFilteredData)
+                            )}
                         </div>
-                    </Card>
+                    </div>
+                )}
 
-                    {/* 2. Genel Net Toplam */}
-                    <Card className="bg-background/40 backdrop-blur-xl border-green-500/20 shadow-lg p-5">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
-                                    {selectedAy === "toplam" ? "Yıllık Net" : "Genel Net Toplam"}
-                                </p>
-                                <h3 className="text-xl font-black text-green-600">
-                                    {formatCurrency(stats.toplamNet)}
-                                </h3>
+                {/* ===================== İZİNLER ===================== */}
+                {activeTab === "izinler" && (
+                    <div className="mt-5">
+                        <Tabs defaultValue="takvim" className="w-full">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <TabsList>
+                                    <TabsTrigger value="takvim">Aylık Takvim</TabsTrigger>
+                                    <TabsTrigger value="liste">İzin Listesi</TabsTrigger>
+                                    <TabsTrigger value="bakiye">Bakiye Yönetimi</TabsTrigger>
+                                </TabsList>
+                                <Button
+                                    onClick={() => { setIzinModalTcNo(null); setIzinModalEdit(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
+                                    className="h-[38px] rounded-[9px] bg-slate-900 text-white hover:bg-slate-800"
+                                >
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Yeni İzin
+                                </Button>
                             </div>
-                            <Wallet className="w-6 h-6 text-green-600" />
-                        </div>
-                    </Card>
-
-                    {/* 3. Genel Brüt Toplam */}
-                    <Card className="bg-background/40 backdrop-blur-xl border-blue-500/20 shadow-lg p-5">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
-                                    {selectedAy === "toplam" ? "Yıllık Brüt" : "Genel Brüt Toplam"}
-                                </p>
-                                <h3 className="text-xl font-black text-blue-600">
-                                    {formatCurrency(stats.toplamBrut)}
-                                </h3>
-                            </div>
-                            <TrendingUp className="w-6 h-6 text-blue-600" />
-                        </div>
-                    </Card>
-
-                    {/* 4. Toplam İşveren Payı */}
-                    <Card className="bg-background/40 backdrop-blur-xl border-orange-500/20 shadow-lg p-5">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
-                                    {selectedAy === "toplam" ? "Yıllık İşveren Payı" : "Toplam İşveren Payı"}
-                                </p>
-                                <h3 className="text-xl font-black text-orange-600">
-                                    {formatCurrency(stats.toplamIsverenPayi)}
-                                </h3>
-                            </div>
-                            <Percent className="w-6 h-6 text-orange-600" />
-                        </div>
-                    </Card>
-
-                    {/* 5. Toplam İşveren Maliyeti */}
-                    <Card className="bg-background/40 backdrop-blur-xl border-purple-500/20 shadow-lg p-5">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
-                                    {selectedAy === "toplam" ? "Yıllık İşveren Maliyeti" : "Toplam İşveren Maliyeti"}
-                                </p>
-                                <h3 className="text-xl font-black text-purple-600">
-                                    {formatCurrency(stats.toplamIsverenMaliyeti)}
-                                </h3>
-                            </div>
-                            <Banknote className="w-6 h-6 text-purple-600" />
-                        </div>
-                    </Card>
-                </div>
-
-                <div className="space-y-8">
-                    {loading ? (
-                        <div className="flex flex-col items-center justify-center py-20 gap-4">
-                            <Loader2 className="w-10 h-10 animate-spin text-primary" />
-                            <p className="font-bold text-muted-foreground">Personel verileri yükleniyor...</p>
-                        </div>
-                    ) : (
-                        <Card className="bg-background/40 backdrop-blur-xl border-border/50 shadow-2xl rounded-2xl overflow-hidden border">
-                            {renderTable(sortedAndFilteredData)}
-                        </Card>
-                    )}
-                </div>
-                </TabsContent>
-
-                <TabsContent value="izinler" className="space-y-6">
-                  <Tabs defaultValue="takvim" className="w-full">
-                    <TabsList>
-                      <TabsTrigger value="takvim">Aylık Takvim</TabsTrigger>
-                      <TabsTrigger value="liste">İzin Listesi</TabsTrigger>
-                      <TabsTrigger value="bakiye">Bakiye Yönetimi</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="takvim" className="mt-6">
-                      <IzinTakvimi
-                        onYeniIzin={(tcNo, tarih) => { setIzinModalTcNo(tcNo); setIzinModalDefaultDate(tarih); setIzinModalEdit(null); setIzinModalOpen(true); }}
-                        onDuzenle={(izin) => { setIzinModalEdit(izin); setIzinModalTcNo(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
-                      />
-                    </TabsContent>
-                    <TabsContent value="liste" className="mt-6">
-                      <IzinListesi
-                        onYeniEkle={() => { setIzinModalTcNo(null); setIzinModalEdit(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
-                        onDuzenle={(izin) => { setIzinModalEdit(izin); setIzinModalTcNo(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
-                      />
-                    </TabsContent>
-                    <TabsContent value="bakiye" className="mt-6">
-                      <IzinBakiye onYeniIzin={(tcNo) => { setIzinModalTcNo(tcNo); setIzinModalEdit(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }} />
-                    </TabsContent>
-                  </Tabs>
-                </TabsContent>
-              </Tabs>
+                            <TabsContent value="takvim" className="mt-4">
+                                <IzinTakvimi
+                                    onYeniIzin={(tcNo, tarih) => { setIzinModalTcNo(tcNo); setIzinModalDefaultDate(tarih); setIzinModalEdit(null); setIzinModalOpen(true); }}
+                                    onDuzenle={(izin) => { setIzinModalEdit(izin); setIzinModalTcNo(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
+                                />
+                            </TabsContent>
+                            <TabsContent value="liste" className="mt-4">
+                                <IzinListesi
+                                    onYeniEkle={() => { setIzinModalTcNo(null); setIzinModalEdit(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
+                                    onDuzenle={(izin) => { setIzinModalEdit(izin); setIzinModalTcNo(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }}
+                                />
+                            </TabsContent>
+                            <TabsContent value="bakiye" className="mt-4">
+                                <IzinBakiye onYeniIzin={(tcNo) => { setIzinModalTcNo(tcNo); setIzinModalEdit(null); setIzinModalDefaultDate(null); setIzinModalOpen(true); }} />
+                            </TabsContent>
+                        </Tabs>
+                    </div>
+                )}
             </div>
 
             {/* Detaylı Hesaplama Modal */}
