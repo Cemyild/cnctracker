@@ -2548,6 +2548,33 @@ export async function registerRoutes(
     }
   });
 
+  // Toplu Gider Güncelleme (seçili faturalara şube/kategori/plaka ata)
+  app.post("/api/giderler/bulk-update", async (req, res) => {
+    try {
+      const bulkGiderUpdateSchema = z.object({
+        ids: z.array(z.string()).min(1),
+        veri: z.object({
+          sube: z.string().nullable().optional(),
+          kategori: z.string().nullable().optional(),
+          plaka: z.string().nullable().optional(),
+        }).strict(),
+      });
+      const parsed = bulkGiderUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Geçersiz istek formatı" });
+      }
+      const { ids, veri } = parsed.data;
+      if (Object.keys(veri).length === 0) {
+        return res.status(400).json({ error: "Güncellenecek alan belirtilmedi" });
+      }
+      const updated = await storage.updateGiderlerBulk(ids, veri);
+      res.json({ updated });
+    } catch (error) {
+      console.error("Toplu gider güncellenirken hata:", error);
+      res.status(500).json({ error: "Toplu güncelleme başarısız" });
+    }
+  });
+
   // Gider Güncelleme
   app.put("/api/giderler/:id", async (req, res) => {
     try {

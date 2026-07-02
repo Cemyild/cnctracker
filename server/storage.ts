@@ -100,6 +100,7 @@ export interface IStorage {
   insertGiderler(veriler: InsertGiderler[]): Promise<Gider[]>;
   deleteGiderler(ay: string, yil: number): Promise<void>;
   updateGider(id: string, veri: Partial<InsertGiderler>): Promise<Gider>;
+  updateGiderlerBulk(ids: string[], veri: Partial<InsertGiderler>): Promise<number>;
   getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }>;
   getHistoricalMappings(): Promise<{ firma: string; sube: string; kategori: string }[]>;
 
@@ -1205,6 +1206,16 @@ export class DatabaseStorage implements IStorage {
       .returning();
     if (!updated) throw new Error("Gider bulunamadı");
     return updated;
+  }
+
+  async updateGiderlerBulk(ids: string[], veri: Partial<InsertGiderler>): Promise<number> {
+    if (ids.length === 0) return 0;
+    const updated = await db
+      .update(giderler)
+      .set(veri)
+      .where(inArray(giderler.id, ids))
+      .returning({ id: giderler.id });
+    return updated.length;
   }
 
   async getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }> {

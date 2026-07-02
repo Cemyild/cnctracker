@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { type Calisan, type Gider, type GumrukVerisi, subeler } from "@shared/schema";
@@ -189,6 +189,7 @@ type Arac = {
                     const [editingGider, setEditingGider] = useState<Gider | null>(null);
                     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
                     const [clearMonthOpen, setClearMonthOpen] = useState(false);
+                    const [selectedGiderIds, setSelectedGiderIds] = useState<Set<string>>(new Set());
                     const [undoTarget, setUndoTarget] = useState<{ id: string; filename: string; kayitSayisi: number } | null>(null);
                     const { toast } = useToast();
 
@@ -223,6 +224,60 @@ type Arac = {
                             toast({
                                 title: "Hata",
                                 description: "Güncelleme sırasında hata oluştu",
+                                variant: "destructive",
+                            });
+                        }
+                    };
+
+                    // Ay/yıl filtresi değişince seçim geçersizleşir — temizle
+                    useEffect(() => {
+                        setSelectedGiderIds(new Set());
+                    }, [selectedGiderAy, selectedGiderYil]);
+
+                    const toggleGiderSelection = (id: string) => {
+                        setSelectedGiderIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) {
+                                next.delete(id);
+                            } else {
+                                next.add(id);
+                            }
+                            return next;
+                        });
+                    };
+
+                    const handleBulkUpdate = async (field: 'sube' | 'kategori', value: string) => {
+                        const ids = Array.from(selectedGiderIds);
+                        if (ids.length === 0) return;
+
+                        const veri: Record<string, string | null> = { [field]: value };
+                        // Satır içi düzenlemeyle aynı kural: araç dışı kategoriye geçişte plaka temizlenir
+                        if (field === 'kategori' && !ARAC_KATEGORILERI.includes(value)) {
+                            veri.plaka = null;
+                        }
+
+                        try {
+                            const response = await fetch('/api/giderler/bulk-update', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ ids, veri })
+                            });
+
+                            if (!response.ok) throw new Error("Bulk update failed");
+                            const result = await response.json();
+
+                            toast({
+                                title: "Başarılı",
+                                description: `${result.updated} kayıt güncellendi`,
+                                duration: 2000,
+                            });
+
+                            refetchGiderler();
+                            refetchGiderStats();
+                        } catch (error) {
+                            toast({
+                                title: "Hata",
+                                description: "Toplu güncelleme sırasında hata oluştu",
                                 variant: "destructive",
                             });
                         }
@@ -1350,10 +1405,62 @@ type Arac = {
                                     {sortedGiderler?.length ?? 0} kayıt
                                   </span>
                                 </div>
+                                {selectedGiderIds.size > 0 && (
+                                  <div className="flex flex-wrap items-center gap-3 border-b bg-accent/40 px-5 py-2.5" data-testid="gider-bulk-bar">
+                                    <span className="text-[12.5px] font-semibold tabular-nums">
+                                      {selectedGiderIds.size} fatura seçildi
+                                    </span>
+                                    <Select value="" onValueChange={(val) => handleBulkUpdate('sube', val)}>
+                                      <SelectTrigger className="h-7 w-[150px] px-2 text-[11.5px]" data-testid="select-bulk-sube">
+                                        <SelectValue placeholder="Şube ata" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {subeler.map((s) => (
+                                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Select value="" onValueChange={(val) => handleBulkUpdate('kategori', val)}>
+                                      <SelectTrigger className="h-7 w-[170px] px-2 text-[11.5px]" data-testid="select-bulk-kategori">
+                                        <SelectValue placeholder="Kategori ata" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {categories?.map((c) => (
+                                          <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 gap-1.5 px-2 text-[12px] text-muted-foreground"
+                                      onClick={() => setSelectedGiderIds(new Set())}
+                                      data-testid="button-bulk-clear"
+                                    >
+                                      <XIcon className="h-3.5 w-3.5" /> Seçimi temizle
+                                    </Button>
+                                  </div>
+                                )}
                                 <div className="max-h-[70vh] overflow-x-auto">
                                   <Table className="w-full whitespace-nowrap text-[12.5px]">
                                     <TableHeader className="sticky top-0 z-[5] bg-slate-50 dark:bg-muted">
                                       <TableRow className="border-b hover:bg-transparent">
+                                        <TableHead className="h-9 w-[36px] px-2.5">
+                                          <Checkbox
+                                            checked={
+                                              (sortedGiderler?.length ?? 0) > 0 && selectedGiderIds.size === sortedGiderler.length
+                                                ? true
+                                                : selectedGiderIds.size > 0
+                                                  ? "indeterminate"
+                                                  : false
+                                            }
+                                            onCheckedChange={(checked) => {
+                                              setSelectedGiderIds(checked ? new Set(sortedGiderler.map((g) => g.id)) : new Set());
+                                            }}
+                                            aria-label="Tümünü seç"
+                                            data-testid="checkbox-gider-select-all"
+                                          />
+                                        </TableHead>
                                         <TableHead onClick={() => handleSort('tarih')} className="h-9 cursor-pointer select-none px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground hover:text-foreground">
                                           <div className="flex items-center">Tarih <SortIcon column="tarih" /></div>
                                         </TableHead>
@@ -1387,19 +1494,19 @@ type Arac = {
                                     <TableBody>
                                       {giderlerLoading ? (
                                         <TableRow>
-                                          <TableCell colSpan={12} className="py-12 text-center">
+                                          <TableCell colSpan={13} className="py-12 text-center">
                                             <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" />
                                           </TableCell>
                                         </TableRow>
                                       ) : giderlerError ? (
                                         <TableRow>
-                                          <TableCell colSpan={12} className="py-12 text-center text-destructive">
+                                          <TableCell colSpan={13} className="py-12 text-center text-destructive">
                                             Veriler yüklenirken hata oluştu. <button className="underline" onClick={() => refetchGiderler()}>Tekrar dene</button>
                                           </TableCell>
                                         </TableRow>
                                       ) : sortedGiderler?.length === 0 ? (
                                         <TableRow>
-                                          <TableCell colSpan={12} className="py-12 text-center text-muted-foreground">
+                                          <TableCell colSpan={13} className="py-12 text-center text-muted-foreground">
                                             Kayıt bulunamadı
                                           </TableCell>
                                         </TableRow>
@@ -1407,8 +1514,16 @@ type Arac = {
                                         sortedGiderler?.map((gider, idx) => (
                                           <TableRow
                                             key={gider.id}
-                                            className={`${idx % 2 === 0 ? 'bg-white dark:bg-background' : 'bg-slate-50 dark:bg-muted/30'} border-b transition-colors hover:bg-accent/50`}
+                                            className={`${selectedGiderIds.has(gider.id) ? 'bg-accent/60' : idx % 2 === 0 ? 'bg-white dark:bg-background' : 'bg-slate-50 dark:bg-muted/30'} border-b transition-colors hover:bg-accent/50`}
                                           >
+                                            <TableCell className="px-2.5 py-1.5">
+                                              <Checkbox
+                                                checked={selectedGiderIds.has(gider.id)}
+                                                onCheckedChange={() => toggleGiderSelection(gider.id)}
+                                                aria-label="Faturayı seç"
+                                                data-testid={`checkbox-gider-${gider.id}`}
+                                              />
+                                            </TableCell>
                                             <TableCell className="px-2.5 py-1.5 font-medium tabular-nums">{formatTarihDisplay(gider.tarih)}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 font-medium" title={gider.firma ?? undefined}>{gider.firma}</TableCell>
                                             <TableCell className="max-w-[140px] truncate px-2.5 py-1.5 text-muted-foreground" title={gider.faturaNo ?? undefined}>{gider.faturaNo}</TableCell>
