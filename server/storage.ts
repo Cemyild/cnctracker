@@ -406,35 +406,43 @@ export class DatabaseStorage implements IStorage {
     refDateStr: string,
     faturaPenceresiDays: number,
   ): Promise<Map<string, { son90: number; yillik: number; ytdCiro: number; ytdIslemSayisi: number }>> {
+    // fatura_tarihi iki formatta gelebiliyor: Excel seri numarası (örn. 45923)
+    // veya DD.MM.YYYY. Üretim verisinin tamamı seri numarası — eski sadece-noktalı
+    // regex tüm satırları eliyordu ve son90/yillik herkes için 0 dönüyordu.
     const result: any = await db.execute(sql`
       SELECT
         firma_unvan AS firma,
         COALESCE(SUM(CASE
-          WHEN to_date(fatura_tarihi, 'DD.MM.YYYY')
-               BETWEEN (${refDateStr}::date - (${faturaPenceresiDays} || ' days')::interval)
-                   AND ${refDateStr}::date
+          WHEN ft BETWEEN (${refDateStr}::date - (${faturaPenceresiDays} || ' days')::interval)
+                      AND ${refDateStr}::date
           THEN COALESCE(top_fatura_tutar, 0)
           ELSE 0 END), 0) AS son90,
         COALESCE(SUM(CASE
-          WHEN to_date(fatura_tarihi, 'DD.MM.YYYY')
-               BETWEEN (${refDateStr}::date - INTERVAL '365 days')
-                   AND ${refDateStr}::date
+          WHEN ft BETWEEN (${refDateStr}::date - INTERVAL '365 days')
+                      AND ${refDateStr}::date
           THEN COALESCE(top_fatura_tutar, 0)
           ELSE 0 END), 0) AS yillik,
         COALESCE(SUM(CASE
-          WHEN to_date(fatura_tarihi, 'DD.MM.YYYY')
-               BETWEEN date_trunc('year', ${refDateStr}::date)::date
-                   AND ${refDateStr}::date
+          WHEN ft BETWEEN date_trunc('year', ${refDateStr}::date)::date
+                      AND ${refDateStr}::date
           THEN COALESCE(mal_bedeli, 0)
           ELSE 0 END), 0) AS ytd_ciro,
         COALESCE(SUM(CASE
-          WHEN to_date(fatura_tarihi, 'DD.MM.YYYY')
-               BETWEEN date_trunc('year', ${refDateStr}::date)::date
-                   AND ${refDateStr}::date
+          WHEN ft BETWEEN date_trunc('year', ${refDateStr}::date)::date
+                      AND ${refDateStr}::date
           THEN 1 ELSE 0 END), 0) AS ytd_islem
-      FROM gumruk_verileri
-      WHERE firma_unvan IS NOT NULL
-        AND fatura_tarihi ~ '^[0-9]{2}\\.[0-9]{2}\\.[0-9]{4}$'
+      FROM (
+        SELECT
+          firma_unvan, mal_bedeli, top_fatura_tutar,
+          CASE
+            WHEN fatura_tarihi ~ '^[0-9]{2}\\.[0-9]{2}\\.[0-9]{4}$' THEN to_date(fatura_tarihi, 'DD.MM.YYYY')
+            WHEN fatura_tarihi ~ '^[0-9]{4,5}$' THEN DATE '1899-12-30' + (fatura_tarihi)::int
+            ELSE NULL
+          END AS ft
+        FROM gumruk_verileri
+        WHERE firma_unvan IS NOT NULL
+      ) t
+      WHERE ft IS NOT NULL
       GROUP BY firma_unvan
     `);
     const map = new Map<string, { son90: number; yillik: number; ytdCiro: number; ytdIslemSayisi: number }>();
