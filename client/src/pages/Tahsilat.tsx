@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LayoutDashboard, Users, TrendingUp, Link2, Archive, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { tarihGoster } from "@shared/tahsilatHesaplari";
 
 import { MizanYukleModal } from "@/components/tahsilat/MizanYukleModal";
 import { TahsilatOzet } from "@/components/tahsilat/TahsilatOzet";
@@ -57,7 +58,7 @@ export default function Tahsilat() {
                     <SelectTrigger className="h-[38px] w-[220px]"><SelectValue placeholder="Mizan seç" /></SelectTrigger>
                     <SelectContent>
                       {mizanList.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>{m.mizanTarihi} ({m.kayitSayisi} müşteri)</SelectItem>
+                        <SelectItem key={m.id} value={m.id}>{tarihGoster(m.mizanTarihi)} ({m.kayitSayisi} müşteri)</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

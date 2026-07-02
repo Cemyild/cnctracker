@@ -179,6 +179,13 @@ export function nedenCumlesi(p: {
   return parca.length ? parca.join(" · ") : "sorun görünmüyor";
 }
 
+// YYYY-MM-DD → dd/mm/yy görüntüleme (new Date kullanmadan — TZ kayması yok)
+export function tarihGoster(s: string | null | undefined): string {
+  if (!s) return "-";
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : s;
+}
+
 export const SEGMENT_LABEL: Record<TahsilatSegment, string> = {
   SAGLIKLI: "Sağlıklı",
   BUYUK_RISK: "Büyük Risk",

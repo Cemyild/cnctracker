@@ -8,7 +8,7 @@ import { Loader2, Settings, Download as DownloadIcon, ArrowUp, ArrowDown, ArrowU
 import { cn } from "@/lib/utils";
 import { RiskEsikleriModal } from "./RiskEsikleriModal";
 import { MusteriDrillDown } from "./MusteriDrillDown";
-import { SEGMENT_LABEL, SEGMENT_PILL, kisaTutar, type TahsilatSegment } from "@shared/tahsilatHesaplari";
+import { SEGMENT_LABEL, SEGMENT_PILL, kisaTutar, tarihGoster, type TahsilatSegment } from "@shared/tahsilatHesaplari";
 
 const PATTERN_LABEL: Record<string, string> = {
   SAGLIKLI: "Sağlıklı", VIP_AKTIF_RISK: "VIP Aktif", TAKIP_GEREKEN: "Takip", YAVAS_ODEYICI: "Yavaş", DONUK_KAYIP: "Donuk",
@@ -143,7 +143,6 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
             <TableHeader className="sticky top-0 z-10 bg-slate-50">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Müşteri</TableHead>
-                <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Sektör</TableHead>
                 <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer" onClick={() => handleSort("netBakiye")}>Net Bakiye <SortIcon f="netBakiye" /></TableHead>
                 <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Son Borç</TableHead>
                 <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Son Ödeme</TableHead>
@@ -159,17 +158,16 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
             </TableHeader>
             <TableBody>
               {!filtered.length ? (
-                <TableRow><TableCell colSpan={13} className="text-center py-8 text-muted-foreground">Filtreye uyan müşteri yok</TableCell></TableRow>
+                <TableRow><TableCell colSpan={12} className="text-center py-8 text-muted-foreground">Filtreye uyan müşteri yok</TableCell></TableRow>
               ) : filtered.map((m) => (
                 <TableRow key={m.musteriId} className="cursor-pointer hover:bg-slate-50" onClick={() => setDrillId(m.musteriId)}>
                   <TableCell>
                     <div className="font-medium">{m.ad}</div>
                     <div className="text-[10px] font-mono text-muted-foreground tabular-nums">{m.hesapKodu}</div>
                   </TableCell>
-                  <TableCell className="text-xs">{m.sektor || "-"}</TableCell>
                   <TableCell className={`text-right tabular-nums whitespace-nowrap font-semibold ${m.netBakiye < 0 ? "text-blue-600" : "text-orange-700"}`}>{fmtTry(m.netBakiye)}</TableCell>
-                  <TableCell className="text-xs tabular-nums">{m.sonBorcTarihi || "-"}</TableCell>
-                  <TableCell className="text-xs tabular-nums">{m.sonAlacakTarihi || "-"}</TableCell>
+                  <TableCell className="text-xs tabular-nums whitespace-nowrap">{tarihGoster(m.sonBorcTarihi)}</TableCell>
+                  <TableCell className="text-xs tabular-nums whitespace-nowrap">{tarihGoster(m.sonAlacakTarihi)}</TableCell>
                   <TableCell className="text-right tabular-nums">{m.gecikme >= 9999 ? "—" : `${m.gecikme}g`}</TableCell>
                   <TableCell className={`text-right tabular-nums ${m.isAktivitesiAcigi > 0 ? "text-red-600" : ""}`}>{m.isAktivitesiAcigi}g</TableCell>
                   <TableCell className={`text-right tabular-nums ${m.bakiyeFaturaAcikYuzde > 20 ? "text-red-600 font-semibold" : ""}`}>{m.bakiyeFaturaAcikYuzde >= 999 ? "—" : `${m.bakiyeFaturaAcikYuzde.toFixed(0)}%`}</TableCell>

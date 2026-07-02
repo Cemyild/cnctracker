@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, PhoneCall, Wallet, AlertTriangle, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SEGMENT_LABEL, SEGMENT_PILL, kisaTutar, type TahsilatSegment } from "@shared/tahsilatHesaplari";
+import { SEGMENT_LABEL, SEGMENT_PILL, kisaTutar, tarihGoster, type TahsilatSegment } from "@shared/tahsilatHesaplari";
 import { MusteriDrillDown } from "./MusteriDrillDown";
 
 type SegmentFiltre = TahsilatSegment | "AKSIYON";
@@ -45,7 +45,7 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
     {
       label: "Önceki Mizana Göre",
       value: delta === null ? "—" : `${delta > 0 ? "▲" : delta < 0 ? "▼" : ""} ${fmtTry(Math.abs(delta))}`,
-      sub: o.oncekiMizanTarihi ? `ref: ${o.oncekiMizanTarihi}` : "önceki mizan yok",
+      sub: o.oncekiMizanTarihi ? `ref: ${tarihGoster(o.oncekiMizanTarihi)}` : "önceki mizan yok",
       color: delta === null ? "#64748b" : delta > 0 ? "#e11d48" : "#10b981",
       Icon: delta !== null && delta > 0 ? ArrowUpRight : ArrowDownRight,
     },
