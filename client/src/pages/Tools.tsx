@@ -1,9 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Plus, Trash2, Car, Calendar, MoreVertical, Fuel, Wrench, FileText, AlertCircle, TrendingUp, DollarSign, Upload, Zap, Building2, MapPin, Pencil } from "lucide-react";
+import { Plus, Trash2, Car, Calendar, MoreVertical, Fuel, Wrench, FileText, AlertCircle, TrendingUp, DollarSign, Upload, Zap, Building2, MapPin, Pencil, Loader2 } from "lucide-react";
 import { format, parseISO, isBefore, addDays, differenceInCalendarDays } from "date-fns";
 import { tr } from "date-fns/locale";
 import * as XLSX from "xlsx";
@@ -104,6 +104,72 @@ const BrandLogo = ({ brand, model }: { brand?: string | null, model?: string | n
 
 // --- SUBSIDIARY COMPONENTS ---
 
+// Sürükle-bırak + tıkla-seç dosya alanı (poliçe ve ruhsat yüklemede ortak)
+function FileDropzone({
+    onFile,
+    uploading,
+    label = "Dosyayı buraya sürükleyin veya tıklayın",
+}: {
+    onFile: (file: File) => void;
+    uploading?: boolean;
+    label?: string;
+}) {
+    const [dragActive, setDragActive] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    return (
+        <div
+            role="button"
+            tabIndex={0}
+            onClick={() => { if (!uploading) inputRef.current?.click(); }}
+            onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !uploading) { e.preventDefault(); inputRef.current?.click(); } }}
+            onDragOver={(e) => { e.preventDefault(); if (!uploading) setDragActive(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
+            onDrop={(e) => {
+                e.preventDefault();
+                setDragActive(false);
+                if (uploading) return;
+                const file = e.dataTransfer.files?.[0];
+                if (file) onFile(file);
+            }}
+            className={cn(
+                "flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors",
+                dragActive
+                    ? "border-primary bg-primary/5"
+                    : "border-muted-foreground/25 bg-muted/20 hover:border-primary/50 hover:bg-primary/5",
+                uploading && "cursor-default opacity-70"
+            )}
+        >
+            <input
+                ref={inputRef}
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) onFile(file);
+                    e.target.value = "";
+                }}
+            />
+            {/* pointer-events-none: alt öğeler dragleave tetikleyip vurguyu titretmesin */}
+            <div className="pointer-events-none flex flex-col items-center gap-1.5">
+                {uploading ? (
+                    <>
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        <span className="text-[12.5px] font-medium text-muted-foreground">Yükleniyor…</span>
+                    </>
+                ) : (
+                    <>
+                        <Upload className={cn("h-5 w-5", dragActive ? "text-primary" : "text-muted-foreground")} />
+                        <span className="text-[12.5px] font-medium">{dragActive ? "Bırakın, yüklensin" : label}</span>
+                        <span className="text-[11px] text-muted-foreground">PDF veya görsel</span>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}
+
 // Poliçe OCR'ından dönen alanlar (server /api/araclar/:id/{trafik,kasko}-police → extracted)
 type ExtractedPolicyFields = { sirket: string | null; policeNo: string | null; bitisTarihi: string | null; fiyat: string | null };
 
@@ -126,6 +192,7 @@ function PoliceUploader({
 }) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
+    const [uploading, setUploading] = useState(false);
 
     if (currentUrl) {
         return (
@@ -180,20 +247,17 @@ function PoliceUploader({
     }
 
     return (
-        <Input
-            type="file"
-            accept="image/*,.pdf"
-            className="cursor-pointer file:cursor-pointer file:text-primary file:font-medium"
-            onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
+        <FileDropzone
+            uploading={uploading}
+            label="Poliçeyi buraya sürükleyin veya tıklayın"
+            onFile={async (file) => {
                 if (!isEditing || !aracId) {
                     alert("Lütfen önce aracı kaydedin, sonra poliçe yükleyin.");
-                    e.target.value = "";
                     return;
                 }
                 const formData = new FormData();
                 formData.append("police", file);
+                setUploading(true);
                 try {
                     const res = await fetch(`/api/araclar/${aracId}/${endpoint}`, {
                         method: "POST",
@@ -209,6 +273,8 @@ function PoliceUploader({
                 } catch (err) {
                     console.error(err);
                     toast({ title: "Hata", description: "Yükleme sırasında hata oluştu.", variant: "destructive" });
+                } finally {
+                    setUploading(false);
                 }
             }}
         />
@@ -227,6 +293,7 @@ function VehicleForm({
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [ruhsatUrl, setRuhsatUrl] = useState(defaultValues?.ruhsatDosyasi);
+    const [ruhsatUploading, setRuhsatUploading] = useState(false);
     const [trafikPoliceUrl, setTrafikPoliceUrl] = useState(defaultValues?.trafikPoliceDosyasi);
     const [kaskoPoliceUrl, setKaskoPoliceUrl] = useState(defaultValues?.kaskoPoliceDosyasi);
 
@@ -515,51 +582,48 @@ function VehicleForm({
                                 </div>
                             ) : (
                                 <FormControl>
-                                    <div className="flex items-center gap-4">
-                                        <Input
-                                            type="file"
-                                            accept="image/*,.pdf"
-                                            className="cursor-pointer file:cursor-pointer file:text-primary file:font-medium"
-                                            onChange={async (e) => {
-                                                const file = e.target.files?.[0];
-                                                if (!file) return;
+                                    <FileDropzone
+                                        uploading={ruhsatUploading}
+                                        label="Ruhsatı buraya sürükleyin veya tıklayın"
+                                        onFile={async (file) => {
+                                            if (!isEditing) {
+                                                alert("Lütfen önce aracı kaydedin, sonra ruhsat yükleyin.");
+                                                return;
+                                            }
 
-                                                if (!isEditing) {
-                                                    alert("Lütfen önce aracı kaydedin, sonra ruhsat yükleyin.");
-                                                    return;
-                                                }
+                                            const formData = new FormData();
+                                            formData.append("ruhsat", file);
+                                            setRuhsatUploading(true);
 
-                                                const formData = new FormData();
-                                                formData.append("ruhsat", file);
+                                            try {
+                                                const aracId = defaultValues?.id;
+                                                if (!aracId) throw new Error("Araç ID bulunamadı");
 
-                                                try {
-                                                    const aracId = defaultValues?.id;
-                                                    if (!aracId) throw new Error("Araç ID bulunamadı");
+                                                const res = await fetch(`/api/araclar/${aracId}/ruhsat`, {
+                                                    method: "POST",
+                                                    body: formData
+                                                });
 
-                                                    const res = await fetch(`/api/araclar/${aracId}/ruhsat`, {
-                                                        method: "POST",
-                                                        body: formData
-                                                    });
+                                                if (!res.ok) throw new Error("Yükleme başarısız");
 
-                                                    if (!res.ok) throw new Error("Yükleme başarısız");
+                                                const data = await res.json();
 
-                                                    const data = await res.json();
+                                                setRuhsatUrl(data.url);
 
-                                                    setRuhsatUrl(data.url);
+                                                toast({
+                                                    title: "Başarılı",
+                                                    description: "Ruhsat dosyası yüklendi.",
+                                                });
 
-                                                    toast({
-                                                        title: "Başarılı",
-                                                        description: "Ruhsat dosyası yüklendi.",
-                                                    });
-
-                                                    await queryClient.invalidateQueries({ queryKey: ["/api/araclar"] });
-                                                } catch (err) {
-                                                    console.error(err);
-                                                    alert("Yükleme sırasında hata oluştu");
-                                                }
-                                            }}
-                                        />
-                                    </div>
+                                                await queryClient.invalidateQueries({ queryKey: ["/api/araclar"] });
+                                            } catch (err) {
+                                                console.error(err);
+                                                alert("Yükleme sırasında hata oluştu");
+                                            } finally {
+                                                setRuhsatUploading(false);
+                                            }
+                                        }}
+                                    />
                                 </FormControl>
                             )}
                             <FormMessage />
