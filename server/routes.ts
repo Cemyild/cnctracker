@@ -131,7 +131,7 @@ import { parseMizanXlsx } from "./mizanParser";
 import { benzerlikSkoru, ESLESME_AUTO_ESIK, ESLESME_ONERI_ESIK } from "./eslestirme";
 import {
   netBakiye, gecikme, isAktivitesiAcigi, bakiyeFaturaAcigi, riskProfili,
-  odemeOrani, firmaSegmenti, nedenCumlesi,
+  odemeOrani, firmaSegmenti, nedenCumlesi, odemeRitmi,
   type RiskEsikleri,
 } from "@shared/tahsilatHesaplari";
 import { type InsertMusteri, type InsertMizanYukleme, type InsertMizanBakiye, type InsertEslestirmeOneri, musteriler, mizanEslestirmeOnerileri } from "@shared/schema";
@@ -2194,6 +2194,63 @@ export async function registerRoutes(
       res.json({ mizan, ozet, rapor, musteriler: detaylar });
     } catch (e: any) {
       console.error("Dashboard hatası:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 10b. Derin analiz — ödeme ritmi bozulma alarmları (haftalık mizan serisi)
+  app.get("/api/tahsilat/analiz", async (req, res) => {
+    try {
+      const mizanIdParam = req.query.mizanId as string | undefined;
+      const tumMizanlar = await storage.getMizanYuklemeleri();
+      const mizan = mizanIdParam ? await storage.getMizanYukleme(mizanIdParam) : tumMizanlar[0];
+      if (!mizan) return res.json({ mizanTarihi: null, mizanSayisiYil: 0, alarmlar: [] });
+      const yil = mizan.mizanTarihi.slice(0, 4);
+      const seri = await storage.getMizanBakiyeSerisiByYil(yil);
+
+      // Firma başına farklı ödeme tarihleri (seçili mizan tarihine kadar)
+      const odemeTarihleri = new Map<string, Set<string>>();
+      for (const r of seri) {
+        if (r.mizanTarihi > mizan.mizanTarihi || !r.sonAlacakTarihi) continue;
+        if (!odemeTarihleri.has(r.musteriId)) odemeTarihleri.set(r.musteriId, new Set());
+        odemeTarihleri.get(r.musteriId)!.add(r.sonAlacakTarihi);
+      }
+
+      const guncel = seri.filter((r) => r.mizanId === mizan.id);
+      const analizMusteriIdler = guncel.map((r) => r.musteriId);
+      const analizMusteriList = analizMusteriIdler.length > 0
+        ? await db.select().from(musteriler).where(inArray(musteriler.id, analizMusteriIdler))
+        : [];
+      const analizMusteriMap = new Map(analizMusteriList.map((m) => [m.id, m]));
+
+      const alarmlar = guncel.map((r) => {
+        const m = analizMusteriMap.get(r.musteriId);
+        if (!m) return null;
+        const nb = netBakiye({ sonBakiye: Number(r.sonBakiye || 0), sonBakiyeBA: r.sonBakiyeBA || "B" });
+        if (nb <= 0) return null;
+        const tarihler = Array.from(odemeTarihleri.get(r.musteriId) || []);
+        const ritim = odemeRitmi(tarihler, mizan.mizanTarihi);
+        if (!ritim.alarm) return null;
+        return {
+          musteriId: m.id,
+          ad: m.ad,
+          hesapKodu: m.hesapKodu,
+          doviz: (m.hesapKodu || "").startsWith("120-02") ? "USD" : "TL",
+          netBakiye: nb,
+          ortalamaAralik: Math.round(ritim.ortalamaAralik!),
+          sonOdemeGun: ritim.sonOdemeGun,
+          odemeSayisi: tarihler.length,
+        };
+      }).filter((x): x is NonNullable<typeof x> => x !== null)
+        .sort((a, b) => b.netBakiye - a.netBakiye);
+
+      res.json({
+        mizanTarihi: mizan.mizanTarihi,
+        mizanSayisiYil: new Set(seri.map((r) => r.mizanId)).size,
+        alarmlar,
+      });
+    } catch (e: any) {
+      console.error("Analiz hatası:", e);
       res.status(500).json({ error: e.message });
     }
   });

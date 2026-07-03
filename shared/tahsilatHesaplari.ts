@@ -181,6 +181,25 @@ export function nedenCumlesi(p: {
   return parca.length ? parca.join(" · ") : "sorun görünmüyor";
 }
 
+// Haftalık mizan serisinden öğrenilen ödeme ritmi.
+// odemeTarihleri: firmanın mizanlar boyunca görülen FARKLI son-ödeme tarihleri.
+// Alarm: ritim öğrenildiyse (≥3 ödeme) ve sessizlik ortalamanın 2 katını + 14 gün tabanını aştıysa.
+export function odemeRitmi(odemeTarihleri: string[], refTarih: string): {
+  ortalamaAralik: number | null;
+  sonOdemeGun: number;
+  alarm: boolean;
+} {
+  const tarihler = Array.from(new Set(odemeTarihleri)).sort((a, b) => daysBetween(b, a));
+  if (tarihler.length === 0) return { ortalamaAralik: null, sonOdemeGun: 9999, alarm: false };
+  const sonOdemeGun = daysBetween(tarihler[tarihler.length - 1], refTarih);
+  if (tarihler.length < 3) return { ortalamaAralik: null, sonOdemeGun, alarm: false };
+  let toplam = 0;
+  for (let i = 1; i < tarihler.length; i++) toplam += daysBetween(tarihler[i - 1], tarihler[i]);
+  const ortalamaAralik = toplam / (tarihler.length - 1);
+  const alarm = sonOdemeGun > 2 * ortalamaAralik && sonOdemeGun > 14;
+  return { ortalamaAralik, sonOdemeGun, alarm };
+}
+
 // YYYY-MM-DD → dd/mm/yy görüntüleme (new Date kullanmadan — TZ kayması yok)
 export function tarihGoster(s: string | null | undefined): string {
   if (!s) return "-";

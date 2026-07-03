@@ -349,6 +349,7 @@ export interface IStorage {
   insertMizanBakiyeBatch(rows: InsertMizanBakiye[]): Promise<number>;
   getMusteriBakiyeTimeline(musteriId: string): Promise<(MizanBakiye & { mizanTarihi: string })[]>;
   getEnSonBakiyelerByMizan(mizanId: string): Promise<MizanBakiye[]>;
+  getMizanBakiyeSerisiByYil(yil: string): Promise<(MizanBakiye & { mizanTarihi: string })[]>;
 
   // Tahsilat — eşleştirme
   getEslestirmeOnerileri(): Promise<(EslestirmeOneri & { musteriAd: string })[]>;
@@ -3166,6 +3167,29 @@ export class DatabaseStorage implements IStorage {
 
   async getEnSonBakiyelerByMizan(mizanId: string): Promise<MizanBakiye[]> {
     return await db.select().from(mizanBakiye).where(eq(mizanBakiye.mizanId, mizanId));
+  }
+
+  // Ritim/seri analizi: yılın tüm mizanlarının bakiye satırları tek join sorgusuyla.
+  async getMizanBakiyeSerisiByYil(yil: string): Promise<(MizanBakiye & { mizanTarihi: string })[]> {
+    return await db
+      .select({
+        id: mizanBakiye.id,
+        mizanId: mizanBakiye.mizanId,
+        musteriId: mizanBakiye.musteriId,
+        borc: mizanBakiye.borc,
+        alacak: mizanBakiye.alacak,
+        bakiyeBorc: mizanBakiye.bakiyeBorc,
+        bakiyeAlacak: mizanBakiye.bakiyeAlacak,
+        sonBakiye: mizanBakiye.sonBakiye,
+        sonBakiyeBA: mizanBakiye.sonBakiyeBA,
+        sonBorcTarihi: mizanBakiye.sonBorcTarihi,
+        sonAlacakTarihi: mizanBakiye.sonAlacakTarihi,
+        mizanTarihi: mizanYuklemeleri.mizanTarihi,
+      })
+      .from(mizanBakiye)
+      .innerJoin(mizanYuklemeleri, eq(mizanBakiye.mizanId, mizanYuklemeleri.id))
+      .where(sql`${mizanYuklemeleri.mizanTarihi} LIKE ${yil + "-%"}`)
+      .orderBy(mizanYuklemeleri.mizanTarihi);
   }
 
   // ============================================================================
