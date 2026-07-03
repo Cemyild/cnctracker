@@ -58,6 +58,10 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
     .filter((m) => (filtre === "AKSIYON" ? m.segment === "NAKIT_TUZAGI" || m.segment === "BUYUK_RISK" : m.segment === filtre))
     .sort((a, b) => b.netBakiye - a.netBakiye);
 
+  const YAS_RENK = ["#10b981", "#f59e0b", "#f97316", "#e11d48"];
+  const yas = (o.yasDagilimi || []) as { aralik: string; tl: number; usd: number; sayi: number }[];
+  const yasToplam = yas.reduce((a, k) => a + k.tl, 0);
+
   return (
     <div className="space-y-[18px]">
       {/* 4 nakit KPI — accent-bar */}
@@ -71,6 +75,36 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
           </div>
         ))}
       </div>
+
+      {/* Nakit yaşlandırma — para kaç gündür dönmüyor? (son ödeme tarihine göre) */}
+      {yasToplam > 0 && (
+        <div className="rounded-[14px] border bg-card p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-[13px] font-bold">Dışarıdaki nakit ne kadar süredir dönmüyor?</h3>
+            <span className="text-[11px] text-muted-foreground">son ödeme tarihine göre · TL hesaplar</span>
+          </div>
+          <div className="mt-3 flex h-7 w-full overflow-hidden rounded-lg">
+            {yas.map((k, i) => k.tl > 0 && (
+              <div
+                key={k.aralik}
+                title={`${k.aralik} gün · ${k.sayi} firma · ${fmtTry(k.tl)}`}
+                style={{ width: `${(k.tl / yasToplam) * 100}%`, background: YAS_RENK[i] }}
+                className="flex items-center justify-center overflow-hidden whitespace-nowrap text-[10.5px] font-bold text-white"
+              >
+                {k.tl / yasToplam > 0.08 ? kisaTutar(k.tl) : ""}
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {yas.map((k, i) => (
+              <span key={k.aralik} className="text-[11px] text-muted-foreground">
+                <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: YAS_RENK[i] }} />
+                {k.aralik}g · {k.sayi} firma · {kisaTutar(k.tl)}{k.usd > 0 ? ` +$${kisaTutar(k.usd)}` : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Segment matrisi — kutuya tıkla → alt liste filtrelenir */}
       <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">

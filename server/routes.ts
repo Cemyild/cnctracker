@@ -2121,6 +2121,21 @@ export async function registerRoutes(
           toplam: segToplam(s, "TL"),
           toplamUsd: segToplam(s, "USD"),
         })),
+        // Dönmeyen nakit yaşlandırması — son ödeme tarihine göre (gecikme 9999 → 90+)
+        yasDagilimi: [
+          { aralik: "0-30", min: 0, max: 30 },
+          { aralik: "31-60", min: 31, max: 60 },
+          { aralik: "61-90", min: 61, max: 90 },
+          { aralik: "90+", min: 91, max: 999999 },
+        ].map((k) => {
+          const grup = detaylar.filter((d) => d.netBakiye > 0 && d.gecikme >= k.min && d.gecikme <= k.max);
+          return {
+            aralik: k.aralik,
+            tl: grup.filter((d) => d.doviz === "TL").reduce((a, d) => a + d.netBakiye, 0),
+            usd: grup.filter((d) => d.doviz === "USD").reduce((a, d) => a + d.netBakiye, 0),
+            sayi: grup.length,
+          };
+        }),
         vipSayisi: detaylar.filter((d) => d.vipRozeti).length,
         vipBakiyeToplam: detaylar.filter((d) => d.vipRozeti).reduce((a, d) => a + d.netBakiye, 0),
         yavasOdeyiciSayisi: detaylar.filter((d) => d.pattern === "YAVAS_ODEYICI").length,
