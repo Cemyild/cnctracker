@@ -1053,6 +1053,7 @@ export default function Tools() {
 
                 toast({ title: "Başarılı", description: `${validGiderler.length} yakıt gideri yüklendi.` });
                 queryClient.invalidateQueries({ queryKey: ["/api/araclar"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/giderler/yakit-faturalari"] });
             } catch (error) {
                 console.error("Excel upload error:", error);
                 toast({ title: "Hata", description: "Excel işlenirken hata oluştu.", variant: "destructive" });
@@ -1064,6 +1065,12 @@ export default function Tools() {
     // Fetch vehicles with updated type (including totalGider, ytd stuff)
     const { data: araclar, isLoading } = useQuery<AracRow[]>({
         queryKey: ["/api/araclar"],
+    });
+
+    // Yakıt faturaları (Halis Petrol) — Gümrük gider listesinde işlenmez, burada takip edilir.
+    // dagitilanTutar: o ayda araçlara dağıtılmış toplam yakıt gideri (Excel yüklemesinden gelir).
+    const { data: yakitFaturalari } = useQuery<(Gider & { dagitilanTutar: number })[]>({
+        queryKey: ["/api/giderler/yakit-faturalari"],
     });
 
     const createMutation = useMutation({
@@ -1200,6 +1207,58 @@ export default function Tools() {
                         </div>
                     ))}
                 </div>
+
+                {/* ===== Yakıt Faturaları (Halis Petrol) ===== */}
+                {(yakitFaturalari?.length ?? 0) > 0 && (
+                    <div className="mt-5 overflow-hidden rounded-[14px] border bg-card" data-testid="yakit-faturalari-card">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3.5">
+                            <div className="flex items-center gap-2">
+                                <Fuel className="h-4 w-4 text-emerald-600" />
+                                <h3 className="text-[15px] font-bold">Yakıt Faturaları</h3>
+                                <span className="text-[12px] text-muted-foreground">Halis Petrol · araç kırılımı için e-postadaki Excel'i "Yakıt Yükle" ile yükleyin</span>
+                            </div>
+                            <span className="text-[12.5px] tabular-nums text-muted-foreground">{yakitFaturalari?.length} fatura</span>
+                        </div>
+                        <div className="max-h-[420px] overflow-x-auto overflow-y-auto">
+                            <Table className="whitespace-nowrap text-[12.5px]">
+                                <TableHeader className="sticky top-0 z-[5] bg-slate-50 dark:bg-muted">
+                                    <TableRow className="border-b hover:bg-transparent">
+                                        <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Tarih</TableHead>
+                                        <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Fatura No</TableHead>
+                                        <TableHead className="h-9 px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground">Fatura Tutarı</TableHead>
+                                        <TableHead className="h-9 px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground">O Ay Dağıtılan</TableHead>
+                                        <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Durum</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {yakitFaturalari?.map((f) => {
+                                        const faturaTutar = Number(f.tryTutar ?? 0);
+                                        const dagitilan = f.dagitilanTutar;
+                                        const durum = dagitilan <= 0
+                                            ? { label: "Bekliyor", cls: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400" }
+                                            : dagitilan >= faturaTutar * 0.99
+                                                ? { label: "Dağıtıldı", cls: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400" }
+                                                : { label: "Kısmi", cls: "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400" };
+                                        return (
+                                            <TableRow key={f.id} className="border-b" data-testid={`yakit-fatura-${f.id}`}>
+                                                <TableCell className="px-2.5 py-2 font-medium tabular-nums">{(f.tarih ?? "-").replace(/\./g, "/")}</TableCell>
+                                                <TableCell className="px-2.5 py-2 text-muted-foreground">{f.faturaNo}</TableCell>
+                                                <TableCell className="px-2.5 py-2 text-right font-bold tabular-nums">{formatCurrencyFull(f.tryTutar)}</TableCell>
+                                                <TableCell className="px-2.5 py-2 text-right tabular-nums text-muted-foreground">{formatCurrencyFull(String(dagitilan))}</TableCell>
+                                                <TableCell className="px-2.5 py-2">
+                                                    <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold", durum.cls)}>{durum.label}</span>
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                                </TableBody>
+                            </Table>
+                        </div>
+                        <p className="border-t px-5 py-2 text-[11.5px] text-muted-foreground">
+                            "O Ay Dağıtılan" fatura ayındaki tüm araç yakıt giderlerinin toplamıdır — karşılaştırma ay bazında yapılır.
+                        </p>
+                    </div>
+                )}
 
                 {/* ===== Şube filtresi + sıralama notu ===== */}
                 <div className="mt-6 flex flex-wrap items-center justify-between gap-3">

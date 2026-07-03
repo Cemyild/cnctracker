@@ -2,6 +2,8 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { type Calisan, type Gider, type GumrukVerisi, subeler } from "@shared/schema";
+import { isYakitFaturasi } from "@shared/yakit";
+import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency, formatCurrencyFull, formatCurrencyShort, cn } from "@/lib/utils";
 import {
@@ -24,7 +26,8 @@ import {
   History,
   Trash2,
   Calculator,
-  Plus
+  Plus,
+  Fuel
 } from "lucide-react";
 import { GiderEditModal } from "@/components/GiderEditModal";
 import { Badge } from "@/components/ui/badge";
@@ -585,11 +588,14 @@ type Arac = {
   const sortedGiderler = useMemo(() => {
     if (!giderler) return [];
 
+    // Yakıt tedarikçisi faturaları bu listede işlenmez — Araçlar sayfasında yönetilir
+    const base = giderler.filter((g) => !isYakitFaturasi(g.firma));
+
     // Eksik bilgi filtresi: null veya boş string "seçilmemiş" sayılır
     const bos = (v: string | null) => !v || !String(v).trim();
     const filtered = eksikFilter === 'tum'
-      ? giderler
-      : giderler.filter((g) =>
+      ? base
+      : base.filter((g) =>
           eksikFilter === 'sube' ? bos(g.sube)
           : eksikFilter === 'kategori' ? bos(g.kategori)
           : bos(g.sube) || bos(g.kategori)
@@ -650,13 +656,19 @@ type Arac = {
   // Filtre etiketlerinde gösterilecek eksik kayıt sayıları (filtreden bağımsız, tüm liste üzerinden)
   const eksikSayilari = useMemo(() => {
     const bos = (v: string | null) => !v || !String(v).trim();
-    const liste = giderler ?? [];
+    const liste = (giderler ?? []).filter((g) => !isYakitFaturasi(g.firma));
     return {
       sube: liste.filter((g) => bos(g.sube)).length,
       kategori: liste.filter((g) => bos(g.kategori)).length,
       herhangi: liste.filter((g) => bos(g.sube) || bos(g.kategori)).length,
     };
   }, [giderler]);
+
+  // Listeden gizlenen yakıt faturası sayısı (bilgi şeridi için)
+  const yakitSayisi = useMemo(
+    () => (giderler ?? []).filter((g) => isYakitFaturasi(g.firma)).length,
+    [giderler]
+  );
 
   // Seçim, görünen listeyle sınırlı kalsın: filtre/ay/yıl değişince veya kayıtlar
   // güncellenip filtre dışına çıkınca görünmeyen id'ler seçimden düşürülür.
@@ -1453,6 +1465,17 @@ type Arac = {
                                     </span>
                                   </div>
                                 </div>
+                                {yakitSayisi > 0 && (
+                                  <div className="flex flex-wrap items-center gap-2 border-b bg-emerald-50/60 px-5 py-2 text-[12px] dark:bg-emerald-950/20" data-testid="gider-yakit-banner">
+                                    <Fuel className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                                    <span className="text-muted-foreground">
+                                      <strong className="font-semibold text-foreground">{yakitSayisi} yakıt faturası</strong> (Halis Petrol) bu listede işlenmez — araç kırılımı e-postadaki Excel ile yapılır:
+                                    </span>
+                                    <Link href="/araclar" className="font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-800 dark:text-emerald-400">
+                                      Araçlar sayfasına git
+                                    </Link>
+                                  </div>
+                                )}
                                 {selectedGiderIds.size > 0 && (
                                   <div className="flex flex-wrap items-center gap-3 border-b bg-accent/40 px-5 py-2.5" data-testid="gider-bulk-bar">
                                     <span className="text-[12.5px] font-semibold tabular-nums">

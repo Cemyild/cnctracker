@@ -2567,6 +2567,18 @@ export async function registerRoutes(
     }
   });
 
+  // Yakıt Faturaları (Halis Petrol) — Araçlar sayfasında listelenir;
+  // ay bazlı araçlara dağıtılan tutar karşılaştırması ile birlikte döner
+  app.get("/api/giderler/yakit-faturalari", async (req, res) => {
+    try {
+      const rows = await storage.getYakitFaturalari();
+      res.json(rows);
+    } catch (error) {
+      console.error("Yakıt faturaları alınırken hata:", error);
+      res.status(500).json({ error: "Yakıt faturaları alınamadı" });
+    }
+  });
+
   // Toplu Gider Güncelleme (seçili faturalara şube/kategori/plaka ata)
   app.post("/api/giderler/bulk-update", async (req, res) => {
     try {

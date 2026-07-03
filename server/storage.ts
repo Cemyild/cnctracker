@@ -101,6 +101,7 @@ export interface IStorage {
   deleteGiderler(ay: string, yil: number): Promise<void>;
   updateGider(id: string, veri: Partial<InsertGiderler>): Promise<Gider>;
   updateGiderlerBulk(ids: string[], veri: Partial<InsertGiderler>): Promise<number>;
+  getYakitFaturalari(): Promise<(Gider & { dagitilanTutar: number })[]>;
   getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }>;
   getHistoricalMappings(): Promise<{ firma: string; sube: string; kategori: string }[]>;
 
@@ -1216,6 +1217,41 @@ export class DatabaseStorage implements IStorage {
       .where(inArray(giderler.id, ids))
       .returning({ id: giderler.id });
     return updated.length;
+  }
+
+  // Yakıt tedarikçisi (Halis Petrol) faturaları + o ayın araçlara dağıtılmış
+  // yakıt gideri toplamı. '_' joker karakteri HALİS/HALIS yazımlarının ikisini
+  // de yakalar; upper() büyük-küçük harf farkını kapatır.
+  async getYakitFaturalari(): Promise<(Gider & { dagitilanTutar: number })[]> {
+    const faturalar = await db
+      .select()
+      .from(giderler)
+      .where(sql`upper(${giderler.firma}) LIKE '%HAL_S PETROL%'`)
+      .orderBy(sql`to_date(${giderler.tarih}, 'DD.MM.YYYY') DESC NULLS LAST`);
+
+    if (faturalar.length === 0) return [];
+
+    // Araçlara dağıtılan yakıt giderleri ay bazında toplanır (tarih YYYY-MM-DD)
+    const dagitim = await db
+      .select({
+        ayKey: sql<string>`substr(${aracGiderler.tarih}, 1, 7)`,
+        toplam: sql<string>`coalesce(sum(${aracGiderler.tutar}), 0)`,
+      })
+      .from(aracGiderler)
+      .where(eq(aracGiderler.kategori, "Yakıt"))
+      .groupBy(sql`substr(${aracGiderler.tarih}, 1, 7)`);
+
+    const AY_NO: Record<string, number> = {
+      ocak: 1, subat: 2, mart: 3, nisan: 4, mayis: 5, haziran: 6,
+      temmuz: 7, agustos: 8, eylul: 9, ekim: 10, kasim: 11, aralik: 12,
+    };
+    const dagitimMap = new Map(dagitim.map((d) => [d.ayKey, Number(d.toplam)]));
+
+    return faturalar.map((f) => {
+      const ayNo = AY_NO[f.ay] ?? 0;
+      const key = `${f.yil}-${String(ayNo).padStart(2, "0")}`;
+      return { ...f, dagitilanTutar: dagitimMap.get(key) ?? 0 };
+    });
   }
 
   async getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }> {
