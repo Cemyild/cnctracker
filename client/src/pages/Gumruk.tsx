@@ -190,6 +190,7 @@ type Arac = {
                     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
                     const [clearMonthOpen, setClearMonthOpen] = useState(false);
                     const [selectedGiderIds, setSelectedGiderIds] = useState<Set<string>>(new Set());
+                    const [eksikFilter, setEksikFilter] = useState<'tum' | 'sube' | 'kategori' | 'herhangi'>('tum');
                     const [undoTarget, setUndoTarget] = useState<{ id: string; filename: string; kayitSayisi: number } | null>(null);
                     const { toast } = useToast();
 
@@ -228,11 +229,6 @@ type Arac = {
                             });
                         }
                     };
-
-                    // Ay/yıl filtresi değişince seçim geçersizleşir — temizle
-                    useEffect(() => {
-                        setSelectedGiderIds(new Set());
-                    }, [selectedGiderAy, selectedGiderYil]);
 
                     const toggleGiderSelection = (id: string) => {
                         setSelectedGiderIds((prev) => {
@@ -588,7 +584,18 @@ type Arac = {
 
   const sortedGiderler = useMemo(() => {
     if (!giderler) return [];
-                    if (!sortConfig.key) return giderler;
+
+    // Eksik bilgi filtresi: null veya boş string "seçilmemiş" sayılır
+    const bos = (v: string | null) => !v || !String(v).trim();
+    const filtered = eksikFilter === 'tum'
+      ? giderler
+      : giderler.filter((g) =>
+          eksikFilter === 'sube' ? bos(g.sube)
+          : eksikFilter === 'kategori' ? bos(g.kategori)
+          : bos(g.sube) || bos(g.kategori)
+        );
+
+                    if (!sortConfig.key) return filtered;
 
     const parseDate = (d: unknown): number => {
       if (d == null) return Number.NEGATIVE_INFINITY;
@@ -608,7 +615,7 @@ type Arac = {
       return new Date(y, m - 1, d1).getTime();
     };
 
-    return [...giderler].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const aValue = a[sortConfig.key as keyof Gider];
       const bValue = b[sortConfig.key as keyof Gider];
 
@@ -638,7 +645,29 @@ type Arac = {
         ? String(sa).localeCompare(String(sb), 'tr', { numeric: true, sensitivity: 'base' })
         : String(sb).localeCompare(String(sa), 'tr', { numeric: true, sensitivity: 'base' });
     });
-  }, [giderler, sortConfig]);
+  }, [giderler, sortConfig, eksikFilter]);
+
+  // Filtre etiketlerinde gösterilecek eksik kayıt sayıları (filtreden bağımsız, tüm liste üzerinden)
+  const eksikSayilari = useMemo(() => {
+    const bos = (v: string | null) => !v || !String(v).trim();
+    const liste = giderler ?? [];
+    return {
+      sube: liste.filter((g) => bos(g.sube)).length,
+      kategori: liste.filter((g) => bos(g.kategori)).length,
+      herhangi: liste.filter((g) => bos(g.sube) || bos(g.kategori)).length,
+    };
+  }, [giderler]);
+
+  // Seçim, görünen listeyle sınırlı kalsın: filtre/ay/yıl değişince veya kayıtlar
+  // güncellenip filtre dışına çıkınca görünmeyen id'ler seçimden düşürülür.
+  useEffect(() => {
+    setSelectedGiderIds((prev) => {
+      if (prev.size === 0) return prev;
+      const gorunen = new Set(sortedGiderler.map((g) => g.id));
+      const next = new Set(Array.from(prev).filter((id) => gorunen.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [sortedGiderler]);
 
                     const SortIcon = ({column}: {column: keyof Gider | 'tryTutar' }) => {
     if (sortConfig.key !== column) return <ArrowUpDown className="ml-1.5 h-3.5 w-3.5 opacity-40" />;
@@ -1399,11 +1428,30 @@ type Arac = {
 
                               {/* Gider Listesi */}
                               <div className="overflow-hidden rounded-[14px] border bg-card">
-                                <div className="flex items-center justify-between border-b px-5 py-4">
+                                <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
                                   <h3 className="text-[15px] font-bold">Gider Listesi</h3>
-                                  <span className="text-[12.5px] tabular-nums text-muted-foreground">
-                                    {sortedGiderler?.length ?? 0} kayıt
-                                  </span>
+                                  <div className="flex items-center gap-3">
+                                    <Select value={eksikFilter} onValueChange={(v) => setEksikFilter(v as typeof eksikFilter)}>
+                                      <SelectTrigger
+                                        className={cn(
+                                          "h-8 w-[230px] px-2.5 text-[12px]",
+                                          eksikFilter !== 'tum' && "border-amber-400 font-semibold text-amber-700 dark:border-amber-500 dark:text-amber-400"
+                                        )}
+                                        data-testid="select-eksik-filter"
+                                      >
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="tum">Tüm faturalar</SelectItem>
+                                        <SelectItem value="herhangi">Şube veya kategori eksik ({eksikSayilari.herhangi})</SelectItem>
+                                        <SelectItem value="sube">Şubesi eksik ({eksikSayilari.sube})</SelectItem>
+                                        <SelectItem value="kategori">Kategorisi eksik ({eksikSayilari.kategori})</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    <span className="text-[12.5px] tabular-nums text-muted-foreground">
+                                      {sortedGiderler?.length ?? 0} kayıt
+                                    </span>
+                                  </div>
                                 </div>
                                 {selectedGiderIds.size > 0 && (
                                   <div className="flex flex-wrap items-center gap-3 border-b bg-accent/40 px-5 py-2.5" data-testid="gider-bulk-bar">
