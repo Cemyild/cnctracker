@@ -3,12 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { LayoutDashboard, Users, TrendingUp, Link2, Archive, Upload } from "lucide-react";
+import { LayoutDashboard, Users, TrendingUp, Link2, Archive, Upload, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { tarihGoster } from "@shared/tahsilatHesaplari";
 
 import { MizanYukleModal } from "@/components/tahsilat/MizanYukleModal";
 import { TahsilatOzet } from "@/components/tahsilat/TahsilatOzet";
+import { HaftalikRapor } from "@/components/tahsilat/HaftalikRapor";
 import { MusteriListesi } from "@/components/tahsilat/MusteriListesi";
 import { TahsilatTrend } from "@/components/tahsilat/TahsilatTrend";
 import { EslestirmeUI } from "@/components/tahsilat/EslestirmeUI";
@@ -22,6 +23,7 @@ interface MizanRow {
 
 const TABS = [
   { id: "ozet", label: "Özet", Icon: LayoutDashboard },
+  { id: "rapor", label: "Rapor", Icon: ClipboardList },
   { id: "musteriler", label: "Müşteriler", Icon: Users },
   { id: "trend", label: "Trend", Icon: TrendingUp },
   { id: "eslestirme", label: "Eşleştirme", Icon: Link2 },
@@ -89,6 +91,7 @@ export default function Tahsilat() {
           </div>
 
           <TabsContent value="ozet" className="mt-5"><TahsilatOzet mizanId={aktifMizanId} /></TabsContent>
+          <TabsContent value="rapor" className="mt-5"><HaftalikRapor mizanId={aktifMizanId} /></TabsContent>
           <TabsContent value="musteriler" className="mt-5"><MusteriListesi mizanId={aktifMizanId} /></TabsContent>
           <TabsContent value="trend" className="mt-5"><TahsilatTrend /></TabsContent>
           <TabsContent value="eslestirme" className="mt-5"><EslestirmeUI /></TabsContent>
