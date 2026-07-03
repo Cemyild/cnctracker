@@ -2016,6 +2016,7 @@ export async function registerRoutes(
         const sonBakiyeNum = Number(b.sonBakiye || 0);
         const nb = netBakiye({ sonBakiye: sonBakiyeNum, sonBakiyeBA: b.sonBakiyeBA || "B" });
         const gec = gecikme(b.sonAlacakTarihi, refTarih);
+        const borcGec = gecikme(b.sonBorcTarihi, refTarih); // son faturanın yaşı
         const isAcik = isAktivitesiAcigi(b.sonBorcTarihi, b.sonAlacakTarihi);
         // Müşterinin tüm gümrük unvanlarının toplamı
         let son90 = 0, yillik = 0, ytdCiro = 0, ytdIslemSayisi = 0;
@@ -2027,7 +2028,7 @@ export async function registerRoutes(
         const risk = riskProfili({
           netBakiye: nb,
           gecikme: gec,
-          isAktivitesiAcigi: isAcik,
+          borcGecikme: borcGec,
           bakiyeFaturaAcikYuzde: bfa.acikYuzde,
           yillikFaturaToplami: yillik,
           esikler,

@@ -67,7 +67,7 @@ export interface RiskSonuc {
 export function riskProfili(p: {
   netBakiye: number;
   gecikme: number;
-  isAktivitesiAcigi: number;
+  borcGecikme: number; // mizan tarihi − son borç (fatura) tarihi, gün; fatura yoksa 9999
   bakiyeFaturaAcikYuzde: number;
   yillikFaturaToplami: number;
   esikler: RiskEsikleri;
@@ -79,15 +79,17 @@ export function riskProfili(p: {
   let pattern: RiskPattern;
   if (p.netBakiye <= 0) {
     pattern = "SAGLIKLI";
-  } else if (p.gecikme >= p.esikler.cokEskiOdemeEsik && p.isAktivitesiAcigi <= -p.esikler.cokEskiOdemeEsik) {
-    // Hem son alacak (gecikme) hem son borç çok eski
+  } else if (p.gecikme >= p.esikler.cokEskiOdemeEsik && p.borcGecikme >= p.esikler.cokEskiOdemeEsik) {
+    // Hem son ödeme hem son fatura çok eski → ilişki donmuş, borç içeride kalmış
     pattern = "DONUK_KAYIP";
-  } else if (p.gecikme >= p.esikler.eskiOdemeEsik && p.isAktivitesiAcigi > 0) {
-    // Son borç son alacaktan yeni (pozitif iş aktivitesi açığı) → iş yapıyor para vermiyor
+  } else if (p.gecikme >= p.esikler.eskiOdemeEsik && p.borcGecikme <= p.esikler.eskiOdemeEsik) {
+    // Fatura yakın ama ödeme eski → iş dönüyor, para gelmiyor
     pattern = "YAVAS_ODEYICI";
   } else if (vipRozeti && p.gecikme < p.esikler.eskiOdemeEsik) {
     pattern = "VIP_AKTIF_RISK";
-  } else if (p.gecikme >= 11 && p.gecikme < p.esikler.eskiOdemeEsik) {
+  } else if (p.gecikme >= 11) {
+    // Ara durumlar dahil (örn. ödeme eski ama fatura 30-60 gün arası) — sessizce
+    // "Sağlıklı"ya düşmesin
     pattern = "TAKIP_GEREKEN";
   } else {
     pattern = "SAGLIKLI";
