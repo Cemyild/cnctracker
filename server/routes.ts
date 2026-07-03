@@ -2138,7 +2138,60 @@ export async function registerRoutes(
         ).map(([sektor, toplam]) => ({ sektor, toplam })),
       };
 
-      res.json({ mizan, ozet, musteriler: detaylar });
+      // Haftalık Değişim Raporu — önceki aynı-yıl mizana göre dönem özeti
+      let rapor: any = null;
+      if (oncekiMizan) {
+        const kotuluk: Record<string, number> = { SAGLIKLI: 0, KUCUK_NOTR: 1, BUYUK_RISK: 2, NAKIT_TUZAGI: 3 };
+        const gecisler = detaylar
+          .map((d) => {
+            const onceki = oncekiBakiyeMap.get(d.musteriId);
+            if (!onceki) return null;
+            const oncekiNet = netBakiye({ sonBakiye: Number(onceki.sonBakiye || 0), sonBakiyeBA: onceki.sonBakiyeBA || "B" });
+            const oncekiOran = odemeOrani(Number(onceki.borc || 0), Number(onceki.alacak || 0));
+            const oncekiGec = gecikme(onceki.sonAlacakTarihi, oncekiMizan.mizanTarihi);
+            // Değer ekseni haftalık pencerede sabit kabul edilir (şimdiki kazandiriyor)
+            const eski = firmaSegmenti({ netBakiye: oncekiNet, odemeOrani: oncekiOran, gecikme: oncekiGec, kazandiriyor: d.kazandiriyor, esikler: segmentEsikleri });
+            if (eski === d.segment) return null;
+            return {
+              musteriId: d.musteriId, ad: d.ad, doviz: d.doviz, netBakiye: d.netBakiye,
+              eski, yeni: d.segment,
+              yon: kotuluk[d.segment] > kotuluk[eski] ? "bozuldu" : "duzeldi",
+            };
+          })
+          .filter((x): x is NonNullable<typeof x> => x !== null);
+
+        const donemli = detaylar.filter((d) => d.donemOdeme !== null);
+        const topla = (dv: "TL" | "USD", alan: "donemOdeme" | "donemFatura") =>
+          donemli.filter((d) => d.doviz === dv).reduce((a, d) => a + Math.max(0, (d as any)[alan] || 0), 0);
+        const hicOdemeyenList = donemli
+          .filter((d) => d.netBakiye > 0 && (d.donemOdeme || 0) <= 0)
+          .sort((a, b) => b.netBakiye - a.netBakiye);
+        const kisi = (d: any) => ({ musteriId: d.musteriId, ad: d.ad, doviz: d.doviz, netBakiye: d.netBakiye });
+        rapor = {
+          oncekiMizanTarihi: oncekiMizan.mizanTarihi,
+          gunSayisi: gecikme(oncekiMizan.mizanTarihi, refTarih),
+          toplamTahsilatTL: topla("TL", "donemOdeme"),
+          toplamTahsilatUsd: topla("USD", "donemOdeme"),
+          toplamYeniFaturaTL: topla("TL", "donemFatura"),
+          toplamYeniFaturaUsd: topla("USD", "donemFatura"),
+          netDegisimTL: ozet.toplamNetAlacakDelta,
+          enCokOdeyen: donemli.filter((d) => (d.donemOdeme || 0) > 0)
+            .sort((a, b) => (b.donemOdeme || 0) - (a.donemOdeme || 0)).slice(0, 5)
+            .map((d) => ({ ...kisi(d), tutar: d.donemOdeme })),
+          borcuBuyuyen: donemli.filter((d) => (d.deltaNetBakiye || 0) > 0)
+            .sort((a, b) => (b.deltaNetBakiye || 0) - (a.deltaNetBakiye || 0)).slice(0, 5)
+            .map((d) => ({ ...kisi(d), tutar: d.deltaNetBakiye })),
+          hicOdemeyen: {
+            sayi: hicOdemeyenList.length,
+            toplamTL: hicOdemeyenList.filter((d) => d.doviz === "TL").reduce((a, d) => a + d.netBakiye, 0),
+            ilk10: hicOdemeyenList.slice(0, 10).map((d) => ({ ...kisi(d), gecikme: d.gecikme })),
+          },
+          bozulanlar: gecisler.filter((g) => g.yon === "bozuldu"),
+          duzelenler: gecisler.filter((g) => g.yon === "duzeldi"),
+        };
+      }
+
+      res.json({ mizan, ozet, rapor, musteriler: detaylar });
     } catch (e: any) {
       console.error("Dashboard hatası:", e);
       res.status(500).json({ error: e.message });
