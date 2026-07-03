@@ -194,6 +194,8 @@ type Arac = {
                     const [clearMonthOpen, setClearMonthOpen] = useState(false);
                     const [selectedGiderIds, setSelectedGiderIds] = useState<Set<string>>(new Set());
                     const [eksikFilter, setEksikFilter] = useState<'tum' | 'sube' | 'kategori' | 'herhangi'>('tum');
+                    // Sabitlenmiş görünüm: listedeki satır sırası/üyeliği. null = yeniden hesaplanacak.
+                    const [gorunumIds, setGorunumIds] = useState<string[] | null>(null);
                     const [undoTarget, setUndoTarget] = useState<{ id: string; filename: string; kayitSayisi: number } | null>(null);
                     const { toast } = useToast();
 
@@ -419,6 +421,7 @@ type Arac = {
                       refetchGiderler();
                     refetchGiderStats();
                     refetchGiderDosyalar();
+                    setGorunumIds(null); // yeni yüklenen kayıtlar listede görünsün
   };
 
 
@@ -670,16 +673,37 @@ type Arac = {
     [giderler]
   );
 
-  // Seçim, görünen listeyle sınırlı kalsın: filtre/ay/yıl değişince veya kayıtlar
-  // güncellenip filtre dışına çıkınca görünmeyen id'ler seçimden düşürülür.
+  // Görünüm parametreleri (filtre/sıralama/ay/yıl) değişince liste yeniden
+  // hesaplanıp SABİTLENİR. Kayıt güncellemeleri satırları oynatmaz/kaybettirmez —
+  // kullanıcı eksik listede çalışırken satırlar yerinde durur, plaka da seçilebilir.
+  useEffect(() => {
+    setGorunumIds(null);
+  }, [eksikFilter, sortConfig, selectedGiderAy, selectedGiderYil]);
+
+  useEffect(() => {
+    if (gorunumIds === null && !giderlerLoading && giderler) {
+      setGorunumIds(sortedGiderler.map((g) => g.id));
+    }
+  }, [gorunumIds, giderlerLoading, giderler, sortedGiderler]);
+
+  // Ekranda gösterilen liste: sırası ve üyeliği sabit, hücre değerleri güncel.
+  // Silinen kayıtlar (byId'de bulunamayanlar) doğal olarak düşer.
+  const displayGiderler = useMemo(() => {
+    if (!gorunumIds) return sortedGiderler;
+    const byId = new Map((giderler ?? []).map((g) => [g.id, g]));
+    return gorunumIds.map((id) => byId.get(id)).filter((g): g is Gider => !!g);
+  }, [gorunumIds, giderler, sortedGiderler]);
+
+  // Seçim, görünen listeyle sınırlı kalsın: görünüm değişince veya kayıtlar
+  // silinince görünmeyen id'ler seçimden düşürülür.
   useEffect(() => {
     setSelectedGiderIds((prev) => {
       if (prev.size === 0) return prev;
-      const gorunen = new Set(sortedGiderler.map((g) => g.id));
+      const gorunen = new Set(displayGiderler.map((g) => g.id));
       const next = new Set(Array.from(prev).filter((id) => gorunen.has(id)));
       return next.size === prev.size ? prev : next;
     });
-  }, [sortedGiderler]);
+  }, [displayGiderler]);
 
                     const SortIcon = ({column}: {column: keyof Gider | 'tryTutar' }) => {
     if (sortConfig.key !== column) return <ArrowUpDown className="ml-1.5 h-3.5 w-3.5 opacity-40" />;
@@ -1461,7 +1485,7 @@ type Arac = {
                                       </SelectContent>
                                     </Select>
                                     <span className="text-[12.5px] tabular-nums text-muted-foreground">
-                                      {sortedGiderler?.length ?? 0} kayıt
+                                      {displayGiderler.length} kayıt
                                     </span>
                                   </div>
                                 </div>
@@ -1519,14 +1543,14 @@ type Arac = {
                                         <TableHead className="h-9 w-[36px] px-2.5">
                                           <Checkbox
                                             checked={
-                                              (sortedGiderler?.length ?? 0) > 0 && selectedGiderIds.size === sortedGiderler.length
+                                              displayGiderler.length > 0 && selectedGiderIds.size === displayGiderler.length
                                                 ? true
                                                 : selectedGiderIds.size > 0
                                                   ? "indeterminate"
                                                   : false
                                             }
                                             onCheckedChange={(checked) => {
-                                              setSelectedGiderIds(checked ? new Set(sortedGiderler.map((g) => g.id)) : new Set());
+                                              setSelectedGiderIds(checked ? new Set(displayGiderler.map((g) => g.id)) : new Set());
                                             }}
                                             aria-label="Tümünü seç"
                                             data-testid="checkbox-gider-select-all"
@@ -1575,14 +1599,14 @@ type Arac = {
                                             Veriler yüklenirken hata oluştu. <button className="underline" onClick={() => refetchGiderler()}>Tekrar dene</button>
                                           </TableCell>
                                         </TableRow>
-                                      ) : sortedGiderler?.length === 0 ? (
+                                      ) : displayGiderler.length === 0 ? (
                                         <TableRow>
                                           <TableCell colSpan={13} className="py-12 text-center text-muted-foreground">
                                             Kayıt bulunamadı
                                           </TableCell>
                                         </TableRow>
                                       ) : (
-                                        sortedGiderler?.map((gider, idx) => (
+                                        displayGiderler.map((gider, idx) => (
                                           <TableRow
                                             key={gider.id}
                                             className={`${selectedGiderIds.has(gider.id) ? 'bg-accent/60' : idx % 2 === 0 ? 'bg-white dark:bg-background' : 'bg-slate-50 dark:bg-muted/30'} border-b transition-colors hover:bg-accent/50`}
