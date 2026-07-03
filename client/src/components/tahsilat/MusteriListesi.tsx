@@ -40,6 +40,8 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
   });
 
   const fmtTry = (v: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(v);
+  const fmtUsd = (v: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(v);
+  const fmtPara = (v: number, doviz: string) => (doviz === "USD" ? fmtUsd(v) : fmtTry(v));
 
   const filtered = useMemo(() => {
     if (!data?.musteriler) return [];
@@ -72,14 +74,14 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
   const exportCsv = () => {
     const escape = (v: any) => { const s = String(v ?? ""); return s.includes(";") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s; };
     const rows = filtered.map((m) => [
-      m.hesapKodu, m.ad, m.sektor || "", m.netBakiye.toFixed(2), m.gecikme, m.isAktivitesiAcigi,
+      m.hesapKodu, m.ad, m.doviz || "TL", m.netBakiye.toFixed(2), m.gecikme, m.isAktivitesiAcigi,
       m.bakiyeFaturaAcikYuzde.toFixed(1), PATTERN_LABEL[m.pattern],
       m.odemeOrani === null ? "" : (m.odemeOrani * 100).toFixed(0),
       m.islemAyOrt === null ? "" : m.islemAyOrt.toFixed(1),
       SEGMENT_LABEL[m.segment as TahsilatSegment] || "",
       m.deltaNetBakiye === null ? "" : m.deltaNetBakiye.toFixed(2),
     ]);
-    const csv = "﻿" + [["Hesap Kodu", "Ad", "Sektör", "Net Bakiye", "Gecikme", "İş Akt. Açığı", "Bakiye-Fatura %", "Risk", "Ödeme %", "İşlem/Ay", "Segment", "Değişim"], ...rows].map((r) => r.map(escape).join(";")).join("\r\n");
+    const csv = "﻿" + [["Hesap Kodu", "Ad", "Döviz", "Net Bakiye", "Gecikme", "İş Akt. Açığı", "Bakiye-Fatura %", "Risk", "Ödeme %", "İşlem/Ay", "Segment", "Değişim"], ...rows].map((r) => r.map(escape).join(";")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `tahsilat-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
@@ -162,10 +164,13 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
               ) : filtered.map((m) => (
                 <TableRow key={m.musteriId} className="cursor-pointer hover:bg-slate-50" onClick={() => setDrillId(m.musteriId)}>
                   <TableCell>
-                    <div className="font-medium">{m.ad}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium">{m.ad}</span>
+                      {m.doviz === "USD" && <span title="Dolar hesabı (120-02)" className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">USD</span>}
+                    </div>
                     <div className="text-[10px] font-mono text-muted-foreground tabular-nums">{m.hesapKodu}</div>
                   </TableCell>
-                  <TableCell className={`text-right tabular-nums whitespace-nowrap font-semibold ${m.netBakiye < 0 ? "text-blue-600" : "text-orange-700"}`}>{fmtTry(m.netBakiye)}</TableCell>
+                  <TableCell className={`text-right tabular-nums whitespace-nowrap font-semibold ${m.netBakiye < 0 ? "text-blue-600" : "text-orange-700"}`}>{fmtPara(m.netBakiye, m.doviz)}</TableCell>
                   <TableCell className="text-xs tabular-nums whitespace-nowrap">{tarihGoster(m.sonBorcTarihi)}</TableCell>
                   <TableCell className="text-xs tabular-nums whitespace-nowrap">{tarihGoster(m.sonAlacakTarihi)}</TableCell>
                   <TableCell className="text-right tabular-nums">{m.gecikme >= 9999 ? "—" : `${m.gecikme}g`}</TableCell>
@@ -174,7 +179,7 @@ export function MusteriListesi({ mizanId }: { mizanId?: string }) {
                   <TableCell className="text-right tabular-nums">{m.odemeOrani === null ? "—" : `%${Math.round(m.odemeOrani * 100)}`}</TableCell>
                   <TableCell className="text-right tabular-nums">{m.islemAyOrt === null ? "—" : m.islemAyOrt.toFixed(1)}</TableCell>
                   <TableCell className={cn("text-right tabular-nums whitespace-nowrap", m.deltaNetBakiye > 0 ? "text-rose-600 font-semibold" : m.deltaNetBakiye < 0 ? "text-emerald-600" : "")}>
-                    {m.deltaNetBakiye === null ? "—" : `${m.deltaNetBakiye > 0 ? "▲" : m.deltaNetBakiye < 0 ? "▼" : ""} ${kisaTutar(Math.abs(m.deltaNetBakiye))}`}
+                    {m.deltaNetBakiye === null ? "—" : `${m.deltaNetBakiye > 0 ? "▲" : m.deltaNetBakiye < 0 ? "▼" : ""} ${m.doviz === "USD" ? "$" : ""}${kisaTutar(Math.abs(m.deltaNetBakiye))}`}
                   </TableCell>
                   <TableCell>
                     <span className={cn("inline-block rounded-full px-2.5 py-0.5 text-[10.5px] font-bold whitespace-nowrap", SEGMENT_PILL[m.segment as TahsilatSegment])}>{SEGMENT_LABEL[m.segment as TahsilatSegment]}</span>

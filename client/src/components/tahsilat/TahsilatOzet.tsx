@@ -27,25 +27,28 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
   });
 
   const fmtTry = (v: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(v);
+  const fmtUsd = (v: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(v);
+  const fmtPara = (v: number, doviz: string) => (doviz === "USD" ? fmtUsd(v) : fmtTry(v));
 
   if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-sky-500" /></div>;
   if (!data?.mizan) return <div className="text-center text-muted-foreground py-12">Henüz mizan yüklenmemiş.</div>;
 
   const o = data.ozet;
   const musteriler = data.musteriler as any[];
-  const segmentOzet = new Map<string, { sayi: number; toplam: number }>(
-    (o.segmentDagilim as any[]).map((s) => [s.segment, { sayi: s.sayi, toplam: s.toplam }])
+  const segmentOzet = new Map<string, { sayi: number; toplam: number; toplamUsd: number }>(
+    (o.segmentDagilim as any[]).map((s) => [s.segment, { sayi: s.sayi, toplam: s.toplam, toplamUsd: s.toplamUsd || 0 }])
   );
 
   const delta = o.toplamNetAlacakDelta as number | null;
+  const usdEk = (v: number) => (v > 0 ? ` · +${fmtUsd(v)}` : "");
   const kpis = [
-    { label: "Dışarıdaki Nakit", value: fmtTry(o.toplamNetAlacak), sub: `${musteriler.length} müşteri`, color: "#0ea5e9", Icon: Wallet },
-    { label: "Nakit Tuzağında", value: fmtTry(o.nakitTuzagiToplam), sub: `${o.nakitTuzagiSayisi} firma — hedef liste`, color: "#e11d48", Icon: PhoneCall },
-    { label: "Büyük Riskte", value: fmtTry(o.buyukRiskToplam), sub: `${o.buyukRiskSayisi} firma — diplomatik takip`, color: "#f59e0b", Icon: AlertTriangle },
+    { label: "Dışarıdaki Nakit", value: fmtTry(o.toplamNetAlacak), sub: `${musteriler.length} müşteri${usdEk(o.toplamNetAlacakUsd)}`, color: "#0ea5e9", Icon: Wallet },
+    { label: "Nakit Tuzağında", value: fmtTry(o.nakitTuzagiToplam), sub: `${o.nakitTuzagiSayisi} firma — hedef liste${usdEk(o.nakitTuzagiToplamUsd)}`, color: "#e11d48", Icon: PhoneCall },
+    { label: "Büyük Riskte", value: fmtTry(o.buyukRiskToplam), sub: `${o.buyukRiskSayisi} firma — diplomatik takip${usdEk(o.buyukRiskToplamUsd)}`, color: "#f59e0b", Icon: AlertTriangle },
     {
       label: "Önceki Mizana Göre",
       value: delta === null ? "—" : `${delta > 0 ? "▲" : delta < 0 ? "▼" : ""} ${fmtTry(Math.abs(delta))}`,
-      sub: o.oncekiMizanTarihi ? `ref: ${tarihGoster(o.oncekiMizanTarihi)}` : "önceki mizan yok",
+      sub: o.oncekiMizanTarihi ? `ref: ${tarihGoster(o.oncekiMizanTarihi)} (TL hesaplar)` : "önceki mizan yok",
       color: delta === null ? "#64748b" : delta > 0 ? "#e11d48" : "#10b981",
       Icon: delta !== null && delta > 0 ? ArrowUpRight : ArrowDownRight,
     },
@@ -72,7 +75,7 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
       {/* Segment matrisi — kutuya tıkla → alt liste filtrelenir */}
       <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         {MATRIS.map((s) => {
-          const seg = segmentOzet.get(s.segment) || { sayi: 0, toplam: 0 };
+          const seg = segmentOzet.get(s.segment) || { sayi: 0, toplam: 0, toplamUsd: 0 };
           const aktif = filtre === s.segment;
           return (
             <button
@@ -85,7 +88,7 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
             >
               <div className="text-[13px] font-bold">{s.emoji} {SEGMENT_LABEL[s.segment]}</div>
               <div className="mt-1.5 text-[18px] font-extrabold tabular-nums">{fmtTry(seg.toplam)}</div>
-              <div className="text-[11.5px] tabular-nums text-muted-foreground">{seg.sayi} firma</div>
+              <div className="text-[11.5px] tabular-nums text-muted-foreground">{seg.sayi} firma{seg.toplamUsd > 0 ? ` · +${fmtUsd(seg.toplamUsd)}` : ""}</div>
               <div className="mt-1.5 text-[10.5px] leading-snug text-muted-foreground">{s.alt}</div>
             </button>
           );
@@ -128,16 +131,17 @@ export function TahsilatOzet({ mizanId }: { mizanId?: string }) {
                         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold", SEGMENT_PILL[m.segment as TahsilatSegment])}>
                           {SEGMENT_LABEL[m.segment as TahsilatSegment]}
                         </span>
+                        {m.doviz === "USD" && <span title="Dolar hesabı (120-02)" className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">USD</span>}
                         {m.eslesmemis && <span title="Gümrük eşleşmesi yok" className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">eşleşmemiş</span>}
                       </div>
                       <div className="text-[10px] font-mono text-muted-foreground">{m.hesapKodu}</div>
                     </td>
-                    <td className="px-3 py-3 text-right font-bold tabular-nums text-orange-700 whitespace-nowrap">{fmtTry(m.netBakiye)}</td>
+                    <td className="px-3 py-3 text-right font-bold tabular-nums text-orange-700 whitespace-nowrap">{fmtPara(m.netBakiye, m.doviz)}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{m.odemeOrani === null ? "—" : `%${Math.round(m.odemeOrani * 100)}`}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{m.gecikme >= 9999 ? "hiç" : `${m.gecikme}g önce`}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{m.ytdIslemSayisi === null ? "—" : m.ytdIslemSayisi}</td>
                     <td className={cn("px-3 py-3 text-right tabular-nums whitespace-nowrap", m.deltaNetBakiye > 0 ? "text-rose-600 font-semibold" : m.deltaNetBakiye < 0 ? "text-emerald-600" : "")}>
-                      {m.deltaNetBakiye === null ? "—" : `${m.deltaNetBakiye > 0 ? "▲" : m.deltaNetBakiye < 0 ? "▼" : ""} ${kisaTutar(Math.abs(m.deltaNetBakiye))}`}
+                      {m.deltaNetBakiye === null ? "—" : `${m.deltaNetBakiye > 0 ? "▲" : m.deltaNetBakiye < 0 ? "▼" : ""} ${m.doviz === "USD" ? "$" : ""}${kisaTutar(Math.abs(m.deltaNetBakiye))}`}
                     </td>
                     <td className="px-5 py-3 text-[12px] leading-snug text-muted-foreground">{m.neden}</td>
                   </tr>

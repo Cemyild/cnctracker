@@ -1968,21 +1968,6 @@ export async function registerRoutes(
       const refTarih = mizan.mizanTarihi;
       const bakiyeler = await storage.getEnSonBakiyelerByMizan(mizan.id);
 
-      // Tüm müşterileri tek seferde çek (N+1 önleme)
-      const musteriIdler = bakiyeler.map((b) => b.musteriId);
-      const musteriList = musteriIdler.length > 0
-        ? await db.select().from(musteriler).where(inArray(musteriler.id, musteriIdler))
-        : [];
-      const musteriMap = new Map(musteriList.map((m) => [m.id, m]));
-
-      // Gümrük fatura toplamlarını DB-side aggregate ile çek (transfer optimize).
-      // Eskiden: getAllGumrukVerileri() ile binlerce satır + JS aggregate.
-      // Şimdi: SQL GROUP BY + SUM, firma sayısı kadar satır (binlerce → onlarca).
-      const faturaMap = await storage.getGumrukFirmaFaturaAggregate(
-        refTarih,
-        ayarlar.faturaPenceresi,
-      );
-
       // Önceki mizan (yalnız AYNI YIL — mizan yıl başında sıfırlanır, DEVİR=0)
       const tumMizanlar = await storage.getMizanYuklemeleri(); // mizanTarihi desc
       const oncekiMizan = tumMizanlar.find((x) =>
@@ -1995,6 +1980,29 @@ export async function registerRoutes(
           oncekiBakiyeMap.set(ob.musteriId, ob);
         }
       }
+
+      // Tüm müşterileri tek seferde çek (N+1 önleme) — önceki mizanın
+      // müşterileri de dahil (döviz ayrımı için hesap kodu lazım)
+      const musteriIdler = Array.from(new Set([
+        ...bakiyeler.map((b) => b.musteriId),
+        ...Array.from(oncekiBakiyeMap.keys()),
+      ]));
+      const musteriList = musteriIdler.length > 0
+        ? await db.select().from(musteriler).where(inArray(musteriler.id, musteriIdler))
+        : [];
+      const musteriMap = new Map(musteriList.map((m) => [m.id, m]));
+
+      // Hesap kodu 120-01-* = TL, 120-02-* = USD hesabı
+      const dovizOf = (musteriId: string): "TL" | "USD" =>
+        (musteriMap.get(musteriId)?.hesapKodu || "").startsWith("120-02") ? "USD" : "TL";
+
+      // Gümrük fatura toplamlarını DB-side aggregate ile çek (transfer optimize).
+      // Eskiden: getAllGumrukVerileri() ile binlerce satır + JS aggregate.
+      // Şimdi: SQL GROUP BY + SUM, firma sayısı kadar satır (binlerce → onlarca).
+      const faturaMap = await storage.getGumrukFirmaFaturaAggregate(
+        refTarih,
+        ayarlar.faturaPenceresi,
+      );
       const mizanAyNo = Math.max(1, parseInt(refTarih.slice(5, 7), 10) || 1);
       const segmentEsikleri = {
         odemeOraniEsik: ayarlar.odemeOraniEsik,
@@ -2065,6 +2073,7 @@ export async function registerRoutes(
           yillikFatura: yillik,
           sonBorcTarihi: b.sonBorcTarihi,
           sonAlacakTarihi: b.sonAlacakTarihi,
+          doviz: dovizOf(b.musteriId),
           odemeOrani: oran,
           ytdCiro,
           ytdIslemSayisi: eslesmemis ? null : ytdIslemSayisi,
@@ -2080,27 +2089,36 @@ export async function registerRoutes(
         };
       }).filter((x): x is NonNullable<typeof x> => x !== null);
 
-      // Özet metrikler
-      const oncekiToplamNetAlacak = oncekiMizan
-        ? Array.from(oncekiBakiyeMap.values())
-            .map((ob) => netBakiye({ sonBakiye: Number(ob.sonBakiye || 0), sonBakiyeBA: ob.sonBakiyeBA || "B" }))
+      // Özet metrikler — TL ve USD hesaplar AYRI toplanır (para birimi karıştırılmaz)
+      const oncekiToplamTL = oncekiMizan
+        ? Array.from(oncekiBakiyeMap.entries())
+            .filter(([mid]) => dovizOf(mid) === "TL")
+            .map(([, ob]) => netBakiye({ sonBakiye: Number(ob.sonBakiye || 0), sonBakiyeBA: ob.sonBakiyeBA || "B" }))
             .filter((v) => v > 0)
             .reduce((a, v) => a + v, 0)
         : null;
-      const toplamNetAlacakSimdi = detaylar.filter((d) => d.netBakiye > 0).reduce((a, d) => a + d.netBakiye, 0);
+      const pozToplam = (dv: "TL" | "USD") =>
+        detaylar.filter((d) => d.doviz === dv && d.netBakiye > 0).reduce((a, d) => a + d.netBakiye, 0);
+      const segToplam = (s: string, dv: "TL" | "USD") =>
+        detaylar.filter((d) => d.segment === s && d.doviz === dv).reduce((a, d) => a + Math.max(0, d.netBakiye), 0);
+      const toplamNetAlacakSimdi = pozToplam("TL");
       const SEGMENTLER = ["SAGLIKLI", "BUYUK_RISK", "KUCUK_NOTR", "NAKIT_TUZAGI"] as const;
       const ozet = {
         toplamNetAlacak: toplamNetAlacakSimdi,
+        toplamNetAlacakUsd: pozToplam("USD"),
         nakitTuzagiSayisi: detaylar.filter((d) => d.segment === "NAKIT_TUZAGI").length,
-        nakitTuzagiToplam: detaylar.filter((d) => d.segment === "NAKIT_TUZAGI").reduce((a, d) => a + d.netBakiye, 0),
+        nakitTuzagiToplam: segToplam("NAKIT_TUZAGI", "TL"),
+        nakitTuzagiToplamUsd: segToplam("NAKIT_TUZAGI", "USD"),
         buyukRiskSayisi: detaylar.filter((d) => d.segment === "BUYUK_RISK").length,
-        buyukRiskToplam: detaylar.filter((d) => d.segment === "BUYUK_RISK").reduce((a, d) => a + d.netBakiye, 0),
+        buyukRiskToplam: segToplam("BUYUK_RISK", "TL"),
+        buyukRiskToplamUsd: segToplam("BUYUK_RISK", "USD"),
         oncekiMizanTarihi: oncekiMizan?.mizanTarihi ?? null,
-        toplamNetAlacakDelta: oncekiToplamNetAlacak === null ? null : toplamNetAlacakSimdi - oncekiToplamNetAlacak,
+        toplamNetAlacakDelta: oncekiToplamTL === null ? null : toplamNetAlacakSimdi - oncekiToplamTL,
         segmentDagilim: SEGMENTLER.map((s) => ({
           segment: s,
           sayi: detaylar.filter((d) => d.segment === s).length,
-          toplam: detaylar.filter((d) => d.segment === s).reduce((a, d) => a + Math.max(0, d.netBakiye), 0),
+          toplam: segToplam(s, "TL"),
+          toplamUsd: segToplam(s, "USD"),
         })),
         vipSayisi: detaylar.filter((d) => d.vipRozeti).length,
         vipBakiyeToplam: detaylar.filter((d) => d.vipRozeti).reduce((a, d) => a + d.netBakiye, 0),
