@@ -33,6 +33,7 @@ import ISO9001BakimOnarim from "@/pages/ISO9001BakimOnarim";
 import PublicEgitimDegerlendirme from "@/pages/PublicEgitimDegerlendirme";
 import PublicSurvey from "@/pages/PublicSurvey";
 import SurveyAnalysis from "@/pages/SurveyAnalysis";
+import PortalApp from "@/pages/portal/PortalApp";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -86,6 +87,7 @@ function Router() {
       <Route path="/egitim-degerlendirme/:id" component={PublicEgitimDegerlendirme} />
       <Route path="/anket-sonuclari/:id" component={SurveyAnalysis} />
       <Route path="/survey/:id" component={PublicSurvey} />
+      <Route path="/portal" component={PortalApp} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -103,7 +105,11 @@ function AppContent() {
     }
   }, []);
   
-  if (location.startsWith("/survey/") || location.startsWith("/egitim-degerlendirme/")) {
+  if (
+    location.startsWith("/survey/") ||
+    location.startsWith("/egitim-degerlendirme/") ||
+    location.startsWith("/portal")
+  ) {
     return <Router />;
   }
 
