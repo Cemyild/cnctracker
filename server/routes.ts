@@ -147,6 +147,9 @@ import { PDFParse } from "pdf-parse";
 import { getTCMBExchangeRate, normalizeCurrencyCode } from "./currency"; // Helper added
 import { processUserQuery, generateNaturalLanguageResponse } from "./lib/openai";
 import { extractPolicyFields } from "./lib/policeOcr";
+import { hashSifre, dogrulaSifre, requirePortal, requireMuhasebe } from "./portalAuth";
+import { insertPortalKullaniciSchema, type PortalKullanici, type InsertPortalKullanici, type Beyanname } from "@shared/schema";
+import type { Request } from "express";
 
 
 // Row hash oluştur - satırı benzersiz tanımlamak için
@@ -4492,6 +4495,113 @@ export async function registerRoutes(
       const sonuc = await storage.upsertBeyannameler(rows);
       const eslesmeyen = await storage.getEslesmeyenBeyannameKullanicilari();
       res.json({ toplam: rows.length, ...sonuc, eslesmeyen });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // ==================== ÖDEMELER PORTALI: OTURUM ====================
+
+  // Oturumdaki AKTİF kullanıcıyı yükler; yoksa null.
+  // Rol/kimlik daima sunucudan okunur — istemci parametresine güvenilmez.
+  async function portalKullanici(req: Request): Promise<PortalKullanici | null> {
+    if (!req.session.portalUserId) return null;
+    const k = await storage.getPortalKullanici(req.session.portalUserId);
+    return k && k.aktif ? k : null;
+  }
+
+  // Yerel tarih YYYY-MM-DD (saklama formatı)
+  function bugunYmd(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  function sanitizePortalKullanici(k: PortalKullanici) {
+    const { sifreHash, ...rest } = k;
+    return rest;
+  }
+
+  app.post("/api/portal/login", async (req, res) => {
+    try {
+      const { kullaniciAdi, sifre } = req.body || {};
+      if (!kullaniciAdi || !sifre) {
+        return res.status(400).json({ error: "Kullanıcı adı ve şifre gerekli" });
+      }
+      const k = await storage.getPortalKullaniciByKullaniciAdi(String(kullaniciAdi).trim());
+      if (!k || !(await dogrulaSifre(String(sifre), k.sifreHash))) {
+        return res.status(401).json({ error: "Kullanıcı adı veya şifre hatalı" });
+      }
+      if (!k.aktif) return res.status(401).json({ error: "Hesap kapalı" });
+      req.session.portalUserId = k.id;
+      req.session.portalRol = k.rol;
+      res.json({ id: k.id, adSoyad: k.adSoyad, rol: k.rol, avAdi: k.avAdi });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/portal/logout", (req, res) => {
+    req.session.destroy(() => res.json({ ok: true }));
+  });
+
+  app.get("/api/portal/me", requirePortal, async (req, res) => {
+    const k = await portalKullanici(req);
+    if (!k) return res.status(401).json({ error: "Giriş gerekli" });
+    res.json({ id: k.id, adSoyad: k.adSoyad, rol: k.rol, avAdi: k.avAdi });
+  });
+
+  // ==================== ÖDEMELER PORTALI: KULLANICI YÖNETİMİ (yönetim paneli) ====================
+
+  app.get("/api/odemeler/kullanicilar", async (_req, res) => {
+    const liste = await storage.getPortalKullanicilar();
+    res.json(liste.map(sanitizePortalKullanici));
+  });
+
+  app.post("/api/odemeler/kullanicilar", async (req, res) => {
+    try {
+      const { sifre, ...alanlar } = req.body || {};
+      if (!sifre || String(sifre).length < 4) {
+        return res.status(400).json({ error: "Şifre en az 4 karakter olmalı" });
+      }
+      const parsed = insertPortalKullaniciSchema.omit({ sifreHash: true }).parse(alanlar);
+      if (!["temsilci", "muhasebe"].includes(parsed.rol)) {
+        return res.status(400).json({ error: "Geçersiz rol" });
+      }
+      const mevcut = await storage.getPortalKullaniciByKullaniciAdi(parsed.kullaniciAdi);
+      if (mevcut) return res.status(400).json({ error: "Bu kullanıcı adı zaten var" });
+      const k = await storage.createPortalKullanici({
+        ...parsed,
+        avAdi: parsed.avAdi ? parsed.avAdi.trim() : null,
+        sifreHash: await hashSifre(String(sifre)),
+      });
+      res.json(sanitizePortalKullanici(k));
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/odemeler/kullanicilar/:id", async (req, res) => {
+    try {
+      // Alan beyaz listesi — sifreHash dışarıdan yazılamaz
+      const izinli: Partial<InsertPortalKullanici> = {};
+      if (typeof req.body?.adSoyad === "string" && req.body.adSoyad.trim()) {
+        izinli.adSoyad = req.body.adSoyad.trim();
+      }
+      if (["temsilci", "muhasebe"].includes(req.body?.rol)) izinli.rol = req.body.rol;
+      if (req.body?.avAdi !== undefined) {
+        izinli.avAdi = req.body.avAdi ? String(req.body.avAdi).trim() : null;
+      }
+      if (typeof req.body?.aktif === "boolean") izinli.aktif = req.body.aktif;
+      if (req.body?.sifre) {
+        if (String(req.body.sifre).length < 4) {
+          return res.status(400).json({ error: "Şifre en az 4 karakter olmalı" });
+        }
+        izinli.sifreHash = await hashSifre(String(req.body.sifre));
+      }
+      const k = await storage.updatePortalKullanici(req.params.id, izinli);
+      if (!k) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(sanitizePortalKullanici(k));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
