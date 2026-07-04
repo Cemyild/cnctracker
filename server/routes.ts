@@ -4529,6 +4529,17 @@ export async function registerRoutes(
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
 
+  // Tutar ayrıştırma: "1.500,50" | "1500,50" | "1500.50" → 1500.5; geçersiz → null.
+  // Hem nokta hem virgül varsa nokta binlik ayracı sayılır.
+  function parseTutar(v: unknown): number | null {
+    let s = String(v ?? "").trim();
+    if (!s) return null;
+    if (s.includes(".") && s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(",", ".");
+    const n = parseFloat(s);
+    return isFinite(n) ? n : null;
+  }
+
   function sanitizePortalKullanici(k: PortalKullanici) {
     const { sifreHash, ...rest } = k;
     return rest;
@@ -4566,8 +4577,12 @@ export async function registerRoutes(
   // ==================== ÖDEMELER PORTALI: KULLANICI YÖNETİMİ (yönetim paneli) ====================
 
   app.get("/api/odemeler/kullanicilar", async (_req, res) => {
-    const liste = await storage.getPortalKullanicilar();
-    res.json(liste.map(sanitizePortalKullanici));
+    try {
+      const liste = await storage.getPortalKullanicilar();
+      res.json(liste.map(sanitizePortalKullanici));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/odemeler/kullanicilar", async (req, res) => {
@@ -4622,24 +4637,39 @@ export async function registerRoutes(
   // ==================== ÖDEMELER PORTALI: VERİ ====================
 
   app.get("/api/portal/beyannameler", requirePortal, async (req, res) => {
-    const ben = await portalKullanici(req);
-    if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
-    // Filtre SUNUCUDA: temsilci yalnız kendi (avAdi) beyannamelerini görür.
-    // avAdi atanmamış temsilci hiçbir şey görmez (boş string hiçbir kullaniciyla eşleşmez).
-    const liste = ben.rol === "muhasebe"
-      ? await storage.getBeyannameler()
-      : await storage.getBeyannameler(ben.avAdi ?? "");
-    res.json(liste);
-  });
-
-  app.get("/api/portal/masraf-turleri", requirePortal, async (_req, res) => {
-    res.json(await storage.getMasrafTurleri(true));
-  });
-
-  app.post("/api/portal/talepler", requirePortal, uploadOdemeBelge.array("belgeler", 10), async (req, res) => {
     try {
       const ben = await portalKullanici(req);
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      // Filtre SUNUCUDA: temsilci yalnız kendi (avAdi) beyannamelerini görür.
+      // avAdi atanmamış temsilci hiçbir şey görmez (boş string hiçbir kullaniciyla eşleşmez).
+      const liste = ben.rol === "muhasebe"
+        ? await storage.getBeyannameler()
+        : await storage.getBeyannameler(ben.avAdi ?? "");
+      res.json(liste);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/portal/masraf-turleri", requirePortal, async (_req, res) => {
+    try {
+      res.json(await storage.getMasrafTurleri(true));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/portal/talepler", requirePortal, uploadOdemeBelge.array("belgeler", 10), async (req, res) => {
+    const yuklenenDosyalar = (req.files as Express.Multer.File[]) || [];
+    const yuklenenleriSil = () => {
+      for (const f of yuklenenDosyalar) fs.unlink(f.path, () => {});
+    };
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) {
+        yuklenenleriSil();
+        return res.status(401).json({ error: "Giriş gerekli" });
+      }
       const { beyannameId, odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama } = req.body || {};
 
       // Beyanname OPSİYONEL: dosya henüz açılmamışsa "dosyasız talep" gönderilir,
@@ -4648,23 +4678,38 @@ export async function registerRoutes(
       let beyanname: Beyanname | undefined;
       if (beyannameIdStr) {
         beyanname = await storage.getBeyanname(beyannameIdStr);
-        if (!beyanname) return res.status(400).json({ error: "Beyanname bulunamadı" });
+        if (!beyanname) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Beyanname bulunamadı" });
+        }
         if (ben.rol === "temsilci" && beyanname.kullanici !== ben.avAdi) {
+          yuklenenleriSil();
           return res.status(403).json({ error: "Bu beyanname size ait değil" });
         }
       } else if (!String(aciklama ?? "").trim()) {
+        yuklenenleriSil();
         return res.status(400).json({ error: "Dosyasız talepte açıklama zorunlu" });
       }
       if (!["masraf", "depo_teminat"].includes(String(odemeTipi))) {
+        yuklenenleriSil();
         return res.status(400).json({ error: "Geçersiz ödeme tipi" });
       }
-      const tutarNum = parseFloat(String(tutar ?? "").replace(",", "."));
-      if (!isFinite(tutarNum) || tutarNum <= 0) return res.status(400).json({ error: "Geçersiz tutar" });
+      const tutarNum = parseTutar(tutar);
+      if (tutarNum == null || tutarNum <= 0) {
+        yuklenenleriSil();
+        return res.status(400).json({ error: "Geçersiz tutar" });
+      }
       const alacakliStr = String(alacakli ?? "").trim();
-      if (!alacakliStr) return res.status(400).json({ error: "Alacaklı (kime ödenecek) zorunlu" });
+      if (!alacakliStr) {
+        yuklenenleriSil();
+        return res.status(400).json({ error: "Alacaklı (kime ödenecek) zorunlu" });
+      }
       // Depo teminatında masraf türü sabittir; masrafta listeden gelir.
       const masrafTuruStr = odemeTipi === "depo_teminat" ? "Depo Teminatı" : String(masrafTuru ?? "").trim();
-      if (!masrafTuruStr) return res.status(400).json({ error: "Masraf türü zorunlu" });
+      if (!masrafTuruStr) {
+        yuklenenleriSil();
+        return res.status(400).json({ error: "Masraf türü zorunlu" });
+      }
 
       const talep = await storage.createOdemeTalep({
         beyannameId: beyanname?.id ?? null,
@@ -4681,8 +4726,7 @@ export async function registerRoutes(
         iadeDurumu: odemeTipi === "depo_teminat" ? "beklemede" : null,
       });
 
-      const dosyalar = (req.files as Express.Multer.File[]) || [];
-      for (const f of dosyalar) {
+      for (const f of yuklenenDosyalar) {
         await storage.createOdemeBelge({
           talepId: talep.id,
           belgeTipi: "fatura",
@@ -4693,15 +4737,20 @@ export async function registerRoutes(
       }
       res.json(talep);
     } catch (e: any) {
+      yuklenenleriSil();
       res.status(400).json({ error: e.message });
     }
   });
 
   app.get("/api/portal/talepler", requirePortal, async (req, res) => {
-    const ben = await portalKullanici(req);
-    if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
-    const filtre = ben.rol === "muhasebe" ? {} : { talepEdenId: ben.id };
-    res.json(await storage.getOdemeTalepleri(filtre));
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const filtre = ben.rol === "muhasebe" ? {} : { talepEdenId: ben.id };
+      res.json(await storage.getOdemeTalepleri(filtre));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post(
@@ -4712,16 +4761,31 @@ export async function registerRoutes(
       { name: "konsimento", maxCount: 1 },
     ]),
     async (req, res) => {
+      const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+      const yuklenenleriSil = () => {
+        for (const f of [...(files?.dekont ?? []), ...(files?.konsimento ?? [])]) fs.unlink(f.path, () => {});
+      };
       try {
         const ben = await portalKullanici(req);
-        if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+        if (!ben) {
+          yuklenenleriSil();
+          return res.status(401).json({ error: "Giriş gerekli" });
+        }
         const talep = await storage.getOdemeTalep(req.params.id);
-        if (!talep) return res.status(404).json({ error: "Bulunamadı" });
-        if (talep.durum === "odendi") return res.status(400).json({ error: "Talep zaten ödendi" });
+        if (!talep) {
+          yuklenenleriSil();
+          return res.status(404).json({ error: "Bulunamadı" });
+        }
+        if (talep.durum === "odendi") {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Talep zaten ödendi" });
+        }
 
-        const files = req.files as Record<string, Express.Multer.File[]> | undefined;
         const dekont = files?.dekont?.[0];
-        if (!dekont) return res.status(400).json({ error: "Dekont dosyası zorunlu" });
+        if (!dekont) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Dekont dosyası zorunlu" });
+        }
 
         await storage.createOdemeBelge({
           talepId: talep.id,
@@ -4747,6 +4811,7 @@ export async function registerRoutes(
         });
         res.json(guncel);
       } catch (e: any) {
+        yuklenenleriSil();
         res.status(400).json({ error: e.message });
       }
     },
@@ -4765,7 +4830,11 @@ export async function registerRoutes(
       }
       const guncel = await storage.updateOdemeTalep(talep.id, {
         iadeDurumu: String(iadeDurumu),
-        iadeTutari: iadeTutari != null && String(iadeTutari) !== "" ? String(iadeTutari) : null,
+        iadeTutari: (() => {
+          if (iadeTutari == null || String(iadeTutari).trim() === "") return null;
+          const n = parseTutar(iadeTutari);
+          return n != null && n >= 0 ? String(n) : null;
+        })(),
         iadeTarihi: iadeTarihi ? String(iadeTarihi) : null,
         iadeNotu: iadeNotu ? String(iadeNotu) : null,
       });
@@ -4805,7 +4874,11 @@ export async function registerRoutes(
   // ==================== ÖDEMELER: YÖNETİM PANELİ EK ROTALAR ====================
 
   app.get("/api/odemeler/masraf-turleri", async (_req, res) => {
-    res.json(await storage.getMasrafTurleri());
+    try {
+      res.json(await storage.getMasrafTurleri());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/odemeler/masraf-turleri", async (req, res) => {
@@ -4836,11 +4909,15 @@ export async function registerRoutes(
 
   // İzleme sayfası: tüm talepler + eşleşmeyen beyanname kullanıcıları
   app.get("/api/odemeler/ozet", async (_req, res) => {
-    const [talepler, eslesmeyen] = await Promise.all([
-      storage.getOdemeTalepleri({}),
-      storage.getEslesmeyenBeyannameKullanicilari(),
-    ]);
-    res.json({ talepler, eslesmeyen });
+    try {
+      const [talepler, eslesmeyen] = await Promise.all([
+        storage.getOdemeTalepleri({}),
+        storage.getEslesmeyenBeyannameKullanicilari(),
+      ]);
+      res.json({ talepler, eslesmeyen });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   return httpServer;
