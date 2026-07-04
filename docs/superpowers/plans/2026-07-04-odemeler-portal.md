@@ -106,7 +106,8 @@ export type MasrafTuru = typeof masrafTurleri.$inferSelect;
 // Ödeme talepleri — modülün kalbi
 export const odemeTalepleri = pgTable("odeme_talepleri", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  beyannameId: varchar("beyanname_id").notNull().references(() => beyannameler.id),
+  // NULLABLE: beyanname dosyası henüz açılmamışsa "dosyasız talep" — sonradan eşleştirilir
+  beyannameId: varchar("beyanname_id").references(() => beyannameler.id),
   talepEdenId: varchar("talep_eden_id").notNull().references(() => portalKullanicilar.id),
   odemeTipi: text("odeme_tipi").notNull(), // 'masraf' | 'depo_teminat'
   masrafTuru: text("masraf_turu").notNull(), // masraf_turleri.ad kopyası; depo_teminat'ta sabit "Depo Teminatı"
@@ -525,12 +526,17 @@ export type OdemeTalepDetay = OdemeTalep & {
       .orderBy(desc(odemeTalepleri.talepTarihi), desc(odemeTalepleri.id));
     if (!talepler.length) return [];
 
-    // N+1 yok: üç toplu sorgu + Map join
-    const beyanIds = Array.from(new Set(talepler.map((t) => t.beyannameId)));
+    // N+1 yok: üç toplu sorgu + Map join.
+    // beyannameId dosyasız taleplerde null — filtrele; boş diziyle inArray çağrılmaz.
+    const beyanIds = Array.from(new Set(
+      talepler.map((t) => t.beyannameId).filter((x): x is string => x != null),
+    ));
     const kullaniciIds = Array.from(new Set(talepler.map((t) => t.talepEdenId)));
     const talepIds = talepler.map((t) => t.id);
     const [beyanSatirlari, kullaniciSatirlari, belgeSatirlari] = await Promise.all([
-      db.select().from(beyannameler).where(inArray(beyannameler.id, beyanIds)),
+      beyanIds.length
+        ? db.select().from(beyannameler).where(inArray(beyannameler.id, beyanIds))
+        : Promise.resolve([] as Beyanname[]),
       db.select().from(portalKullanicilar).where(inArray(portalKullanicilar.id, kullaniciIds)),
       db.select().from(odemeBelgeleri).where(inArray(odemeBelgeleri.talepId, talepIds)),
     ]);
@@ -544,7 +550,7 @@ export type OdemeTalepDetay = OdemeTalep & {
     }
     return talepler.map((t) => ({
       ...t,
-      beyanname: beyanMap.get(t.beyannameId) ?? null,
+      beyanname: t.beyannameId ? beyanMap.get(t.beyannameId) ?? null : null,
       talepEdenAd: adMap.get(t.talepEdenId) ?? "?",
       belgeler: belgeMap.get(t.id) ?? [],
     }));
@@ -765,7 +771,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ```ts
 import { hashSifre, dogrulaSifre, requirePortal, requireMuhasebe } from "./portalAuth";
-import { insertPortalKullaniciSchema, type PortalKullanici, type InsertPortalKullanici } from "@shared/schema";
+import { insertPortalKullaniciSchema, type PortalKullanici, type InsertPortalKullanici, type Beyanname } from "@shared/schema";
 import type { Request } from "express";
 ```
 
@@ -940,8 +946,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Produces:
   - `GET /api/portal/beyannameler` — temsilci: yalnız kendi `avAdi`'sininkiler (SUNUCUDA filtre); muhasebe: hepsi
   - `GET /api/portal/masraf-turleri` — yalnız aktifler
-  - `POST /api/portal/talepler` — multipart, dosya alanı `belgeler` (max 10); alanlar: `beyannameId, odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama`
+  - `POST /api/portal/talepler` — multipart, dosya alanı `belgeler` (max 10); alanlar: `beyannameId (opsiyonel — boşsa "dosyasız talep", o zaman aciklama zorunlu), odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama`
   - `GET /api/portal/talepler` → `OdemeTalepDetay[]` (temsilci: kendininkiler; muhasebe: hepsi)
+  - `PUT /api/portal/talepler/:id/beyanname` — JSON `{ beyannameId }`; dosyasız talebe sonradan eşleştirme (talep sahibi veya muhasebe; yalnız `beyannameId=null` iken; temsilci yalnız kendi `avAdi` beyannamesini seçebilir)
   - `POST /api/portal/talepler/:id/odeme` — multipart `dekont` (zorunlu, 1) + `konsimento` (ops., 1); yalnız muhasebe
   - `PUT /api/portal/talepler/:id/iade` — JSON `{ iadeDurumu, iadeTutari?, iadeTarihi?, iadeNotu? }`; yalnız muhasebe
   - `GET/POST/PUT /api/odemeler/masraf-turleri[/:id]`, `GET /api/odemeler/ozet`
@@ -992,10 +999,18 @@ Task 5 rotalarının altına:
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
       const { beyannameId, odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama } = req.body || {};
 
-      const beyanname = await storage.getBeyanname(String(beyannameId || ""));
-      if (!beyanname) return res.status(400).json({ error: "Beyanname bulunamadı" });
-      if (ben.rol === "temsilci" && beyanname.kullanici !== ben.avAdi) {
-        return res.status(403).json({ error: "Bu beyanname size ait değil" });
+      // Beyanname OPSİYONEL: dosya henüz açılmamışsa "dosyasız talep" gönderilir,
+      // ödeme sonrası temsilci eşleştirir. Dosyasızsa açıklama zorunlu (muhasebe işi tanısın).
+      const beyannameIdStr = String(beyannameId ?? "").trim();
+      let beyanname: Beyanname | undefined;
+      if (beyannameIdStr) {
+        beyanname = await storage.getBeyanname(beyannameIdStr);
+        if (!beyanname) return res.status(400).json({ error: "Beyanname bulunamadı" });
+        if (ben.rol === "temsilci" && beyanname.kullanici !== ben.avAdi) {
+          return res.status(403).json({ error: "Bu beyanname size ait değil" });
+        }
+      } else if (!String(aciklama ?? "").trim()) {
+        return res.status(400).json({ error: "Dosyasız talepte açıklama zorunlu" });
       }
       if (!["masraf", "depo_teminat"].includes(String(odemeTipi))) {
         return res.status(400).json({ error: "Geçersiz ödeme tipi" });
@@ -1009,7 +1024,7 @@ Task 5 rotalarının altına:
       if (!masrafTuruStr) return res.status(400).json({ error: "Masraf türü zorunlu" });
 
       const talep = await storage.createOdemeTalep({
-        beyannameId: beyanname.id,
+        beyannameId: beyanname?.id ?? null,
         talepEdenId: ben.id,
         odemeTipi: String(odemeTipi),
         masrafTuru: masrafTuruStr,
@@ -1111,6 +1126,32 @@ Task 5 rotalarının altına:
         iadeTarihi: iadeTarihi ? String(iadeTarihi) : null,
         iadeNotu: iadeNotu ? String(iadeNotu) : null,
       });
+      if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(guncel);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // Dosyasız talebe sonradan beyanname eşleştirme (talep sahibi veya muhasebe)
+  app.put("/api/portal/talepler/:id/beyanname", requirePortal, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const talep = await storage.getOdemeTalep(req.params.id);
+      if (!talep) return res.status(404).json({ error: "Bulunamadı" });
+      if (ben.rol !== "muhasebe" && talep.talepEdenId !== ben.id) {
+        return res.status(403).json({ error: "Yetkisiz" });
+      }
+      if (talep.beyannameId) {
+        return res.status(400).json({ error: "Talep zaten bir beyannameyle eşleşmiş" });
+      }
+      const beyanname = await storage.getBeyanname(String(req.body?.beyannameId ?? ""));
+      if (!beyanname) return res.status(400).json({ error: "Beyanname bulunamadı" });
+      if (ben.rol === "temsilci" && beyanname.kullanici !== ben.avAdi) {
+        return res.status(403).json({ error: "Bu beyanname size ait değil" });
+      }
+      const guncel = await storage.updateOdemeTalep(talep.id, { beyannameId: beyanname.id });
       if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
       res.json(guncel);
     } catch (e: any) {
@@ -1238,6 +1279,28 @@ curl -s -b "$TEMP/muhasebe-cookies.txt" -X PUT \
 # 11) Özet (yönetim)
 curl -s http://localhost:5000/api/odemeler/ozet | head -c 400
 # Beklenen: {"talepler":[...2 kayıt...],"eslesmeyen":[...]}
+
+# 12) DOSYASIZ talep — açıklamasız reddedilir, açıklamayla kabul edilir
+curl -s -b "$TEMP/portal-cookies.txt" -X POST http://localhost:5000/api/portal/talepler \
+  -F "odemeTipi=masraf" -F "masrafTuru=Ardiye" -F "tutar=250" -F "alacakli=Test Antrepo"
+# Beklenen: {"error":"Dosyasız talepte açıklama zorunlu"}
+curl -s -b "$TEMP/portal-cookies.txt" -X POST http://localhost:5000/api/portal/talepler \
+  -F "odemeTipi=masraf" -F "masrafTuru=Ardiye" -F "tutar=250" -F "alacakli=Test Antrepo" \
+  -F "aciklama=ACME ithalatı, dosya henüz açılmadı"
+# Beklenen: {"id":"...","beyannameId":null,"durum":"bekliyor",...} → DOSYASIZ_ID not al
+
+# 13) Muhasebe öder → temsilci beyannameyle eşleştirir
+curl -s -b "$TEMP/muhasebe-cookies.txt" -X POST \
+  http://localhost:5000/api/portal/talepler/DOSYASIZ_ID/odeme -F "dekont=@$TEMP/dekont-test.pdf"
+curl -s -b "$TEMP/portal-cookies.txt" -X PUT \
+  http://localhost:5000/api/portal/talepler/DOSYASIZ_ID/beyanname \
+  -H "Content-Type: application/json" -d '{"beyannameId":"BEYAN_ID"}'
+# Beklenen: "beyannameId":"BEYAN_ID"
+# Tekrar eşleştirme denemesi → 400
+curl -s -b "$TEMP/portal-cookies.txt" -X PUT \
+  http://localhost:5000/api/portal/talepler/DOSYASIZ_ID/beyanname \
+  -H "Content-Type: application/json" -d '{"beyannameId":"BEYAN_ID"}'
+# Beklenen: {"error":"Talep zaten bir beyannameyle eşleşmiş"}
 ```
 
 - [ ] **Step 5: Commit**
@@ -1543,8 +1606,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `client/src/pages/portal/TemsilciPanel.tsx` (iskeleti tam implementasyonla değiştir)
 
 **Interfaces:**
-- Consumes: `GET /api/portal/beyannameler`, `GET /api/portal/masraf-turleri`, `POST /api/portal/talepler` (multipart), `GET /api/portal/talepler`; `portalUtils` yardımcıları; `PortalMe` (Task 7); shadcn `Card, Input, Button, Textarea, Badge, Select, Table` bileşenleri; `useToast` (`@/hooks/use-toast`).
-- Produces: `TemsilciPanel({ me })` default export — Task 7'deki iskeletle aynı imza, davranış tamamlanır.
+- Consumes: `GET /api/portal/beyannameler`, `GET /api/portal/masraf-turleri`, `POST /api/portal/talepler` (multipart, beyannameId opsiyonel), `PUT /api/portal/talepler/:id/beyanname`, `GET /api/portal/talepler`; `portalUtils` yardımcıları; `PortalMe` (Task 7); shadcn `Card, Input, Button, Textarea, Badge, Select, Table, Checkbox` bileşenleri; `useToast` (`@/hooks/use-toast`).
+- Produces: `TemsilciPanel({ me })` default export — Task 7'deki iskeletle aynı imza; içinde üç bölüm: talep formu ("Dosya yok" seçenekli), Eşleşme Bekleyen Ödemeler kartı (ödenmiş + beyannamesiz talepler için eşleştirme), Taleplerim tablosu.
 
 - [ ] **Step 1: TemsilciPanel.tsx'i tam implementasyonla değiştir**
 
@@ -1553,13 +1616,14 @@ Dosyanın tüm içeriğini şununla değiştir:
 ```tsx
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Beyanname, MasrafTuru } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -1573,6 +1637,106 @@ import {
   type TalepDetay, formatTarih, formatPara,
   TIP_ETIKET, DURUM_ETIKET, IADE_ETIKET, BELGE_ETIKET, belgeUrl,
 } from "./portalUtils";
+
+// Ödenmiş ama beyannamesiz talepler — temsilciden eşleştirme istenir
+function EslesmeBekleyenler({
+  talepler, beyannameler,
+}: { talepler: TalepDetay[]; beyannameler: Beyanname[] }) {
+  const { toast } = useToast();
+  const [secimler, setSecimler] = useState<Record<string, string>>({});
+  const [aramalar, setAramalar] = useState<Record<string, string>>({});
+  const [gonderilen, setGonderilen] = useState<string | null>(null);
+
+  const bekleyenler = talepler.filter((t) => !t.beyannameId && t.durum === "odendi");
+  if (!bekleyenler.length) return null;
+
+  const eslestir = async (talepId: string) => {
+    const beyannameId = secimler[talepId];
+    if (!beyannameId) {
+      toast({ title: "Beyanname seçin", variant: "destructive" });
+      return;
+    }
+    setGonderilen(talepId);
+    try {
+      await apiRequest("PUT", `/api/portal/talepler/${talepId}/beyanname`, { beyannameId });
+      toast({ title: "Eşleştirildi" });
+      queryClient.invalidateQueries({ queryKey: ["/api/portal/talepler"] });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setGonderilen(null);
+    }
+  };
+
+  return (
+    <Card className="border-amber-300">
+      <CardHeader>
+        <CardTitle className="text-amber-700">
+          Eşleşme Bekleyen Ödemeler ({bekleyenler.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Bu ödemeler dosyasız gönderilmişti ve ödendi. Lütfen ait oldukları beyannameyle
+          eşleştirin.
+        </p>
+        {bekleyenler.map((t) => {
+          const q = (aramalar[t.id] ?? "").trim().toLocaleLowerCase("tr");
+          const filtreli = q
+            ? beyannameler.filter(
+                (b) =>
+                  b.dosyaNo.toLocaleLowerCase("tr").includes(q) ||
+                  (b.alici ?? "").toLocaleLowerCase("tr").includes(q),
+              )
+            : beyannameler;
+          return (
+            <div
+              key={t.id}
+              className="rounded-md border p-3 space-y-2"
+              data-testid={`row-eslesmeyen-${t.id}`}
+            >
+              <div className="text-sm">
+                {formatTarih(t.talepTarihi)} — {formatPara(t.tutar, t.paraBirimi)} — {t.alacakli}
+                {t.aciklama && <span className="text-muted-foreground"> — {t.aciklama}</span>}
+              </div>
+              <div className="flex flex-col md:flex-row gap-2">
+                <Input
+                  placeholder="Beyanname ara…"
+                  value={aramalar[t.id] ?? ""}
+                  onChange={(e) => setAramalar((s) => ({ ...s, [t.id]: e.target.value }))}
+                  className="md:max-w-56"
+                />
+                <Select
+                  value={secimler[t.id] ?? ""}
+                  onValueChange={(v) => setSecimler((s) => ({ ...s, [t.id]: v }))}
+                >
+                  <SelectTrigger className="md:max-w-md">
+                    <SelectValue placeholder="Beyanname seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filtreli.slice(0, 100).map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.dosyaNo} — {b.alici ?? "?"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  onClick={() => eslestir(t.id)}
+                  disabled={gonderilen === t.id}
+                  data-testid={`button-eslestir-${t.id}`}
+                >
+                  {gonderilen === t.id ? "Eşleştiriliyor…" : "Eşleştir"}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function TemsilciPanel({ me }: { me: PortalMe }) {
   const { toast } = useToast();
@@ -1590,6 +1754,7 @@ export default function TemsilciPanel({ me }: { me: PortalMe }) {
   // Form durumu
   const [arama, setArama] = useState("");
   const [beyannameId, setBeyannameId] = useState("");
+  const [dosyaYok, setDosyaYok] = useState(false); // beyanname henüz açılmadı/yüklenmedi
   const [odemeTipi, setOdemeTipi] = useState<"masraf" | "depo_teminat">("masraf");
   const [masrafTuru, setMasrafTuru] = useState("");
   const [tutar, setTutar] = useState("");
@@ -1616,8 +1781,12 @@ export default function TemsilciPanel({ me }: { me: PortalMe }) {
 
   const gonder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!beyannameId) {
-      toast({ title: "Beyanname seçin", variant: "destructive" });
+    if (!dosyaYok && !beyannameId) {
+      toast({ title: "Beyanname seçin", description: "Dosya henüz yoksa 'Dosya yok' işaretleyin.", variant: "destructive" });
+      return;
+    }
+    if (dosyaYok && !aciklama.trim()) {
+      toast({ title: "Dosyasız talepte açıklama zorunlu", description: "Muhasebenin işi tanıyabilmesi için müşteri/iş bilgisini yazın.", variant: "destructive" });
       return;
     }
     if (!tutar.trim() || !alacakli.trim()) {
@@ -1631,7 +1800,7 @@ export default function TemsilciPanel({ me }: { me: PortalMe }) {
     setGonderiliyor(true);
     try {
       const fd = new FormData();
-      fd.set("beyannameId", beyannameId);
+      if (!dosyaYok) fd.set("beyannameId", beyannameId);
       fd.set("odemeTipi", odemeTipi);
       fd.set("masrafTuru", masrafTuru);
       fd.set("tutar", tutar);
@@ -1648,6 +1817,7 @@ export default function TemsilciPanel({ me }: { me: PortalMe }) {
       if (!res.ok) throw new Error((await res.json()).error || "Talep gönderilemedi");
       toast({ title: "Talep gönderildi", description: "Muhasebe listesine düştü." });
       setBeyannameId("");
+      setDosyaYok(false);
       setMasrafTuru("");
       setTutar("");
       setAlacakli("");
@@ -1673,6 +1843,23 @@ export default function TemsilciPanel({ me }: { me: PortalMe }) {
           <form onSubmit={gonder} className="space-y-4">
             <div className="space-y-2">
               <Label>Beyanname / Dosya</Label>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="dosya-yok"
+                  checked={dosyaYok}
+                  onCheckedChange={(v) => {
+                    setDosyaYok(v === true);
+                    if (v === true) setBeyannameId("");
+                  }}
+                  data-testid="checkbox-dosya-yok"
+                />
+                <Label htmlFor="dosya-yok" className="font-normal text-muted-foreground">
+                  Dosya yok — beyanname henüz açılmadı / sisteme yüklenmedi
+                  (ödeme sonrası eşleştirmeniz istenir)
+                </Label>
+              </div>
+              {!dosyaYok && (
+                <>
               <Input
                 placeholder="Dosya no, müşteri veya beyan no ara…"
                 value={arama}
@@ -1691,7 +1878,9 @@ export default function TemsilciPanel({ me }: { me: PortalMe }) {
                   ))}
                 </SelectContent>
               </Select>
-              {secili && (
+                </>
+              )}
+              {!dosyaYok && secili && (
                 <div className="text-xs text-muted-foreground rounded-md border p-2 space-y-0.5">
                   <div><span className="font-medium">Müşteri:</span> {secili.alici ?? "—"}</div>
                   <div><span className="font-medium">Beyan No:</span> {secili.beyanNo ?? "—"}</div>
@@ -1811,6 +2000,8 @@ export default function TemsilciPanel({ me }: { me: PortalMe }) {
         </CardContent>
       </Card>
 
+      <EslesmeBekleyenler talepler={talepler} beyannameler={beyannameler} />
+
       <Card>
         <CardHeader>
           <CardTitle>Taleplerim</CardTitle>
@@ -1840,7 +2031,9 @@ export default function TemsilciPanel({ me }: { me: PortalMe }) {
               {talepler.map((t) => (
                 <TableRow key={t.id} data-testid={`row-talep-${t.id}`}>
                   <TableCell>{formatTarih(t.talepTarihi)}</TableCell>
-                  <TableCell>{t.beyanname?.dosyaNo ?? "—"}</TableCell>
+                  <TableCell>
+                    {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
+                  </TableCell>
                   <TableCell className="max-w-48 truncate">{t.beyanname?.alici ?? "—"}</TableCell>
                   <TableCell>
                     {TIP_ETIKET[t.odemeTipi] ?? t.odemeTipi}
@@ -1897,6 +2090,12 @@ Expected: hatasız.
 - "Depo Teminatı" seçince Masraf Türü alanı gizlenmeli.
 - Dosya ekleyip talep gönder → toast + tabloda "Bekliyor" rozetiyle satır; fatura linki yeni sekmede açılmalı.
 - Task 6'da curl ile ödenen talep tabloda "Ödendi" + Dekont linkiyle görünmeli.
+- "Dosya yok" işaretle → beyanname arama/seçim alanı gizlenmeli; açıklamasız gönderim
+  "Dosyasız talepte açıklama zorunlu" hatası vermeli; açıklamayla gönderilince tabloda
+  "Dosyasız" rozetiyle görünmeli.
+- Task 6 curl adım 12-13'te ödenen dosyasız talep (eşleştirilmemişse) sayfanın ortasında
+  "Eşleşme Bekleyen Ödemeler" kartında çıkmalı; beyanname seçip "Eşleştir" → kart
+  kaybolmalı, satır dosya no'suyla güncellenmelidir.
 
 - [ ] **Step 4: Commit**
 
@@ -2204,7 +2403,9 @@ export default function MuhasebePanel() {
                   <TableRow key={t.id} data-testid={`row-muhasebe-talep-${t.id}`}>
                     <TableCell>{formatTarih(t.talepTarihi)}</TableCell>
                     <TableCell>{t.talepEdenAd}</TableCell>
-                    <TableCell>{t.beyanname?.dosyaNo ?? "—"}</TableCell>
+                    <TableCell>
+                      {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
+                    </TableCell>
                     <TableCell className="max-w-44 truncate">{t.beyanname?.alici ?? "—"}</TableCell>
                     <TableCell>
                       {TIP_ETIKET[t.odemeTipi] ?? t.odemeTipi}
@@ -2276,7 +2477,9 @@ export default function MuhasebePanel() {
                       : null;
                   return (
                     <TableRow key={t.id} data-testid={`row-depo-${t.id}`}>
-                      <TableCell>{t.beyanname?.dosyaNo ?? "—"}</TableCell>
+                      <TableCell>
+                        {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
+                      </TableCell>
                       <TableCell className="max-w-44 truncate">{t.beyanname?.alici ?? "—"}</TableCell>
                       <TableCell>{t.talepEdenAd}</TableCell>
                       <TableCell>{formatPara(t.tutar, t.paraBirimi)}</TableCell>
@@ -2921,6 +3124,10 @@ Spec §10'daki senaryoyu uçtan uca yürüt:
 5. Dekont yükleyip "Ödendi" → temsilci tarafında 30 sn içinde güncelleniyor, dekont indirilebiliyor.
 6. Depo teminatı talebi → ödeme (dekont+konşimento) → Depo Ödemeleri sekmesi → iade kaydı.
 7. Yetki: temsilci çerezi olmadan `curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/portal/talepler` → 401; temsilci çereziyle başka kullanıcının ödeme rotasına POST → 403.
+8. Dosyasız akış: "Dosya yok" ile talep gönder (açıklamasız reddedilmeli) → muhasebe
+   öder → temsilcide "Eşleşme Bekleyen Ödemeler" kartına düşmeli → beyanname eşleştir →
+   karttan düşüp Taleplerim tablosunda dosya no'suyla görünmeli; aynı talebe ikinci
+   eşleştirme denemesi 400 dönmeli.
 
 Herhangi bir adım başarısızsa: düzelt, `npm run check`, ilgili dosyaları commit'le
 (`fix(odemeler): <sorun>` + Co-Authored-By satırı), senaryoyu tekrarla.

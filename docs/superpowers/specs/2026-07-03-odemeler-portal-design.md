@@ -12,6 +12,10 @@ Gümrük müşavirliği operasyonunda müşteri adına yapılan ödemelerin tale
 - **Muhasebe** gelen talepleri tek tabloda görür, ödemeyi yapar, dekontu yükler.
 - **Depo teminatları** (konteyner teminat bedelleri) normal masraflardan farklıdır: ödeme
   sonrası ayrı bir listede takip edilir; işlem bitince ödenen taraftan geri talep edilir.
+- **Dosyasız talep:** beyanname dosyası henüz açılmamış / Excel'e düşmemişse temsilci
+  "Dosya yok" işaretleyip beyannamesiz talep gönderebilir (açıklama zorunlu olur).
+  Ödeme yapıldıktan sonra beyannamesiz talepler temsilcinin ekranında **"Eşleşme
+  Bekleyen Ödemeler"** listesinde görünür; temsilciden beyannameyle eşleştirmesi istenir.
 
 Mevcut uygulama tamamen yönetim tarafıdır ve tek ortak şifreyle korunur; **hiçbir çalışan
 görmemelidir**. Bu modül ise tüm çalışanların kullanacağı, kendi gerçek kullanıcı girişine
@@ -107,7 +111,7 @@ Bölüm 4'teki alanlar + `id` (PK), `sonGuncelleme` (timestamp, her yüklemede t
 | Alan | Tip | Not |
 |---|---|---|
 | id | varchar uuid | PK |
-| beyannameId | varchar FK → beyannameler | `varchar("beyanname_id")` |
+| beyannameId | varchar FK → beyannameler, **nullable** | `varchar("beyanname_id")`; dosyasız talepte null, sonradan eşleştirilir |
 | talepEdenId | varchar FK → portal_kullanicilar | oturumdan damgalanır |
 | odemeTipi | text | `masraf` \| `depo_teminat` |
 | masrafTuru | text | `masraf_turleri` tablosundan seçilen ad (aşağıya bakın) |
@@ -165,8 +169,14 @@ hesaplar giremez.
 - Üstte **Yeni Ödeme Talebi** formu:
   1. Beyanname seçimi — arama kutulu dropdown, yalnız kendi (`avAdi`) beyannameleri;
      seçilince müşteri, dosya no, beyan no, gümrük idaresi otomatik gösterilir.
+     **"Dosya yok"** işaretlenirse beyanname seçimi atlanır ve açıklama zorunlu olur
+     (muhasebe işi tanıyabilsin diye).
   2. Ödeme tipi (Normal masraf / Depo teminatı), masraf türü, tutar + para birimi,
      kime ödenecek, IBAN (opsiyonel), açıklama, belge yükleme (çoklu dosya).
+- Ortada **Eşleşme Bekleyen Ödemeler** listesi: ödenmiş (`durum=odendi`) ama
+  beyannamesiz (`beyannameId=null`) talepler. Temsilci arama kutulu seçiciden
+  beyanname seçip eşleştirir; eşleşen kayıt listeden düşer. Bekleyen dosyasız
+  talepler normal tabloda "Dosyasız" rozetiyle görünür.
 - Altta **kendi taleplerinin tablosu**: durum rozeti (Bekliyor/Ödendi), belgeler,
   muhasebenin yüklediği dekont buradan indirilir.
 
@@ -210,8 +220,9 @@ Rotalar [server/routes.ts](../../../server/routes.ts)'e, veri erişimi
 | `POST /api/portal/logout` | oturumlu | oturumu kapatır |
 | `GET /api/portal/me` | oturumlu | kimlik + rol |
 | `GET /api/portal/beyannameler` | oturumlu | temsilci: yalnız `avAdi` eşleşenler (**filtre sunucuda**); muhasebe: hepsi |
-| `POST /api/portal/talepler` | temsilci | multipart (fatura ekleri); `talepEdenId` oturumdan |
+| `POST /api/portal/talepler` | temsilci | multipart (fatura ekleri); `talepEdenId` oturumdan; `beyannameId` opsiyonel (dosyasız talep — o zaman açıklama zorunlu) |
 | `GET /api/portal/talepler` | oturumlu | temsilci: kendininkiler; muhasebe: hepsi |
+| `PUT /api/portal/talepler/:id/beyanname` | talep sahibi veya muhasebe | dosyasız talebe beyanname eşleştirme; yalnız `beyannameId=null` iken; temsilci yalnız kendi `avAdi` beyannamesini seçebilir |
 | `POST /api/portal/talepler/:id/odeme` | muhasebe | multipart (dekont + varsa konşimento); durum→`odendi`, `odemeTarihi`+`odeyenId` damgalanır |
 | `PUT /api/portal/talepler/:id/iade` | muhasebe | iade kaydı (durum, tutar, tarih, not) |
 
@@ -252,6 +263,9 @@ istemci parametresine güvenilmez.
   listesinde görünür.
 - Ödendi işlemi dekont dosyası olmadan kabul edilmez (400).
 - Pasif kullanıcı girişi: 401 + "Hesap kapalı" mesajı.
+- Dosyasız talepte açıklama boşsa 400 ("Dosyasız talepte açıklama zorunlu").
+- Eşleştirmede: talep zaten eşleşmişse 400; temsilci başkasının `avAdi` beyannamesini
+  seçerse 403; başkasının talebini eşleştirmeye çalışan temsilci 403.
 
 ## 10. Doğrulama
 
@@ -266,6 +280,9 @@ Test altyapısı yok; `npm run check` (tsc) tek otomatik kapı. Elle uçtan uca 
    işaretleme çalışıyor mu?
 7. Yetki: temsilci başka temsilcinin talebini API'den çekebiliyor mu (403/filtre)?
    Girişsiz `/api/portal/talepler` 401 dönüyor mu?
+8. Dosyasız akış: "Dosya yok" ile talep gönder (açıklamasız reddedilmeli) → muhasebe
+   öder → talep temsilcide "Eşleşme Bekleyen Ödemeler"e düştü mü → beyanname eşleştir →
+   listeden düşüp normal tabloda dosya no'suyla görünüyor mu?
 
 ## 11. Uygulama Sırası (özet)
 
