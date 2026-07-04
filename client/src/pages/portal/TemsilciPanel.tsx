@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 import type { Beyanname, MasrafTuru } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,7 +42,13 @@ function EslesmeBekleyenler({
     }
     setGonderilen(talepId);
     try {
-      await apiRequest("PUT", `/api/portal/talepler/${talepId}/beyanname`, { beyannameId });
+      const res = await fetch(`/api/portal/talepler/${talepId}/beyanname`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ beyannameId }),
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Eşleştirme yapılamadı");
       toast({ title: "Eşleştirildi" });
       queryClient.invalidateQueries({ queryKey: ["/api/portal/talepler"] });
     } catch (e: any) {
