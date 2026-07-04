@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { storage } from "./storage";
+import { setupPortalSession } from "./portalAuth";
 
 const app = express();
 const httpServer = createServer(app);
@@ -24,6 +25,9 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false, limit: "50mb" }));
+
+// Ödemeler Portalı oturumları (yalnız /api/portal/* rotaları kontrol eder)
+setupPortalSession(app);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

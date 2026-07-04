@@ -10,7 +10,7 @@ if (!process.env.DATABASE_URL) {
 // ama esnek sertifika kontrolü (Neon ve diğer managed Postgres için).
 const isLocal = /(@|host=)(localhost|127\.0\.0\.1|::1)/.test(process.env.DATABASE_URL);
 
-const pool = new pg.Pool({
+export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: isLocal ? false : { rejectUnauthorized: false },
 });
