@@ -951,3 +951,114 @@ export const insertTahsilatAyarlariSchema = createInsertSchema(tahsilatAyarlari)
 });
 export type InsertTahsilatAyarlari = z.infer<typeof insertTahsilatAyarlariSchema>;
 export type TahsilatAyarlari = typeof tahsilatAyarlari.$inferSelect;
+
+// ==================== ÖDEMELER PORTALI ====================
+
+// Portal kullanıcıları — çalışan girişi (yönetim panelinden bağımsız)
+export const portalKullanicilar = pgTable("portal_kullanicilar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kullaniciAdi: text("kullanici_adi").notNull().unique(),
+  sifreHash: text("sifre_hash").notNull(), // "salt:hash" (crypto.scrypt)
+  adSoyad: text("ad_soyad").notNull(),
+  rol: text("rol").notNull(), // 'temsilci' | 'muhasebe'
+  avAdi: text("av_adi"), // Beyanname Excel AV sütunu eşleşmesi (örn. "SÜLEYMAN")
+  aktif: boolean("aktif").notNull().default(true),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+});
+
+export const insertPortalKullaniciSchema = createInsertSchema(portalKullanicilar).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertPortalKullanici = z.infer<typeof insertPortalKullaniciSchema>;
+export type PortalKullanici = typeof portalKullanicilar.$inferSelect;
+
+// Beyanname referans listesi — Excel'den beslenir, DOSYA NO ile upsert
+export const beyannameler = pgTable("beyannameler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  dosyaNo: text("dosya_no").notNull(),
+  alici: text("alici"),
+  gonderen: text("gonderen"),
+  koli: integer("koli"),
+  gumrukIdaresi: text("gumruk_idaresi"),
+  beyanTarihi: text("beyan_tarihi"), // YYYY-MM-DD; Excel'de "." veya boş → null
+  beyanNo: text("beyan_no"),
+  fatBedeli: decimal("fat_bedeli", { precision: 18, scale: 2 }),
+  doviz: text("doviz"),
+  kullanici: text("kullanici"), // AV sütunu — temsilci filtre alanı
+  sonGuncelleme: timestamp("son_guncelleme").defaultNow(),
+}, (table) => [
+  uniqueIndex("beyannameler_dosya_no_idx").on(table.dosyaNo),
+  index("beyannameler_kullanici_idx").on(table.kullanici),
+]);
+
+export const insertBeyannameSchema = createInsertSchema(beyannameler).omit({
+  id: true,
+  sonGuncelleme: true,
+});
+export type InsertBeyanname = z.infer<typeof insertBeyannameSchema>;
+export type Beyanname = typeof beyannameler.$inferSelect;
+
+// Masraf türleri — yönetim panelinden düzenlenir
+export const masrafTurleri = pgTable("masraf_turleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ad: text("ad").notNull().unique(),
+  aktif: boolean("aktif").notNull().default(true),
+  sira: integer("sira").notNull().default(0),
+});
+
+export const insertMasrafTuruSchema = createInsertSchema(masrafTurleri).omit({ id: true });
+export type InsertMasrafTuru = z.infer<typeof insertMasrafTuruSchema>;
+export type MasrafTuru = typeof masrafTurleri.$inferSelect;
+
+// Ödeme talepleri — modülün kalbi
+export const odemeTalepleri = pgTable("odeme_talepleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // NULLABLE: beyanname dosyası henüz açılmamışsa "dosyasız talep" — sonradan eşleştirilir
+  beyannameId: varchar("beyanname_id").references(() => beyannameler.id),
+  talepEdenId: varchar("talep_eden_id").notNull().references(() => portalKullanicilar.id),
+  odemeTipi: text("odeme_tipi").notNull(), // 'masraf' | 'depo_teminat'
+  masrafTuru: text("masraf_turu").notNull(), // masraf_turleri.ad kopyası; depo_teminat'ta sabit "Depo Teminatı"
+  tutar: decimal("tutar", { precision: 18, scale: 2 }).notNull(),
+  paraBirimi: text("para_birimi").notNull().default("TRY"), // TRY | USD | EUR
+  alacakli: text("alacakli").notNull(), // kime ödenecek (firma adı)
+  iban: text("iban"),
+  aciklama: text("aciklama"),
+  durum: text("durum").notNull().default("bekliyor"), // 'bekliyor' | 'odendi'
+  talepTarihi: text("talep_tarihi").notNull(), // YYYY-MM-DD
+  odemeTarihi: text("odeme_tarihi"), // ödendi anında damgalanır
+  odeyenId: varchar("odeyen_id").references(() => portalKullanicilar.id),
+  // Depo teminatı iade takibi (Faz 2'de genişleyecek)
+  iadeDurumu: text("iade_durumu"), // depo: 'beklemede' | 'iade_edildi'; masrafta null
+  iadeTutari: decimal("iade_tutari", { precision: 18, scale: 2 }), // kısmi iade / demuraj kesintisi
+  iadeTarihi: text("iade_tarihi"),
+  iadeNotu: text("iade_notu"),
+}, (table) => [
+  index("odeme_talepleri_durum_idx").on(table.durum),
+  index("odeme_talepleri_talep_eden_idx").on(table.talepEdenId),
+  index("odeme_talepleri_tip_idx").on(table.odemeTipi),
+]);
+
+export const insertOdemeTalepSchema = createInsertSchema(odemeTalepleri).omit({ id: true });
+export type InsertOdemeTalep = z.infer<typeof insertOdemeTalepSchema>;
+export type OdemeTalep = typeof odemeTalepleri.$inferSelect;
+
+// Ödeme belgeleri — talep başına çoklu dosya
+export const odemeBelgeleri = pgTable("odeme_belgeleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  talepId: varchar("talep_id").notNull().references(() => odemeTalepleri.id, { onDelete: "cascade" }),
+  belgeTipi: text("belge_tipi").notNull(), // 'fatura' (temsilci) | 'dekont' | 'konsimento' (muhasebe)
+  filename: text("filename").notNull(),
+  filepath: text("filepath").notNull(), // uploads/odemeler/... (ileri eğik çizgili)
+  yukleyenId: varchar("yukleyen_id").notNull().references(() => portalKullanicilar.id),
+  yuklemeTarihi: timestamp("yukleme_tarihi").defaultNow(),
+}, (table) => [
+  index("odeme_belgeleri_talep_idx").on(table.talepId),
+]);
+
+export const insertOdemeBelgeSchema = createInsertSchema(odemeBelgeleri).omit({
+  id: true,
+  yuklemeTarihi: true,
+});
+export type InsertOdemeBelge = z.infer<typeof insertOdemeBelgeSchema>;
+export type OdemeBelge = typeof odemeBelgeleri.$inferSelect;
