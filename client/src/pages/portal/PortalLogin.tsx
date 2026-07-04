@@ -15,8 +15,9 @@ export default function PortalLogin() {
     setGonderiliyor(true);
     setHata("");
     try {
-      await apiRequest("POST", "/api/portal/login", { kullaniciAdi: kullaniciAdi.trim(), sifre });
-      await queryClient.invalidateQueries({ queryKey: ["/api/portal/me"] });
+      const res = await apiRequest("POST", "/api/portal/login", { kullaniciAdi: kullaniciAdi.trim(), sifre });
+      const me = await res.json();
+      queryClient.setQueryData(["/api/portal/me"], me);
     } catch (err: any) {
       const mesaj = String(err?.message ?? "");
       setHata(mesaj.includes("Hesap kapalı") ? "Hesap kapalı" : "Kullanıcı adı veya şifre hatalı");

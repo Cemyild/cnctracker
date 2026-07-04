@@ -4558,7 +4558,12 @@ export async function registerRoutes(
       if (!k.aktif) return res.status(401).json({ error: "Hesap kapalı" });
       req.session.portalUserId = k.id;
       req.session.portalRol = k.rol;
-      res.json({ id: k.id, adSoyad: k.adSoyad, rol: k.rol, avAdi: k.avAdi });
+      // Oturum store'a yazılmadan yanıt dönmesin — hemen ardından gelen
+      // /api/portal/me isteğinin oturumu bulamaması yarışını önler.
+      req.session.save((err) => {
+        if (err) return res.status(500).json({ error: "Oturum kaydedilemedi" });
+        res.json({ id: k.id, adSoyad: k.adSoyad, rol: k.rol, avAdi: k.avAdi });
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
