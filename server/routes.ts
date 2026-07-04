@@ -104,6 +104,9 @@ const uploadBordroMemory = multer({ storage: multer.memoryStorage() });
 // Mizan upload — memory storage; arşivleme route handler'ında md5 hesabıyla yapılır
 const uploadMizanMemory = multer({ storage: multer.memoryStorage() });
 
+// Beyanname Excel — memory storage; upsert route handler'ında yapılır
+const uploadBeyannameMemory = multer({ storage: multer.memoryStorage() });
+
 // Multer Latin-1 default'undan kaynaklanan UTF-8 mojibake'i düzeltir.
 // Türkçe dosya isimlerinde "ŞUBAT" → "ÅUBAT" gibi bozulmaları çözer.
 function fixUploadFilename(name: string): string {
@@ -128,6 +131,7 @@ import { parseUcretPusulasiPdf, ayNumaraToKey } from "./bordroParser";
 import { isGunuSayisi, bakiyeHesapla } from "@shared/izinHesaplari";
 import { type InsertAcilisBakiye, type InsertCalisanIzin } from "@shared/schema";
 import { parseMizanXlsx } from "./mizanParser";
+import { parseBeyannameWorkbook } from "./beyannameParser";
 import { benzerlikSkoru, ESLESME_AUTO_ESIK, ESLESME_ONERI_ESIK } from "./eslestirme";
 import {
   netBakiye, gecikme, isAktivitesiAcigi, bakiyeFaturaAcigi, riskProfili,
@@ -4475,6 +4479,22 @@ export async function registerRoutes(
   app.delete("/api/yonetim-aksiyonlar/:id", async (req, res) => {
     await storage.deleteAksiyon(req.params.id);
     res.json({ ok: true });
+  });
+
+  // ==================== ÖDEMELER PORTALI: YÖNETİM ====================
+
+  // Beyanname Excel yükleme — DOSYA NO ile upsert (yönetim paneli)
+  app.post("/api/odemeler/beyanname-excel", uploadBeyannameMemory.single("dosya"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Dosya gerekli" });
+      const { rows } = parseBeyannameWorkbook(req.file.buffer);
+      if (!rows.length) return res.status(400).json({ error: "Excel'de veri satırı bulunamadı" });
+      const sonuc = await storage.upsertBeyannameler(rows);
+      const eslesmeyen = await storage.getEslesmeyenBeyannameKullanicilari();
+      res.json({ toplam: rows.length, ...sonuc, eslesmeyen });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
   });
 
   return httpServer;
