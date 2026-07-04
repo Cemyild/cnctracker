@@ -102,4 +102,8 @@ app.use((req, res, next) => {
       if (r.inserted > 0) log(`✓ ${r.inserted} resmi tatil eklendi.`, "izin-seed");
     })
     .catch((e) => log(`Resmi tatil seed hatası: ${e.message}`, "izin-seed"));
+
+  // Ödemeler Portalı: masraf türlerini seed et (idempotent)
+  storage.seedMasrafTurleri()
+    .catch((e) => log(`Masraf türü seed hatası: ${e.message}`, "odemeler-seed"));
 })();

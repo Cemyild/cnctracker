@@ -22,12 +22,25 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   mizanBakiye, type MizanBakiye, type InsertMizanBakiye,
   mizanEslestirmeLog, type EslestirmeLog, type InsertEslestirmeLog,
   mizanEslestirmeOnerileri, type EslestirmeOneri, type InsertEslestirmeOneri,
-  tahsilatAyarlari, type TahsilatAyarlari, type InsertTahsilatAyarlari } from "@shared/schema";
+  tahsilatAyarlari, type TahsilatAyarlari, type InsertTahsilatAyarlari,
+  portalKullanicilar, type PortalKullanici, type InsertPortalKullanici,
+  beyannameler, type Beyanname, type InsertBeyanname,
+  masrafTurleri, type MasrafTuru, type InsertMasrafTuru,
+  odemeTalepleri, type OdemeTalep, type InsertOdemeTalep,
+  odemeBelgeleri, type OdemeBelge, type InsertOdemeBelge,
+} from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import { db } from "./db";
-import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count, notInArray } from "drizzle-orm";
 import { buildDedupKey } from "./dedup";
+
+// Ödemeler Portalı: talep + ilişkili beyanname/kullanıcı/belgeler tek yanıtta
+export type OdemeTalepDetay = OdemeTalep & {
+  beyanname: Beyanname | null;
+  talepEdenAd: string;
+  belgeler: OdemeBelge[];
+};
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -363,6 +376,26 @@ export interface IStorage {
   // Tahsilat — ayarlar
   getTahsilatAyarlari(): Promise<TahsilatAyarlari>;
   updateTahsilatAyarlari(data: Partial<InsertTahsilatAyarlari>): Promise<TahsilatAyarlari>;
+
+  // Ödemeler Portalı
+  getPortalKullanicilar(): Promise<PortalKullanici[]>;
+  getPortalKullanici(id: string): Promise<PortalKullanici | undefined>;
+  getPortalKullaniciByKullaniciAdi(kullaniciAdi: string): Promise<PortalKullanici | undefined>;
+  createPortalKullanici(k: InsertPortalKullanici): Promise<PortalKullanici>;
+  updatePortalKullanici(id: string, k: Partial<InsertPortalKullanici>): Promise<PortalKullanici | undefined>;
+  upsertBeyannameler(rows: InsertBeyanname[]): Promise<{ eklenen: number; guncellenen: number }>;
+  getBeyannameler(kullanici?: string): Promise<Beyanname[]>;
+  getBeyanname(id: string): Promise<Beyanname | undefined>;
+  getEslesmeyenBeyannameKullanicilari(): Promise<{ kullanici: string; adet: number }[]>;
+  getMasrafTurleri(sadeceAktif?: boolean): Promise<MasrafTuru[]>;
+  createMasrafTuru(t: InsertMasrafTuru): Promise<MasrafTuru>;
+  updateMasrafTuru(id: string, t: Partial<InsertMasrafTuru>): Promise<MasrafTuru | undefined>;
+  seedMasrafTurleri(): Promise<void>;
+  createOdemeTalep(t: InsertOdemeTalep): Promise<OdemeTalep>;
+  getOdemeTalepleri(filtre?: { talepEdenId?: string; odemeTipi?: string }): Promise<OdemeTalepDetay[]>;
+  getOdemeTalep(id: string): Promise<OdemeTalep | undefined>;
+  updateOdemeTalep(id: string, t: Partial<InsertOdemeTalep>): Promise<OdemeTalep | undefined>;
+  createOdemeBelge(b: InsertOdemeBelge): Promise<OdemeBelge>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -3300,6 +3333,180 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tahsilatAyarlari.id, DatabaseStorage.TAHSILAT_AYARLARI_ID))
       .returning();
     return row;
+  }
+
+  // ==================== ÖDEMELER PORTALI ====================
+
+  async getPortalKullanicilar(): Promise<PortalKullanici[]> {
+    return db.select().from(portalKullanicilar).orderBy(asc(portalKullanicilar.adSoyad));
+  }
+
+  async getPortalKullanici(id: string): Promise<PortalKullanici | undefined> {
+    const [k] = await db.select().from(portalKullanicilar).where(eq(portalKullanicilar.id, id));
+    return k;
+  }
+
+  async getPortalKullaniciByKullaniciAdi(kullaniciAdi: string): Promise<PortalKullanici | undefined> {
+    const [k] = await db.select().from(portalKullanicilar)
+      .where(eq(portalKullanicilar.kullaniciAdi, kullaniciAdi));
+    return k;
+  }
+
+  async createPortalKullanici(k: InsertPortalKullanici): Promise<PortalKullanici> {
+    const [yeni] = await db.insert(portalKullanicilar).values(k).returning();
+    return yeni;
+  }
+
+  async updatePortalKullanici(id: string, k: Partial<InsertPortalKullanici>): Promise<PortalKullanici | undefined> {
+    const [guncel] = await db.update(portalKullanicilar).set(k)
+      .where(eq(portalKullanicilar.id, id)).returning();
+    return guncel;
+  }
+
+  async upsertBeyannameler(rows: InsertBeyanname[]): Promise<{ eklenen: number; guncellenen: number }> {
+    if (!rows.length) return { eklenen: 0, guncellenen: 0 };
+    // Aynı batch içinde tekrarlı dosyaNo "ON CONFLICT ... cannot affect row a second time"
+    // hatası verir — son satır kazanacak şekilde tekilleştir.
+    const tekil = new Map<string, InsertBeyanname>();
+    for (const r of rows) tekil.set(r.dosyaNo, r);
+    const kayitlar = Array.from(tekil.values());
+
+    const mevcutlar = await db.select({ dosyaNo: beyannameler.dosyaNo }).from(beyannameler)
+      .where(inArray(beyannameler.dosyaNo, kayitlar.map((r) => r.dosyaNo)));
+    const mevcutSet = new Set(mevcutlar.map((m) => m.dosyaNo));
+
+    for (let i = 0; i < kayitlar.length; i += 500) {
+      const parca = kayitlar.slice(i, i + 500);
+      await db.insert(beyannameler).values(parca).onConflictDoUpdate({
+        target: beyannameler.dosyaNo,
+        set: {
+          alici: sql`excluded.alici`,
+          gonderen: sql`excluded.gonderen`,
+          koli: sql`excluded.koli`,
+          gumrukIdaresi: sql`excluded.gumruk_idaresi`,
+          beyanTarihi: sql`excluded.beyan_tarihi`,
+          beyanNo: sql`excluded.beyan_no`,
+          fatBedeli: sql`excluded.fat_bedeli`,
+          doviz: sql`excluded.doviz`,
+          kullanici: sql`excluded.kullanici`,
+          sonGuncelleme: sql`now()`,
+        },
+      });
+    }
+    const eklenen = kayitlar.filter((r) => !mevcutSet.has(r.dosyaNo)).length;
+    return { eklenen, guncellenen: kayitlar.length - eklenen };
+  }
+
+  async getBeyannameler(kullanici?: string): Promise<Beyanname[]> {
+    if (kullanici !== undefined) {
+      return db.select().from(beyannameler)
+        .where(eq(beyannameler.kullanici, kullanici))
+        .orderBy(desc(beyannameler.dosyaNo));
+    }
+    return db.select().from(beyannameler).orderBy(desc(beyannameler.dosyaNo));
+  }
+
+  async getBeyanname(id: string): Promise<Beyanname | undefined> {
+    const [b] = await db.select().from(beyannameler).where(eq(beyannameler.id, id));
+    return b;
+  }
+
+  async getEslesmeyenBeyannameKullanicilari(): Promise<{ kullanici: string; adet: number }[]> {
+    const tanimliSatirlar = await db.select({ avAdi: portalKullanicilar.avAdi })
+      .from(portalKullanicilar).where(isNotNull(portalKullanicilar.avAdi));
+    const tanimli = tanimliSatirlar.map((k) => k.avAdi!).filter((a) => a.length > 0);
+    const kosul = tanimli.length
+      ? and(isNotNull(beyannameler.kullanici), notInArray(beyannameler.kullanici, tanimli))
+      : isNotNull(beyannameler.kullanici);
+    const satirlar = await db.select({ kullanici: beyannameler.kullanici, adet: count() })
+      .from(beyannameler).where(kosul).groupBy(beyannameler.kullanici);
+    return satirlar.map((r) => ({ kullanici: r.kullanici!, adet: Number(r.adet) }));
+  }
+
+  async getMasrafTurleri(sadeceAktif?: boolean): Promise<MasrafTuru[]> {
+    if (sadeceAktif) {
+      return db.select().from(masrafTurleri).where(eq(masrafTurleri.aktif, true))
+        .orderBy(asc(masrafTurleri.sira), asc(masrafTurleri.ad));
+    }
+    return db.select().from(masrafTurleri).orderBy(asc(masrafTurleri.sira), asc(masrafTurleri.ad));
+  }
+
+  async createMasrafTuru(t: InsertMasrafTuru): Promise<MasrafTuru> {
+    const [yeni] = await db.insert(masrafTurleri).values(t).returning();
+    return yeni;
+  }
+
+  async updateMasrafTuru(id: string, t: Partial<InsertMasrafTuru>): Promise<MasrafTuru | undefined> {
+    const [guncel] = await db.update(masrafTurleri).set(t)
+      .where(eq(masrafTurleri.id, id)).returning();
+    return guncel;
+  }
+
+  async seedMasrafTurleri(): Promise<void> {
+    const varsayilan = ["Ardiye", "Liman Masrafı", "Demuraj", "Tahmil-Tahliye", "Ordino", "Diğer"];
+    await db.insert(masrafTurleri)
+      .values(varsayilan.map((ad, i) => ({ ad, sira: i })))
+      .onConflictDoNothing({ target: masrafTurleri.ad });
+  }
+
+  async createOdemeTalep(t: InsertOdemeTalep): Promise<OdemeTalep> {
+    const [yeni] = await db.insert(odemeTalepleri).values(t).returning();
+    return yeni;
+  }
+
+  async getOdemeTalepleri(filtre?: { talepEdenId?: string; odemeTipi?: string }): Promise<OdemeTalepDetay[]> {
+    const kosullar = [];
+    if (filtre?.talepEdenId) kosullar.push(eq(odemeTalepleri.talepEdenId, filtre.talepEdenId));
+    if (filtre?.odemeTipi) kosullar.push(eq(odemeTalepleri.odemeTipi, filtre.odemeTipi));
+    const talepler = await db.select().from(odemeTalepleri)
+      .where(kosullar.length ? and(...kosullar) : undefined)
+      .orderBy(desc(odemeTalepleri.talepTarihi), desc(odemeTalepleri.id));
+    if (!talepler.length) return [];
+
+    // N+1 yok: üç toplu sorgu + Map join.
+    // beyannameId dosyasız taleplerde null — filtrele; boş diziyle inArray çağrılmaz.
+    const beyanIds = Array.from(new Set(
+      talepler.map((t) => t.beyannameId).filter((x): x is string => x != null),
+    ));
+    const kullaniciIds = Array.from(new Set(talepler.map((t) => t.talepEdenId)));
+    const talepIds = talepler.map((t) => t.id);
+    const [beyanSatirlari, kullaniciSatirlari, belgeSatirlari] = await Promise.all([
+      beyanIds.length
+        ? db.select().from(beyannameler).where(inArray(beyannameler.id, beyanIds))
+        : Promise.resolve([] as Beyanname[]),
+      db.select().from(portalKullanicilar).where(inArray(portalKullanicilar.id, kullaniciIds)),
+      db.select().from(odemeBelgeleri).where(inArray(odemeBelgeleri.talepId, talepIds)),
+    ]);
+    const beyanMap = new Map(beyanSatirlari.map((b) => [b.id, b]));
+    const adMap = new Map(kullaniciSatirlari.map((k) => [k.id, k.adSoyad]));
+    const belgeMap = new Map<string, OdemeBelge[]>();
+    for (const b of belgeSatirlari) {
+      const arr = belgeMap.get(b.talepId) ?? [];
+      arr.push(b);
+      belgeMap.set(b.talepId, arr);
+    }
+    return talepler.map((t) => ({
+      ...t,
+      beyanname: t.beyannameId ? beyanMap.get(t.beyannameId) ?? null : null,
+      talepEdenAd: adMap.get(t.talepEdenId) ?? "?",
+      belgeler: belgeMap.get(t.id) ?? [],
+    }));
+  }
+
+  async getOdemeTalep(id: string): Promise<OdemeTalep | undefined> {
+    const [t] = await db.select().from(odemeTalepleri).where(eq(odemeTalepleri.id, id));
+    return t;
+  }
+
+  async updateOdemeTalep(id: string, t: Partial<InsertOdemeTalep>): Promise<OdemeTalep | undefined> {
+    const [guncel] = await db.update(odemeTalepleri).set(t)
+      .where(eq(odemeTalepleri.id, id)).returning();
+    return guncel;
+  }
+
+  async createOdemeBelge(b: InsertOdemeBelge): Promise<OdemeBelge> {
+    const [yeni] = await db.insert(odemeBelgeleri).values(b).returning();
+    return yeni;
   }
 }
 
