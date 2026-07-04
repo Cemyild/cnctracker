@@ -130,9 +130,9 @@ function IadeDialog({
 }: { talep: TalepDetay | null; kapat: () => void }) {
   const { toast } = useToast();
   const [iadeDurumu, setIadeDurumu] = useState("iade_edildi");
-  const [iadeTutari, setIadeTutari] = useState("");
-  const [iadeTarihi, setIadeTarihi] = useState("");
-  const [iadeNotu, setIadeNotu] = useState("");
+  const [iadeTutari, setIadeTutari] = useState(talep?.iadeTutari ?? "");
+  const [iadeTarihi, setIadeTarihi] = useState(talep?.iadeTarihi ?? "");
+  const [iadeNotu, setIadeNotu] = useState(talep?.iadeNotu ?? "");
   const [gonderiliyor, setGonderiliyor] = useState(false);
 
   const kaydet = async () => {
@@ -412,8 +412,16 @@ export default function MuhasebePanel() {
         </Card>
       </TabsContent>
 
-      <OdemeDialog talep={odemeTalebi} kapat={() => setOdemeTalebi(null)} />
-      <IadeDialog talep={iadeTalebi} kapat={() => setIadeTalebi(null)} />
+      <OdemeDialog
+        key={odemeTalebi?.id ?? "odeme-kapali"}
+        talep={odemeTalebi}
+        kapat={() => setOdemeTalebi(null)}
+      />
+      <IadeDialog
+        key={iadeTalebi?.id ?? "iade-kapali"}
+        talep={iadeTalebi}
+        kapat={() => setIadeTalebi(null)}
+      />
     </Tabs>
   );
 }
