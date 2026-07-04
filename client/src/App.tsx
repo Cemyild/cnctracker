@@ -34,6 +34,7 @@ import PublicEgitimDegerlendirme from "@/pages/PublicEgitimDegerlendirme";
 import PublicSurvey from "@/pages/PublicSurvey";
 import SurveyAnalysis from "@/pages/SurveyAnalysis";
 import PortalApp from "@/pages/portal/PortalApp";
+import Odemeler from "@/pages/Odemeler";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -46,6 +47,7 @@ const pageTitles: Record<string, string> = {
   "/calisanlar": "Çalışanlar",
   "/hesaplamalar": "Hesaplamalar",
   "/tahsilat": "Müşteri Tahsilat",
+  "/odemeler": "Ödemeler",
   "/anketler": "Anketler",
   "/iso9001": "ISO9001-2015",
   "/iso9001/anketler": "ISO9001-2015 — Anketler",
@@ -71,6 +73,7 @@ function Router() {
       <Route path="/calisanlar" component={Calisanlar} />
       <Route path="/hesaplamalar" component={Hesaplamalar} />
       <Route path="/tahsilat" component={Tahsilat} />
+      <Route path="/odemeler" component={Odemeler} />
       <Route path="/anketler">
         <Redirect to="/iso9001/anketler" />
       </Route>
