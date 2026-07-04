@@ -33,6 +33,10 @@ declare module "express-session" {
 export function setupPortalSession(app: Express) {
   const PgStore = connectPgSimple(session);
   if (!process.env.SESSION_SECRET) {
+    // Prod'da bilinen bir anahtar ile oturum imzalamak portal auth'unu anlamsız kılar.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("SESSION_SECRET zorunlu — production'da tanımlı olmalı");
+    }
     console.warn("[portal] SESSION_SECRET tanımlı değil — geçici geliştirme anahtarı kullanılıyor.");
   }
   app.use(

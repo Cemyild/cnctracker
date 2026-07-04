@@ -4534,8 +4534,14 @@ export async function registerRoutes(
   function parseTutar(v: unknown): number | null {
     let s = String(v ?? "").trim();
     if (!s) return null;
-    if (s.includes(".") && s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
-    else s = s.replace(",", ".");
+    if (s.includes(".") && s.includes(",")) {
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+      // "1.500" / "12.500.000" — yalnız nokta, 3'lü gruplar: binlik ayracı
+      s = s.replace(/\./g, "");
+    } else {
+      s = s.replace(",", ".");
+    }
     const n = parseFloat(s);
     return isFinite(n) ? n : null;
   }
@@ -4574,9 +4580,13 @@ export async function registerRoutes(
   });
 
   app.get("/api/portal/me", requirePortal, async (req, res) => {
-    const k = await portalKullanici(req);
-    if (!k) return res.status(401).json({ error: "Giriş gerekli" });
-    res.json({ id: k.id, adSoyad: k.adSoyad, rol: k.rol, avAdi: k.avAdi });
+    try {
+      const k = await portalKullanici(req);
+      if (!k) return res.status(401).json({ error: "Giriş gerekli" });
+      res.json({ id: k.id, adSoyad: k.adSoyad, rol: k.rol, avAdi: k.avAdi });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ==================== ÖDEMELER PORTALI: KULLANICI YÖNETİMİ (yönetim paneli) ====================
