@@ -26,7 +26,7 @@ app.use(
 
 app.use(express.urlencoded({ extended: false, limit: "50mb" }));
 
-// Ödemeler Portalı oturumları (yalnız /api/portal/* rotaları kontrol eder)
+// Ödemeler Portalı oturumları — middleware yalnız /api/portal/* yollarına takılır
 setupPortalSession(app);
 
 export function log(message: string, source = "express") {

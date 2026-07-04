@@ -36,6 +36,7 @@ export function setupPortalSession(app: Express) {
     console.warn("[portal] SESSION_SECRET tanımlı değil — geçici geliştirme anahtarı kullanılıyor.");
   }
   app.use(
+    "/api/portal",
     session({
       store: new PgStore({
         pool,
@@ -47,6 +48,7 @@ export function setupPortalSession(app: Express) {
       saveUninitialized: false,
       cookie: {
         httpOnly: true,
+        sameSite: "lax",
         maxAge: 1000 * 60 * 60 * 12, // 12 saat
       },
     }),
