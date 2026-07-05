@@ -127,7 +127,7 @@ export default function KonsimentoAnalizAlani({
           <CardContent className="pt-4 space-y-3">
             {asama === "elle" && (
               <p className="text-sm text-amber-700" data-testid={`uyari-${idOnEki}-elle`}>
-                {hataMesaji} — bilgileri elle girin.
+                {hataMesaji}
               </p>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
