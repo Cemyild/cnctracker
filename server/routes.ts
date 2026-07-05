@@ -4685,10 +4685,21 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/portal/talepler", requirePortal, uploadOdemeBelge.array("belgeler", 10), async (req, res) => {
-    const yuklenenDosyalar = (req.files as Express.Multer.File[]) || [];
+  app.post(
+    "/api/portal/talepler",
+    requirePortal,
+    uploadOdemeBelge.fields([
+      { name: "belgeler", maxCount: 10 },
+      { name: "konsimento", maxCount: 1 },
+    ]),
+    async (req, res) => {
+    const dosyaGruplari = req.files as Record<string, Express.Multer.File[]> | undefined;
+    const yuklenenDosyalar = dosyaGruplari?.belgeler ?? [];
+    const konsimentoDosyasi = dosyaGruplari?.konsimento?.[0];
     const yuklenenleriSil = () => {
-      for (const f of yuklenenDosyalar) fs.unlink(f.path, () => {});
+      for (const f of [...yuklenenDosyalar, ...(konsimentoDosyasi ? [konsimentoDosyasi] : [])]) {
+        fs.unlink(f.path, () => {});
+      }
     };
     try {
       const ben = await portalKullanici(req);
@@ -4696,7 +4707,7 @@ export async function registerRoutes(
         yuklenenleriSil();
         return res.status(401).json({ error: "Giriş gerekli" });
       }
-      const { beyannameId, odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama } = req.body || {};
+      const { beyannameId, odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama, konsimentoNo, tasiyici } = req.body || {};
 
       // Beyanname OPSİYONEL: dosya henüz açılmamışsa "dosyasız talep" gönderilir,
       // ödeme sonrası temsilci eşleştirir. Dosyasızsa açıklama zorunlu (muhasebe işi tanısın).
@@ -4737,6 +4748,19 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Masraf türü zorunlu" });
       }
 
+      // Depo teminatında konşimento dosyası ve numarası ZORUNLU (Faz 1.6 iş kuralı)
+      const konsimentoNoStr = String(konsimentoNo ?? "").trim();
+      if (odemeTipi === "depo_teminat") {
+        if (!konsimentoDosyasi) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Depo teminatında konşimento zorunlu" });
+        }
+        if (!konsimentoNoStr) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Konşimento numarası zorunlu" });
+        }
+      }
+
       const talep = await storage.createOdemeTalep({
         beyannameId: beyanname?.id ?? null,
         talepEdenId: ben.id,
@@ -4749,6 +4773,8 @@ export async function registerRoutes(
         aciklama: aciklama ? String(aciklama) : null,
         durum: "bekliyor",
         talepTarihi: bugunYmd(),
+        konsimentoNo: odemeTipi === "depo_teminat" ? konsimentoNoStr : null,
+        tasiyici: odemeTipi === "depo_teminat" && String(tasiyici ?? "").trim() ? String(tasiyici).trim() : null,
         iadeDurumu: odemeTipi === "depo_teminat" ? "beklemede" : null,
       });
 
@@ -4761,12 +4787,22 @@ export async function registerRoutes(
           yukleyenId: ben.id,
         });
       }
+      if (konsimentoDosyasi) {
+        await storage.createOdemeBelge({
+          talepId: talep.id,
+          belgeTipi: "konsimento",
+          filename: fixUploadFilename(konsimentoDosyasi.originalname),
+          filepath: konsimentoDosyasi.path.replace(/\\/g, "/"),
+          yukleyenId: ben.id,
+        });
+      }
       res.json(talep);
     } catch (e: any) {
       yuklenenleriSil();
       res.status(400).json({ error: e.message });
     }
-  });
+  },
+  );
 
   app.get("/api/portal/talepler", requirePortal, async (req, res) => {
     try {
@@ -4952,7 +4988,8 @@ export async function registerRoutes(
           yuklenenleriSil();
           return res.status(401).json({ error: "Giriş gerekli" });
         }
-        const { beyannameId, odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama } = req.body || {};
+        const { beyannameId, odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama, konsimentoNo, tasiyici } =
+          req.body || {};
 
         const beyannameIdStr = String(beyannameId ?? "").trim();
         let beyanname: Beyanname | undefined;
@@ -4986,6 +5023,18 @@ export async function registerRoutes(
           yuklenenleriSil();
           return res.status(400).json({ error: "Masraf türü zorunlu" });
         }
+        const konsimentoNoStr = String(konsimentoNo ?? "").trim();
+        const konsimento = files?.konsimento?.[0];
+        if (odemeTipi === "depo_teminat") {
+          if (!konsimento) {
+            yuklenenleriSil();
+            return res.status(400).json({ error: "Depo teminatında konşimento zorunlu" });
+          }
+          if (!konsimentoNoStr) {
+            yuklenenleriSil();
+            return res.status(400).json({ error: "Konşimento numarası zorunlu" });
+          }
+        }
         const dekont = files?.dekont?.[0];
         if (!dekont) {
           yuklenenleriSil();
@@ -5011,6 +5060,8 @@ export async function registerRoutes(
           talepTarihi: bugun,
           odemeTarihi: bugun,
           odeyenId: ben.id,
+          konsimentoNo: odemeTipi === "depo_teminat" ? konsimentoNoStr : null,
+          tasiyici: odemeTipi === "depo_teminat" && String(tasiyici ?? "").trim() ? String(tasiyici).trim() : null,
           iadeDurumu: odemeTipi === "depo_teminat" ? "beklemede" : null,
         });
         await storage.createOdemeBelge({
@@ -5020,7 +5071,6 @@ export async function registerRoutes(
           filepath: dekont.path.replace(/\\/g, "/"),
           yukleyenId: ben.id,
         });
-        const konsimento = files?.konsimento?.[0];
         if (konsimento) {
           await storage.createOdemeBelge({
             talepId: talep.id,
