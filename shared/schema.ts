@@ -1024,6 +1024,9 @@ export const odemeTalepleri = pgTable("odeme_talepleri", {
   alacakli: text("alacakli").notNull(), // kime ödenecek (firma adı)
   iban: text("iban"),
   aciklama: text("aciklama"),
+  // Depo teminatında zorunlu (sunucu doğrular); masrafta null
+  konsimentoNo: text("konsimento_no"),
+  tasiyici: text("tasiyici"),
   durum: text("durum").notNull().default("bekliyor"), // 'bekliyor' | 'odendi'
   talepTarihi: text("talep_tarihi").notNull(), // YYYY-MM-DD
   odemeTarihi: text("odeme_tarihi"), // ödendi anında damgalanır
