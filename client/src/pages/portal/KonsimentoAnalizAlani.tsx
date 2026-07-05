@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,7 +48,12 @@ export default function KonsimentoAnalizAlani({
   const [analiz, setAnaliz] = useState<AnalizYaniti | null>(null);
   const [hataMesaji, setHataMesaji] = useState("");
 
+  // Geciken analiz yanıtlarının güncel seçimi ezmesini önler:
+  // her dosya değişiminde artar; eski isteğin yanıtı geldiğinde yok sayılır.
+  const istekSayaci = useRef(0);
+
   const dosyaSecildi = async (dosya: File | null) => {
+    const buIstek = ++istekSayaci.current;
     if (!dosya) {
       setAsama("bos");
       setAnaliz(null);
@@ -67,8 +72,13 @@ export default function KonsimentoAnalizAlani({
         body: fd,
         credentials: "include",
       });
-      if (!res.ok) throw new Error((await res.json()).error || "Analiz yapılamadı");
+      if (buIstek !== istekSayaci.current) return; // seçim değişti — bu yanıt bayat
+      if (!res.ok) {
+        const govde = await res.json().catch(() => ({} as { error?: string }));
+        throw new Error(govde.error || "Analiz yapılamadı");
+      }
       const veri = (await res.json()) as AnalizYaniti;
+      if (buIstek !== istekSayaci.current) return;
       setAnaliz(veri);
       setAsama("hazir");
       onDegisim({
@@ -79,6 +89,7 @@ export default function KonsimentoAnalizAlani({
         alacakliOnerisi: veri.acenteAdi ?? veri.tasiyici ?? null,
       });
     } catch (e: any) {
+      if (buIstek !== istekSayaci.current) return; // bayat hata da yok sayılır
       setAnaliz(null);
       setAsama("elle");
       setHataMesaji(e.message || "Analiz yapılamadı — bilgileri elle girin");
@@ -92,8 +103,9 @@ export default function KonsimentoAnalizAlani({
 
   return (
     <div className="space-y-2">
-      <Label>Konşimento (zorunlu — PDF)</Label>
+      <Label htmlFor={`${idOnEki}-konsimento-dosya`}>Konşimento (zorunlu — PDF)</Label>
       <Input
+        id={`${idOnEki}-konsimento-dosya`}
         type="file"
         accept="application/pdf"
         onChange={(e) => dosyaSecildi(e.target.files?.[0] ?? null)}
@@ -120,16 +132,18 @@ export default function KonsimentoAnalizAlani({
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <Label>Konşimento No (zorunlu)</Label>
+                <Label htmlFor={`${idOnEki}-konsimento-no`}>Konşimento No (zorunlu)</Label>
                 <Input
+                  id={`${idOnEki}-konsimento-no`}
                   value={deger.konsimentoNo}
                   onChange={(e) => alanGuncelle({ konsimentoNo: e.target.value })}
                   data-testid={`input-${idOnEki}-konsimento-no`}
                 />
               </div>
               <div className="space-y-1">
-                <Label>Taşıyıcı</Label>
+                <Label htmlFor={`${idOnEki}-tasiyici`}>Taşıyıcı</Label>
                 <Input
+                  id={`${idOnEki}-tasiyici`}
                   value={deger.tasiyici}
                   onChange={(e) => alanGuncelle({ tasiyici: e.target.value })}
                   data-testid={`input-${idOnEki}-tasiyici`}
