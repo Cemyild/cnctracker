@@ -24,7 +24,6 @@ function OdemeDialog({
 }: { talep: TalepDetay | null; kapat: () => void }) {
   const { toast } = useToast();
   const [dekont, setDekont] = useState<File | null>(null);
-  const [konsimento, setKonsimento] = useState<File | null>(null);
   const [gonderiliyor, setGonderiliyor] = useState(false);
 
   const odemeYap = async () => {
@@ -37,7 +36,6 @@ function OdemeDialog({
     try {
       const fd = new FormData();
       fd.set("dekont", dekont);
-      if (konsimento) fd.set("konsimento", konsimento);
       const res = await fetch(`/api/portal/talepler/${talep.id}/odeme`, {
         method: "POST",
         body: fd,
@@ -67,6 +65,12 @@ function OdemeDialog({
               <div><span className="font-medium">Talep Eden:</span> {talep.talepEdenAd}</div>
               <div><span className="font-medium">Tür:</span> {TIP_ETIKET[talep.odemeTipi] ?? talep.odemeTipi} / {talep.masrafTuru}</div>
               <div><span className="font-medium">Tutar:</span> {formatPara(talep.tutar, talep.paraBirimi)}</div>
+              {talep.konsimentoNo && (
+                <div>
+                  <span className="font-medium">Konşimento:</span> {talep.konsimentoNo}
+                  {talep.tasiyici ? ` — ${talep.tasiyici}` : ""}
+                </div>
+              )}
               <div><span className="font-medium">Alacaklı:</span> {talep.alacakli}{talep.iban ? ` — ${talep.iban}` : ""}</div>
               {talep.aciklama && <div><span className="font-medium">Açıklama:</span> {talep.aciklama}</div>}
               <div className="pt-1"><BelgeLinkleri talep={talep} /></div>
@@ -79,16 +83,6 @@ function OdemeDialog({
                 data-testid="input-dekont"
               />
             </div>
-            {talep.odemeTipi === "depo_teminat" && (
-              <div className="space-y-2">
-                <Label>Konşimento Örneği</Label>
-                <Input
-                  type="file"
-                  onChange={(e) => setKonsimento(e.target.files?.[0] ?? null)}
-                  data-testid="input-konsimento"
-                />
-              </div>
-            )}
           </div>
         )}
         <DialogFooter>
@@ -123,6 +117,7 @@ export default function GelenTaleplerSayfasi() {
                 <TableHead>Dosya No</TableHead>
                 <TableHead>Müşteri</TableHead>
                 <TableHead>Tür</TableHead>
+                <TableHead>Konşimento No</TableHead>
                 <TableHead>Tutar</TableHead>
                 <TableHead>Alacaklı</TableHead>
                 <TableHead>Belgeler</TableHead>
@@ -133,7 +128,7 @@ export default function GelenTaleplerSayfasi() {
             <TableBody>
               {talepler.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     Talep yok
                   </TableCell>
                 </TableRow>
@@ -149,6 +144,18 @@ export default function GelenTaleplerSayfasi() {
                   <TableCell>
                     {TIP_ETIKET[t.odemeTipi] ?? t.odemeTipi}
                     {t.odemeTipi === "masraf" ? ` / ${t.masrafTuru}` : ""}
+                  </TableCell>
+                  <TableCell>
+                    {t.konsimentoNo ? (
+                      <div>
+                        <div className="text-sm">{t.konsimentoNo}</div>
+                        {t.tasiyici && (
+                          <div className="text-xs text-muted-foreground">{t.tasiyici}</div>
+                        )}
+                      </div>
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                   <TableCell>{formatPara(t.tutar, t.paraBirimi)}</TableCell>
                   <TableCell className="max-w-36 truncate">

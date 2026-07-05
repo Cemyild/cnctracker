@@ -141,6 +141,7 @@ export default function DepoOdemeleriSayfasi() {
             <TableHeader>
               <TableRow>
                 <TableHead>Dosya No</TableHead>
+                <TableHead>Konşimento No</TableHead>
                 <TableHead>Müşteri</TableHead>
                 <TableHead>Temsilci</TableHead>
                 <TableHead>Tutar</TableHead>
@@ -155,7 +156,7 @@ export default function DepoOdemeleriSayfasi() {
             <TableBody>
               {depoTalepleri.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     Depo teminatı kaydı yok
                   </TableCell>
                 </TableRow>
@@ -169,6 +170,18 @@ export default function DepoOdemeleriSayfasi() {
                   <TableRow key={t.id} data-testid={`row-depo-${t.id}`}>
                     <TableCell>
                       {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
+                    </TableCell>
+                    <TableCell>
+                      {t.konsimentoNo ? (
+                        <div>
+                          <div className="text-sm">{t.konsimentoNo}</div>
+                          {t.tasiyici && (
+                            <div className="text-xs text-muted-foreground">{t.tasiyici}</div>
+                          )}
+                        </div>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
                     <TableCell className="max-w-44 truncate">{t.beyanname?.alici ?? "—"}</TableCell>
                     <TableCell>{t.talepEdenAd}</TableCell>

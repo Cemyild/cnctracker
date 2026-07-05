@@ -14,6 +14,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { type PortalMe } from "./PortalApp";
 import { formatTarih, formatPara } from "./portalUtils";
+import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 
 export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   const { toast } = useToast();
@@ -36,6 +37,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   const [iban, setIban] = useState("");
   const [aciklama, setAciklama] = useState("");
   const [dosyalar, setDosyalar] = useState<FileList | null>(null);
+  const [konsimento, setKonsimento] = useState<KonsimentoBilgisi>({ ...BOS_KONSIMENTO });
   const [formSayac, setFormSayac] = useState(0); // dosya input'unu sıfırlamak için remount anahtarı
   const [gonderiliyor, setGonderiliyor] = useState(false);
 
@@ -51,6 +53,16 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   }, [beyannameler, arama]);
 
   const secili = beyannameler.find((b) => b.id === beyannameId);
+
+  const konsimentoDegisti = (b: KonsimentoBilgisi) => {
+    // Öneri yeni geldiyse ve alacaklı boşsa/önceki öneriyse otomatik doldur (elle yazılmışsa ezme)
+    if (b.alacakliOnerisi && b.alacakliOnerisi !== konsimento.alacakliOnerisi) {
+      if (!alacakli.trim() || alacakli === konsimento.alacakliOnerisi) {
+        setAlacakli(b.alacakliOnerisi);
+      }
+    }
+    setKonsimento(b);
+  };
 
   const gonder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,6 +82,20 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
       toast({ title: "Masraf türü seçin", variant: "destructive" });
       return;
     }
+    if (odemeTipi === "depo_teminat") {
+      if (!konsimento.dosya) {
+        toast({ title: "Depo teminatında konşimento zorunlu", variant: "destructive" });
+        return;
+      }
+      if (!konsimento.konsimentoNo.trim()) {
+        toast({ title: "Konşimento numarası zorunlu", variant: "destructive" });
+        return;
+      }
+      if (!konsimento.onaylandi) {
+        toast({ title: "Konşimento bilgilerini onaylayın", description: "\"Bilgiler doğru, onaylıyorum\" kutusunu işaretleyin.", variant: "destructive" });
+        return;
+      }
+    }
     setGonderiliyor(true);
     try {
       const fd = new FormData();
@@ -82,6 +108,11 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
       fd.set("iban", iban);
       fd.set("aciklama", aciklama);
       if (dosyalar) Array.from(dosyalar).forEach((f) => fd.append("belgeler", f));
+      if (odemeTipi === "depo_teminat" && konsimento.dosya) {
+        fd.set("konsimento", konsimento.dosya);
+        fd.set("konsimentoNo", konsimento.konsimentoNo.trim());
+        fd.set("tasiyici", konsimento.tasiyici.trim());
+      }
       const res = await fetch("/api/portal/talepler", {
         method: "POST",
         body: fd,
@@ -97,6 +128,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
       setIban("");
       setAciklama("");
       setDosyalar(null);
+      setKonsimento({ ...BOS_KONSIMENTO });
       setFormSayac((s) => s + 1);
       queryClient.invalidateQueries({ queryKey: ["/api/portal/talepler"] });
     } catch (err: any) {
@@ -223,6 +255,10 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                 </div>
               </div>
             </div>
+
+            {odemeTipi === "depo_teminat" && (
+              <KonsimentoAnalizAlani key={formSayac} deger={konsimento} onDegisim={konsimentoDegisti} idOnEki="talep" />
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
