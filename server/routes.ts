@@ -107,6 +107,16 @@ const uploadMizanMemory = multer({ storage: multer.memoryStorage() });
 // Beyanname Excel — memory storage; upsert route handler'ında yapılır
 const uploadBeyannameMemory = multer({ storage: multer.memoryStorage() });
 
+// Konşimento analizi — memory storage: analiz aşamasında diske yazılmaz
+const uploadKonsimentoMemory = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === "application/pdf") cb(null, true);
+    else cb(new Error("Yalnız PDF dosyası yüklenebilir"));
+  },
+});
+
 const odemeBelgeStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     const dir = "uploads/odemeler";
@@ -160,6 +170,7 @@ import { getTCMBExchangeRate, normalizeCurrencyCode } from "./currency"; // Help
 import { processUserQuery, generateNaturalLanguageResponse } from "./lib/openai";
 import { extractPolicyFields } from "./lib/policeOcr";
 import { hashSifre, dogrulaSifre, requirePortal, requireMuhasebe } from "./portalAuth";
+import { konsimentoAnalizEt, analizYapilandirildiMi } from "./konsimentoAnaliz";
 import { insertPortalKullaniciSchema, type PortalKullanici, type InsertPortalKullanici, type Beyanname } from "@shared/schema";
 import type { Request } from "express";
 
@@ -4885,6 +4896,38 @@ export async function registerRoutes(
       res.status(400).json({ error: e.message });
     }
   });
+
+  // Konşimento PDF analizi — Claude ile konşimento no / taşıyıcı / TR acentesi çıkarımı.
+  // Sonuç her zaman kullanıcı onayından geçer; hata durumunda istemci elle girişe düşer.
+  app.post(
+    "/api/portal/konsimento-analiz",
+    requirePortal,
+    (req, res, next) => {
+      uploadKonsimentoMemory.single("konsimento")(req, res, (err) => {
+        if (err) return res.status(400).json({ error: err.message });
+        next();
+      });
+    },
+    async (req, res) => {
+      try {
+        if (!analizYapilandirildiMi()) {
+          return res.status(503).json({ error: "Analiz servisi yapılandırılmamış" });
+        }
+        if (!req.file) return res.status(400).json({ error: "Konşimento dosyası gerekli" });
+        const sonuc = await konsimentoAnalizEt(req.file.buffer);
+        res.json({
+          konsimentoNo: sonuc.konsimentoNo,
+          tasiyici: sonuc.tasiyici,
+          acenteAdi: sonuc.turkiyeAcentesi?.ad ?? null,
+          acenteAdres: sonuc.turkiyeAcentesi?.adres ?? null,
+          acenteBulundu: sonuc.turkiyeAcentesi != null,
+        });
+      } catch (e: any) {
+        console.warn(`[konsimento-analiz] hata: ${e.message}`);
+        res.status(502).json({ error: "Analiz yapılamadı — bilgileri elle girin" });
+      }
+    },
+  );
 
   // Muhasebe: talepsiz DOĞRUDAN ödeme kaydı — tek adımda "odendi" oluşur.
   // Dekont zorunlu; beyanname opsiyonel (muhasebe tüm listeyi görür, avAdi kontrolü yok);
