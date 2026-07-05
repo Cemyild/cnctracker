@@ -205,7 +205,12 @@ export default function DogrudanOdemeSayfasi() {
               <Label>Ödeme Tipi</Label>
               <Select
                 value={odemeTipi}
-                onValueChange={(v) => setOdemeTipi(v as "masraf" | "depo_teminat")}
+                onValueChange={(v) => {
+                  setOdemeTipi(v as "masraf" | "depo_teminat");
+                  // Tip değişince konşimento bilgisi geçersiz — sıfırla (yanıltıcı bayat durum kalmasın)
+                  setKonsimento({ ...BOS_KONSIMENTO });
+                  sonAlacakliOnerisi.current = null;
+                }}
               >
                 <SelectTrigger data-testid="select-dogrudan-tip">
                   <SelectValue />
