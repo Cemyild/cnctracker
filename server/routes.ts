@@ -4950,6 +4950,10 @@ export async function registerRoutes(
         }
 
         const bugun = bugunYmd();
+        // BİLİNEN RİSK (Faz 2'de db.transaction ile çözülecek): talep "odendi" olarak
+        // önce yazılır; ardından dekont belgesi eklenir. Aradaki nadir bir DB hatası
+        // dekontsuz "odendi" kaydı bırakabilir (belge FK talepId gerektirdiğinden
+        // sıralama tersine çevrilemez).
         const talep = await storage.createOdemeTalep({
           beyannameId: beyanname?.id ?? null,
           talepEdenId: ben.id,
