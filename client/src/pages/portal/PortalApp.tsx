@@ -70,8 +70,8 @@ function PortalIcerik({ me }: { me: PortalMe }) {
           <SidebarTrigger data-testid="button-portal-sidebar-toggle" />
           <h1 className="text-lg font-semibold" data-testid="text-portal-sayfa-baslik">{baslik}</h1>
         </header>
-        <main className="flex-1 overflow-auto p-4">
-          <div className="max-w-6xl mx-auto">
+        <main className="flex-1 overflow-auto p-6">
+          <div className="w-full">
             <Switch>
               {me.rol === "temsilci" && (
                 <Route path="/portal/yeni-talep">
