@@ -31,6 +31,7 @@ type AnalizYaniti = {
   acenteAdi: string | null;
   acenteAdres: string | null;
   acenteBulundu: boolean;
+  acenteKaynagi: string | null;
 };
 
 type Asama = "bos" | "analiz" | "hazir" | "elle";
@@ -161,6 +162,11 @@ export default function KonsimentoAnalizAlani({
                     </div>
                     {analiz.acenteAdres && (
                       <div className="text-muted-foreground">{analiz.acenteAdres}</div>
+                    )}
+                    {analiz.acenteKaynagi && (
+                      <div className="text-muted-foreground" data-testid={`kaynak-${idOnEki}-acente`}>
+                        Kaynak: {analiz.acenteKaynagi}
+                      </div>
                     )}
                     <div className="text-muted-foreground">
                       Alacaklı alanı bu acenteyle dolduruldu — gerekirse değiştirin.

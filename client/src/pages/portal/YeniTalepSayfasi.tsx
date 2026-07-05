@@ -1,7 +1,7 @@
 import { useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import type { Beyanname, MasrafTuru } from "@shared/schema";
+import type { Beyanname, MasrafTuru, OdemeSirketi } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,9 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   });
   const { data: masrafTurleri = [] } = useQuery<MasrafTuru[]>({
     queryKey: ["/api/portal/masraf-turleri"],
+  });
+  const { data: odemeSirketleri = [] } = useQuery<OdemeSirketi[]>({
+    queryKey: ["/api/portal/odeme-sirketleri"],
   });
 
   // Form durumu
@@ -136,6 +139,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
       sonAlacakliOnerisi.current = null;
       setFormSayac((s) => s + 1);
       queryClient.invalidateQueries({ queryKey: ["/api/portal/talepler"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/portal/odeme-sirketleri"] });
     } catch (err: any) {
       toast({ title: "Hata", description: err.message, variant: "destructive" });
     } finally {
@@ -277,8 +281,14 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                   placeholder="Firma adı"
                   value={alacakli}
                   onChange={(e) => setAlacakli(e.target.value)}
+                  list="alacakli-onerileri-talep"
                   data-testid="input-alacakli"
                 />
+                <datalist id="alacakli-onerileri-talep">
+                  {odemeSirketleri.map((s) => (
+                    <option key={s.id} value={s.ad} />
+                  ))}
+                </datalist>
               </div>
               <div className="space-y-2">
                 <Label>IBAN (varsa)</Label>
