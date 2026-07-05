@@ -75,7 +75,7 @@ export async function konsimentoAnalizEt(pdfBuffer: Buffer): Promise<KonsimentoA
   const client = new Anthropic({ maxRetries: 1, timeout: 30_000 }); // ms — 30 sn bütçe
   const response = await client.messages.create({
     model: "claude-sonnet-5",
-    max_tokens: 1024,
+    max_tokens: 4096, // sonnet-5 adaptif düşünme + JSON çıktı aynı bütçeyi paylaşır — 1024 yoğun belgede kesilebilir
     system: SISTEM_ISTEMI,
     output_config: { format: { type: "json_schema", schema: CIKTI_SEMASI } },
     messages: [
