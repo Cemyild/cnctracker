@@ -4685,6 +4685,15 @@ export async function registerRoutes(
     }
   });
 
+  // Kayıtlı ödeme şirketleri — alacaklı alanı öneri listesi (depo onaylarından birikir)
+  app.get("/api/portal/odeme-sirketleri", requirePortal, async (_req, res) => {
+    try {
+      res.json(await storage.getOdemeSirketleri());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post(
     "/api/portal/talepler",
     requirePortal,
@@ -4795,6 +4804,12 @@ export async function registerRoutes(
           filepath: konsimentoDosyasi.path.replace(/\\/g, "/"),
           yukleyenId: ben.id,
         });
+      }
+      // Onaylanan depo alacaklısını öneri listesine kaydet (best-effort — talebi bozmaz)
+      if (odemeTipi === "depo_teminat") {
+        storage.upsertOdemeSirketi(alacakliStr).catch((e) =>
+          console.warn(`[odeme-sirketleri] upsert hatası: ${e.message}`),
+        );
       }
       res.json(talep);
     } catch (e: any) {
@@ -5079,6 +5094,12 @@ export async function registerRoutes(
             filepath: konsimento.path.replace(/\\/g, "/"),
             yukleyenId: ben.id,
           });
+        }
+        // Onaylanan depo alacaklısını öneri listesine kaydet (best-effort — talebi bozmaz)
+        if (odemeTipi === "depo_teminat") {
+          storage.upsertOdemeSirketi(alacakliStr).catch((e) =>
+            console.warn(`[odeme-sirketleri] upsert hatası: ${e.message}`),
+          );
         }
         res.json(talep);
       } catch (e: any) {

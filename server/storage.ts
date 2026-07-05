@@ -28,6 +28,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   masrafTurleri, type MasrafTuru, type InsertMasrafTuru,
   odemeTalepleri, type OdemeTalep, type InsertOdemeTalep,
   odemeBelgeleri, type OdemeBelge, type InsertOdemeBelge,
+  odemeSirketleri, type OdemeSirketi, type InsertOdemeSirketi,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
@@ -396,6 +397,8 @@ export interface IStorage {
   getOdemeTalep(id: string): Promise<OdemeTalep | undefined>;
   updateOdemeTalep(id: string, t: Partial<InsertOdemeTalep>): Promise<OdemeTalep | undefined>;
   createOdemeBelge(b: InsertOdemeBelge): Promise<OdemeBelge>;
+  upsertOdemeSirketi(ad: string): Promise<void>;
+  getOdemeSirketleri(): Promise<OdemeSirketi[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -3507,6 +3510,30 @@ export class DatabaseStorage implements IStorage {
   async createOdemeBelge(b: InsertOdemeBelge): Promise<OdemeBelge> {
     const [yeni] = await db.insert(odemeBelgeleri).values(b).returning();
     return yeni;
+  }
+
+  async upsertOdemeSirketi(ad: string): Promise<void> {
+    const temiz = ad.trim();
+    if (!temiz) return;
+    await db
+      .insert(odemeSirketleri)
+      .values({ ad: temiz })
+      .onConflictDoUpdate({
+        target: odemeSirketleri.ad,
+        set: {
+          kullanimSayisi: sql`${odemeSirketleri.kullanimSayisi} + 1`,
+          sonKullanim: sql`now()`,
+        },
+      });
+  }
+
+  async getOdemeSirketleri(): Promise<OdemeSirketi[]> {
+    return db
+      .select()
+      .from(odemeSirketleri)
+      .where(eq(odemeSirketleri.aktif, true))
+      .orderBy(desc(odemeSirketleri.kullanimSayisi), desc(odemeSirketleri.sonKullanim))
+      .limit(100);
   }
 }
 

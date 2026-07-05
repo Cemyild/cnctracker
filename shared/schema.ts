@@ -1066,6 +1066,22 @@ export const insertOdemeBelgeSchema = createInsertSchema(odemeBelgeleri).omit({
 export type InsertOdemeBelge = z.infer<typeof insertOdemeBelgeSchema>;
 export type OdemeBelge = typeof odemeBelgeleri.$inferSelect;
 
+// Onaylanan depo alacaklıları — analiz yanlışsa temsilci öneri listesinden seçer.
+export const odemeSirketleri = pgTable("odeme_sirketleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ad: text("ad").notNull().unique(),
+  kullanimSayisi: integer("kullanim_sayisi").notNull().default(1),
+  sonKullanim: timestamp("son_kullanim").defaultNow(),
+  aktif: boolean("aktif").notNull().default(true),
+});
+
+export const insertOdemeSirketiSchema = createInsertSchema(odemeSirketleri).omit({
+  id: true,
+  sonKullanim: true,
+});
+export type InsertOdemeSirketi = z.infer<typeof insertOdemeSirketiSchema>;
+export type OdemeSirketi = typeof odemeSirketleri.$inferSelect;
+
 // connect-pg-simple'ın çalışma anında oluşturduğu oturum tablosu.
 // Şemada tanımlı olmazsa drizzle-kit push bu tabloyu SİLMEYE çalışır ve
 // CI'daki non-interactive push onay bekleyip HİÇBİR değişikliği uygulamaz.
