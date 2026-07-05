@@ -90,7 +90,7 @@ function Router() {
       <Route path="/egitim-degerlendirme/:id" component={PublicEgitimDegerlendirme} />
       <Route path="/anket-sonuclari/:id" component={SurveyAnalysis} />
       <Route path="/survey/:id" component={PublicSurvey} />
-      <Route path="/portal" component={PortalApp} />
+      <Route path="/portal/:rest*" component={PortalApp} />
       <Route component={NotFound} />
     </Switch>
   );

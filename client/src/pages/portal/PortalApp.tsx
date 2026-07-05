@@ -1,10 +1,19 @@
+import { useEffect } from "react";
+import { Redirect, Route, Switch, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, getQueryFn, queryClient } from "@/lib/queryClient";
-import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import PortalLogin from "./PortalLogin";
-import TemsilciPanel from "./TemsilciPanel";
-import MuhasebePanel from "./MuhasebePanel";
+import PortalSidebar from "./PortalSidebar";
+import YeniTalepSayfasi from "./YeniTalepSayfasi";
+import TaleplerimSayfasi from "./TaleplerimSayfasi";
+import GelenTaleplerSayfasi from "./GelenTaleplerSayfasi";
+import DepoOdemeleriSayfasi from "./DepoOdemeleriSayfasi";
+import DogrudanOdemeSayfasi from "./DogrudanOdemeSayfasi";
+import { type TalepDetay } from "./portalUtils";
+import {
+  useTalepBildirimleri, bildirimIzniIste, type SayfaAnahtari,
+} from "./useTalepBildirimleri";
 
 export type PortalMe = {
   id: string;
@@ -12,6 +21,83 @@ export type PortalMe = {
   rol: "temsilci" | "muhasebe";
   avAdi: string | null;
 };
+
+const SAYFA_BASLIKLARI: Record<string, string> = {
+  "/portal/yeni-talep": "Yeni Talep",
+  "/portal/taleplerim": "Taleplerim",
+  "/portal/gelen-talepler": "Gelen Talepler",
+  "/portal/depo": "Depo Ödemeleri",
+  "/portal/dogrudan-odeme": "Doğrudan Ödeme",
+};
+
+const ROTA_SAYFASI: Record<string, SayfaAnahtari> = {
+  "/portal/taleplerim": "taleplerim",
+  "/portal/gelen-talepler": "gelenTalepler",
+  "/portal/depo": "depo",
+};
+
+function PortalIcerik({ me }: { me: PortalMe }) {
+  const [location] = useLocation();
+
+  // Tek itici sorgu: 10 sn'de bir tazeler; sayfalar aynı queryKey cache'ini okur.
+  const { data: talepler = [] } = useQuery<TalepDetay[]>({
+    queryKey: ["/api/portal/talepler"],
+    refetchInterval: 10000,
+  });
+
+  const aktifSayfa = ROTA_SAYFASI[location] ?? null;
+  const rozetler = useTalepBildirimleri(me, talepler, aktifSayfa);
+
+  useEffect(() => {
+    bildirimIzniIste(); // girişten sonra bir kez sorar; reddedilirse sessiz
+  }, []);
+
+  const cikisYap = async () => {
+    await apiRequest("POST", "/api/portal/logout").catch(() => {});
+    queryClient.setQueryData(["/api/portal/me"], null);
+  };
+
+  const varsayilanRota = me.rol === "muhasebe" ? "/portal/gelen-talepler" : "/portal/yeni-talep";
+  const baslik = SAYFA_BASLIKLARI[location] ?? "Ödemeler Portalı";
+
+  return (
+    <div className="flex h-screen w-full bg-background">
+      <PortalSidebar me={me} rozetler={rozetler} cikisYap={cikisYap} />
+      <div className="flex flex-col flex-1 min-w-0">
+        <header className="flex items-center gap-4 h-14 px-4 border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10">
+          <SidebarTrigger data-testid="button-portal-sidebar-toggle" />
+          <h1 className="text-lg font-semibold" data-testid="text-portal-sayfa-baslik">{baslik}</h1>
+        </header>
+        <main className="flex-1 overflow-auto p-4">
+          <div className="max-w-6xl mx-auto">
+            <Switch>
+              {me.rol === "temsilci" && (
+                <Route path="/portal/yeni-talep">
+                  <YeniTalepSayfasi me={me} />
+                </Route>
+              )}
+              {me.rol === "temsilci" && (
+                <Route path="/portal/taleplerim" component={TaleplerimSayfasi} />
+              )}
+              {me.rol === "muhasebe" && (
+                <Route path="/portal/gelen-talepler" component={GelenTaleplerSayfasi} />
+              )}
+              {me.rol === "muhasebe" && (
+                <Route path="/portal/depo" component={DepoOdemeleriSayfasi} />
+              )}
+              {me.rol === "muhasebe" && (
+                <Route path="/portal/dogrudan-odeme" component={DogrudanOdemeSayfasi} />
+              )}
+              <Route>
+                <Redirect to={varsayilanRota} />
+              </Route>
+            </Switch>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
 
 export default function PortalApp() {
   const { data: me, isLoading } = useQuery<PortalMe | null>({
@@ -28,31 +114,14 @@ export default function PortalApp() {
   }
   if (!me) return <PortalLogin />;
 
-  const cikisYap = async () => {
-    await apiRequest("POST", "/api/portal/logout");
-    queryClient.setQueryData(["/api/portal/me"], null);
+  const style = {
+    "--sidebar-width": "16rem",
+    "--sidebar-width-icon": "3.5rem",
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="flex items-center justify-between h-14 px-4 border-b sticky top-0 bg-background/95 backdrop-blur-sm z-10">
-        <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="CNC" className="h-8 w-auto object-contain" />
-          <span className="font-semibold">Ödemeler Portalı</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">
-            {me.adSoyad} — {me.rol === "muhasebe" ? "Muhasebe" : "Müşteri Temsilcisi"}
-          </span>
-          <Button variant="ghost" size="sm" onClick={cikisYap} data-testid="button-portal-cikis">
-            <LogOut className="w-4 h-4 mr-1" />
-            Çıkış
-          </Button>
-        </div>
-      </header>
-      <main className="p-4 max-w-6xl mx-auto">
-        {me.rol === "muhasebe" ? <MuhasebePanel /> : <TemsilciPanel me={me} />}
-      </main>
-    </div>
+    <SidebarProvider style={style as React.CSSProperties}>
+      <PortalIcerik me={me} />
+    </SidebarProvider>
   );
 }
