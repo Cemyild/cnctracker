@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, decimal, date, integer, uniqueIndex, index, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, decimal, date, integer, uniqueIndex, index, timestamp, jsonb, json, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1065,3 +1065,15 @@ export const insertOdemeBelgeSchema = createInsertSchema(odemeBelgeleri).omit({
 });
 export type InsertOdemeBelge = z.infer<typeof insertOdemeBelgeSchema>;
 export type OdemeBelge = typeof odemeBelgeleri.$inferSelect;
+
+// connect-pg-simple'ın çalışma anında oluşturduğu oturum tablosu.
+// Şemada tanımlı olmazsa drizzle-kit push bu tabloyu SİLMEYE çalışır ve
+// CI'daki non-interactive push onay bekleyip HİÇBİR değişikliği uygulamaz.
+// Yapı, canlıdaki tabloyla birebir aynıdır — push için no-op.
+export const portalSessions = pgTable("portal_sessions", {
+  sid: varchar("sid").primaryKey(),
+  sess: json("sess").notNull(),
+  expire: timestamp("expire", { precision: 6 }).notNull(),
+}, (table) => [
+  index("IDX_session_expire").on(table.expire),
+]);
