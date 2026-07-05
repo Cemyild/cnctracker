@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import type { Beyanname, MasrafTuru } from "@shared/schema";
@@ -53,12 +53,16 @@ export default function DogrudanOdemeSayfasi() {
 
   const secili = beyannameler.find((b) => b.id === beyannameId);
 
+  // Son GEÇERLİ öneriyi ref'te izle: dosya değişimindeki ara null-öneri çağrısı
+  // izi silmesin — yoksa yeni öneri "elle yazılmış" sanılıp eski acente ekranda kalır.
+  const sonAlacakliOnerisi = useRef<string | null>(null);
   const konsimentoDegisti = (b: KonsimentoBilgisi) => {
-    // Öneri yeni geldiyse ve alacaklı boşsa/önceki öneriyse otomatik doldur (elle yazılmışsa ezme)
-    if (b.alacakliOnerisi && b.alacakliOnerisi !== konsimento.alacakliOnerisi) {
-      if (!alacakli.trim() || alacakli === konsimento.alacakliOnerisi) {
+    if (b.alacakliOnerisi && b.alacakliOnerisi !== sonAlacakliOnerisi.current) {
+      // Alacaklı boşsa ya da hâlâ önceki öneriyse yeni öneriyle doldur (elle yazılmışsa ezme)
+      if (!alacakli.trim() || alacakli === sonAlacakliOnerisi.current) {
         setAlacakli(b.alacakliOnerisi);
       }
+      sonAlacakliOnerisi.current = b.alacakliOnerisi;
     }
     setKonsimento(b);
   };
@@ -125,6 +129,7 @@ export default function DogrudanOdemeSayfasi() {
       toast({ title: "Ödeme kaydedildi", description: "Kayıt doğrudan Ödendi durumunda oluştu." });
       setBeyannameId(""); setDosyaYok(false); setMasrafTuru(""); setTutar("");
       setAlacakli(""); setIban(""); setAciklama(""); setDekont(null); setKonsimento({ ...BOS_KONSIMENTO });
+      sonAlacakliOnerisi.current = null;
       setFormSayac((s) => s + 1);
       queryClient.invalidateQueries({ queryKey: ["/api/portal/talepler"] });
     } catch (err: any) {
