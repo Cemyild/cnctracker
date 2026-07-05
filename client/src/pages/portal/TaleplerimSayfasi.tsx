@@ -5,9 +5,7 @@ import type { Beyanname } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -19,7 +17,6 @@ import {
   type TalepDetay, formatTarih, formatPara,
   TIP_ETIKET, DURUM_ETIKET, IADE_ETIKET, BELGE_ETIKET, belgeUrl,
 } from "./portalUtils";
-import BelgeLinkleri from "./BelgeLinkleri";
 
 // Ödenmiş ama beyannamesiz talepler — temsilciden eşleştirme istenir
 function EslesmeBekleyenler({
