@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { type TalepDetay, formatPara } from "./portalUtils";
 import { type PortalMe } from "./PortalApp";
@@ -100,6 +100,7 @@ export function useTalepBildirimleri(
 ): Rozetler {
   const [, navigate] = useLocation();
   const bildirilenler = useRef<Set<string>>(new Set()); // "sayfa:talepId:imza" — aynı değişiklik bir kez bildirilir
+  const [, yenidenHesapla] = useState(0); // imza senkronu sonrası rozetleri anında tazelemek için
   const sayfalar = rolSayfalari(me.rol);
 
   const imzalar = imzalariOku(me);
@@ -115,7 +116,10 @@ export function useTalepBildirimleri(
         degisti = true;
       }
     }
-    if (degisti) imzalariYaz(me, d);
+    if (degisti) {
+      imzalariYaz(me, d);
+      yenidenHesapla((n) => n + 1);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me.id, talepler]);
 
@@ -126,6 +130,7 @@ export function useTalepBildirimleri(
       const d = imzalariOku(me);
       d[aktifSayfa] = guncelImza(sayfaTalepleri(aktifSayfa, talepler));
       imzalariYaz(me, d);
+      yenidenHesapla((n) => n + 1); // localStorage değişti — rozet/başlık yeniden hesaplansın
     };
     senkronla();
     document.addEventListener("visibilitychange", senkronla);
