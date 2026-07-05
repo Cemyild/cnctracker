@@ -43,6 +43,8 @@ function PortalIcerik({ me }: { me: PortalMe }) {
   const { data: talepler = [] } = useQuery<TalepDetay[]>({
     queryKey: ["/api/portal/talepler"],
     refetchInterval: 10000,
+    // Sekme arka plandayken de tazele — bildirimler gizli sekmede tetiklenir
+    refetchIntervalInBackground: true,
   });
 
   const aktifSayfa = ROTA_SAYFASI[location] ?? null;
