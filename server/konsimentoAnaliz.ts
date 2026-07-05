@@ -8,23 +8,29 @@ export type KonsimentoAnalizSonucu = {
   konsimentoNo: string | null;
   tasiyici: string | null;
   turkiyeAcentesi: { ad: string; adres: string | null } | null;
+  acenteKaynagi: string | null;
 };
 
 export function analizYapilandirildiMi(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
-const SISTEM_ISTEMI = `Sen bir gümrük operasyon asistanısın. Sana bir konşimento (Bill of Lading) PDF'i verilecek. Görevin belgeden ŞU üç bilgiyi çıkarmak:
+const SISTEM_ISTEMI = `Sen bir gümrük operasyon uzmanısın. Sana bir konşimento (Bill of Lading / Sea Waybill) PDF'i verilecek. Belge taranmış veya düşük kaliteli olabilir — görüntüden dikkatle oku. Üç bilgi çıkaracaksın:
 
-1. konsimentoNo: Konşimento numarası. Belgede "B/L No", "Bill of Lading No", "BL Number", "Konşimento No" gibi etiketlerle geçer. Belge numarasını birebir, boşluksuz aktar.
-2. tasiyici: Taşıyıcı firma (carrier/line). Genelde belge başlığında veya logo bölgesinde yazar (örn. MSC, MAERSK, ONE, YANG MING, ARKAS).
-3. turkiyeAcentesi: Belgede TÜRKİYE ADRESLİ bir firma varsa (delivery agent, destination agent, notify address bölümlerinde Türkiye/Turkey/TR adresli acente) o firmanın adı ve adresi. Türk limanı adı tek başına acente DEĞİLDİR; adresli bir FİRMA olmalı.
+1. konsimentoNo — Konşimento numarası:
+- YALNIZ şu etiketli kutudan oku: "B/L No", "B/L NO.", "B/L Number", "Bill of Lading No", "Sea Waybill No", "SWB-No".
+- ŞUNLARI ASLA KONŞİMENTO NUMARASI OLARAK ALMA: "Booking Number", "Booking Ref", "Carrier's Reference", "Export References", "Shipper's Ref", "OTI/NVOCC Number", fatura/kontrat numaraları ve konteyner numaraları (konteyner numarası 4 harf + 7 rakam biçimindedir).
+- Numarayı KARAKTER KARAKTER aynen aktar; O ile 0, I ile 1, B ile 8 karışmalarına dikkat et. Doğru etiketi bulamıyorsan veya net okuyamıyorsan null döndür.
 
-KURALLAR:
-- Yalnız belgede YAZAN bilgiyi aktar. ASLA tahmin etme, tamamlama veya uydurma.
-- Bir alandan emin değilsen o alanı null döndür.
-- Belge taranmış/fotoğraf olabilir — görüntüden oku.
-- Firma adlarını belgede yazıldığı gibi aktar (kısaltma açma).`;
+2. tasiyici — Taşıyıcı hat (carrier): belge başlığında/logosunda veya "Carrier:" etiketinde yazan denizcilik firması.
+
+3. turkiyeAcentesi ve acenteKaynagi — Türkiye'deki ödeme/teslim acentesi:
+- Acenteyi YALNIZ şu etiketli bloklardan al: "Port Agent", "Carrier's Agent(s)", "Carrier's Agents Endorsements", "Port of Discharge Agent", "Destination Agent", "Delivery Agent", "For delivery of (this) goods please apply to", veya belgenin alt/kenar bölgesindeki acente iletişim bloğu (vergi numarası / TAX ID / MERSIS ve telefon bilgisi içeren Türkiye adresli firma).
+- ŞU BLOKLARDAN ASLA ACENTE ALMA: "Shipper" / "Exporter", "Consignee" / "Importer", "Notify Party" / "Notify Address". Bu bloklardaki firmalar müşteridir; Türkiye adresli ve A.Ş./LTD uzantılı olsalar BİLE ödeme acentesi DEĞİLDİR.
+- Acente Türkiye adresli olmalıdır. Adında A.Ş. / LTD. / ŞTİ. uzantısı olması güveni artırır ama şart değildir (yabancı kökenli isimli firmaların İstanbul/Türkiye ofisleri de geçerli acentedir).
+- acenteKaynagi alanına acenteyi aldığın blok etiketini aynen yaz (örn. "Destination Agent", "Port Agent", "For delivery of this goods please apply to"). İzinli blokların hiçbirinde Türkiye adresli firma yoksa turkiyeAcentesi ve acenteKaynagi null olmalı.
+
+GENEL KURAL: Yalnız belgede YAZAN bilgiyi aktar. ASLA tahmin etme, tamamlama veya uydurma. Emin olmadığın her alanı null bırak.`;
 
 // Yapılandırılmış çıktı şeması — her nesnede additionalProperties:false + required zorunlu.
 const CIKTI_SEMASI = {
@@ -56,15 +62,19 @@ const CIKTI_SEMASI = {
       ],
       description: "Belgede yazılı Türkiye adresli acente; yoksa null",
     },
+    acenteKaynagi: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+      description: "Acentenin alındığı blok etiketi (izinli listeden); acente yoksa null",
+    },
   },
-  required: ["konsimentoNo", "tasiyici", "turkiyeAcentesi"],
+  required: ["konsimentoNo", "tasiyici", "turkiyeAcentesi", "acenteKaynagi"],
   additionalProperties: false,
 } as const;
 
 export async function konsimentoAnalizEt(pdfBuffer: Buffer): Promise<KonsimentoAnalizSonucu> {
-  const client = new Anthropic({ maxRetries: 1, timeout: 20_000 }); // ms — 20 sn bütçe
+  const client = new Anthropic({ maxRetries: 1, timeout: 30_000 }); // ms — 30 sn bütçe
   const response = await client.messages.create({
-    model: "claude-haiku-4-5",
+    model: "claude-sonnet-5",
     max_tokens: 1024,
     system: SISTEM_ISTEMI,
     output_config: { format: { type: "json_schema", schema: CIKTI_SEMASI } },

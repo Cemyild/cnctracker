@@ -4972,6 +4972,7 @@ export async function registerRoutes(
           acenteAdi: sonuc.turkiyeAcentesi?.ad ?? null,
           acenteAdres: sonuc.turkiyeAcentesi?.adres ?? null,
           acenteBulundu: sonuc.turkiyeAcentesi != null,
+          acenteKaynagi: sonuc.acenteKaynagi,
         });
       } catch (e: any) {
         console.warn(`[konsimento-analiz] hata: ${e.message}`);
