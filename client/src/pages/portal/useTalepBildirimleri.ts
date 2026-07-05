@@ -128,7 +128,11 @@ export function useTalepBildirimleri(
     const senkronla = () => {
       if (!aktifSayfa || document.visibilityState !== "visible") return;
       const d = imzalariOku(me);
-      d[aktifSayfa] = guncelImza(sayfaTalepleri(aktifSayfa, talepler));
+      const yeni = guncelImza(sayfaTalepleri(aktifSayfa, talepler));
+      // Değişiklik yoksa yazma ve bump etme — kararsız talepler referansında
+      // bump→render→effect döngüsünü (Maximum update depth) engeller.
+      if (JSON.stringify(d[aktifSayfa] ?? null) === JSON.stringify(yeni)) return;
+      d[aktifSayfa] = yeni;
       imzalariYaz(me, d);
       yenidenHesapla((n) => n + 1); // localStorage değişti — rozet/başlık yeniden hesaplansın
     };
