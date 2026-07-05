@@ -4886,6 +4886,111 @@ export async function registerRoutes(
     }
   });
 
+  // Muhasebe: talepsiz DOĞRUDAN ödeme kaydı — tek adımda "odendi" oluşur.
+  // Dekont zorunlu; beyanname opsiyonel (muhasebe tüm listeyi görür, avAdi kontrolü yok);
+  // beyannamesizse açıklama zorunlu (temsilci dosyasız talep kuralıyla aynı).
+  app.post(
+    "/api/portal/dogrudan-odeme",
+    requireMuhasebe,
+    uploadOdemeBelge.fields([
+      { name: "dekont", maxCount: 1 },
+      { name: "konsimento", maxCount: 1 },
+    ]),
+    async (req, res) => {
+      const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+      const yuklenenleriSil = () => {
+        for (const f of [...(files?.dekont ?? []), ...(files?.konsimento ?? [])]) {
+          fs.unlink(f.path, () => {});
+        }
+      };
+      try {
+        const ben = await portalKullanici(req);
+        if (!ben) {
+          yuklenenleriSil();
+          return res.status(401).json({ error: "Giriş gerekli" });
+        }
+        const { beyannameId, odemeTipi, masrafTuru, tutar, paraBirimi, alacakli, iban, aciklama } = req.body || {};
+
+        const beyannameIdStr = String(beyannameId ?? "").trim();
+        let beyanname: Beyanname | undefined;
+        if (beyannameIdStr) {
+          beyanname = await storage.getBeyanname(beyannameIdStr);
+          if (!beyanname) {
+            yuklenenleriSil();
+            return res.status(400).json({ error: "Beyanname bulunamadı" });
+          }
+        } else if (!String(aciklama ?? "").trim()) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Dosyasız talepte açıklama zorunlu" });
+        }
+        if (!["masraf", "depo_teminat"].includes(String(odemeTipi))) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Geçersiz ödeme tipi" });
+        }
+        const tutarNum = parseTutar(tutar);
+        if (tutarNum == null || tutarNum <= 0) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Geçersiz tutar" });
+        }
+        const alacakliStr = String(alacakli ?? "").trim();
+        if (!alacakliStr) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Alacaklı (kime ödenecek) zorunlu" });
+        }
+        const masrafTuruStr =
+          odemeTipi === "depo_teminat" ? "Depo Teminatı" : String(masrafTuru ?? "").trim();
+        if (!masrafTuruStr) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Masraf türü zorunlu" });
+        }
+        const dekont = files?.dekont?.[0];
+        if (!dekont) {
+          yuklenenleriSil();
+          return res.status(400).json({ error: "Dekont dosyası zorunlu" });
+        }
+
+        const bugun = bugunYmd();
+        const talep = await storage.createOdemeTalep({
+          beyannameId: beyanname?.id ?? null,
+          talepEdenId: ben.id,
+          odemeTipi: String(odemeTipi),
+          masrafTuru: masrafTuruStr,
+          tutar: String(tutarNum),
+          paraBirimi: ["TRY", "USD", "EUR"].includes(String(paraBirimi)) ? String(paraBirimi) : "TRY",
+          alacakli: alacakliStr,
+          iban: iban ? String(iban).trim() : null,
+          aciklama: aciklama ? String(aciklama) : null,
+          durum: "odendi",
+          talepTarihi: bugun,
+          odemeTarihi: bugun,
+          odeyenId: ben.id,
+          iadeDurumu: odemeTipi === "depo_teminat" ? "beklemede" : null,
+        });
+        await storage.createOdemeBelge({
+          talepId: talep.id,
+          belgeTipi: "dekont",
+          filename: fixUploadFilename(dekont.originalname),
+          filepath: dekont.path.replace(/\\/g, "/"),
+          yukleyenId: ben.id,
+        });
+        const konsimento = files?.konsimento?.[0];
+        if (konsimento) {
+          await storage.createOdemeBelge({
+            talepId: talep.id,
+            belgeTipi: "konsimento",
+            filename: fixUploadFilename(konsimento.originalname),
+            filepath: konsimento.path.replace(/\\/g, "/"),
+            yukleyenId: ben.id,
+          });
+        }
+        res.json(talep);
+      } catch (e: any) {
+        yuklenenleriSil();
+        res.status(400).json({ error: e.message });
+      }
+    },
+  );
+
   // ==================== ÖDEMELER: YÖNETİM PANELİ EK ROTALAR ====================
 
   app.get("/api/odemeler/masraf-turleri", async (_req, res) => {
