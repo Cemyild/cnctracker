@@ -16,6 +16,31 @@ import { type PortalMe } from "./PortalApp";
 import { formatTarih, formatPara } from "./portalUtils";
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 
+type KalemDurum = "bekliyor" | "gonderiliyor" | "gonderildi" | "hata";
+
+type Kalem = {
+  odemeTipi: "masraf" | "depo_teminat";
+  masrafTuru: string;
+  tutar: string;
+  paraBirimi: string;
+  alacakli: string;
+  iban: string;
+  aciklama: string;
+  belgeler: File[];
+  konsimento: { dosya: File; konsimentoNo: string; tasiyici: string } | null;
+  durum: KalemDurum;
+  hataMesaji?: string;
+};
+
+// Görsel toplam içindir — sunucudaki parseTutar yetkilidir. "1.500", "1.500,25", "1500.25" biçimlerini tolere eder.
+function tutarSayiya(s: string): number {
+  const t = s.trim();
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) return parseFloat(t.replace(/\./g, "").replace(",", "."));
+  if (/^\d+,\d+$/.test(t)) return parseFloat(t.replace(",", "."));
+  const n = parseFloat(t);
+  return Number.isNaN(n) ? 0 : n;
+}
+
 export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   const { toast } = useToast();
   const { data: beyannameler = [] } = useQuery<Beyanname[]>({
@@ -28,10 +53,12 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
     queryKey: ["/api/portal/odeme-sirketleri"],
   });
 
-  // Form durumu
+  // Dosya bloğu (kalem listesi doluyken kilitli)
   const [arama, setArama] = useState("");
   const [beyannameId, setBeyannameId] = useState("");
   const [dosyaYok, setDosyaYok] = useState(false); // beyanname henüz açılmadı/yüklenmedi
+
+  // Kalem formu
   const [odemeTipi, setOdemeTipi] = useState<"masraf" | "depo_teminat">("masraf");
   const [masrafTuru, setMasrafTuru] = useState("");
   const [tutar, setTutar] = useState("");
@@ -41,8 +68,15 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   const [aciklama, setAciklama] = useState("");
   const [dosyalar, setDosyalar] = useState<FileList | null>(null);
   const [konsimento, setKonsimento] = useState<KonsimentoBilgisi>({ ...BOS_KONSIMENTO });
-  const [formSayac, setFormSayac] = useState(0); // dosya input'unu sıfırlamak için remount anahtarı
-  const [gonderiliyor, setGonderiliyor] = useState(false);
+  const [formSayac, setFormSayac] = useState(0); // dosya/konşimento input'larını sıfırlamak için remount anahtarı
+
+  // Kalem listesi + gönderim
+  const [kalemler, setKalemler] = useState<Kalem[]>([]);
+  const [gonderimAktif, setGonderimAktif] = useState(false);
+
+  const listeDolu = kalemler.length > 0;
+  const bekleyenSayisi = kalemler.filter((k) => k.durum !== "gonderildi").length;
+  const hataVar = kalemler.some((k) => k.durum === "hata");
 
   const filtreliBeyannameler = useMemo(() => {
     const q = arama.trim().toLocaleLowerCase("tr");
@@ -56,6 +90,13 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   }, [beyannameler, arama]);
 
   const secili = beyannameler.find((b) => b.id === beyannameId);
+
+  // Para birimi bazında görsel toplamlar (tüm listelenen kalemler)
+  const toplamlar = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const k of kalemler) t[k.paraBirimi] = (t[k.paraBirimi] ?? 0) + tutarSayiya(k.tutar);
+    return t;
+  }, [kalemler]);
 
   // Son GEÇERLİ öneriyi ref'te izle: dosya değişimindeki ara null-öneri çağrısı
   // izi silmesin — yoksa yeni öneri "elle yazılmış" sanılıp eski acente ekranda kalır.
@@ -71,8 +112,21 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
     setKonsimento(b);
   };
 
-  const gonder = async (e: React.FormEvent) => {
+  const kalemFormunuSifirla = () => {
+    setMasrafTuru("");
+    setTutar("");
+    setAlacakli("");
+    setIban("");
+    setAciklama("");
+    setDosyalar(null);
+    setKonsimento({ ...BOS_KONSIMENTO });
+    sonAlacakliOnerisi.current = null;
+    setFormSayac((s) => s + 1);
+  };
+
+  const kalemEkle = (e: React.FormEvent) => {
     e.preventDefault();
+    if (gonderimAktif) return;
     if (!dosyaYok && !beyannameId) {
       toast({ title: "Beyanname seçin", description: "Dosya henüz yoksa 'Dosya yok' işaretleyin.", variant: "destructive" });
       return;
@@ -103,47 +157,108 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
         return;
       }
     }
-    setGonderiliyor(true);
-    try {
-      const fd = new FormData();
-      if (!dosyaYok) fd.set("beyannameId", beyannameId);
-      fd.set("odemeTipi", odemeTipi);
-      fd.set("masrafTuru", masrafTuru);
-      fd.set("tutar", tutar);
-      fd.set("paraBirimi", paraBirimi);
-      fd.set("alacakli", alacakli);
-      fd.set("iban", iban);
-      fd.set("aciklama", aciklama);
-      if (dosyalar) Array.from(dosyalar).forEach((f) => fd.append("belgeler", f));
-      if (odemeTipi === "depo_teminat" && konsimento.dosya) {
-        fd.set("konsimento", konsimento.dosya);
-        fd.set("konsimentoNo", konsimento.konsimentoNo.trim());
-        fd.set("tasiyici", konsimento.tasiyici.trim());
-      }
-      const res = await fetch("/api/portal/talepler", {
-        method: "POST",
-        body: fd,
-        credentials: "include",
+    const yeni: Kalem = {
+      odemeTipi,
+      masrafTuru: odemeTipi === "masraf" ? masrafTuru : "Depo Teminatı",
+      tutar: tutar.trim(),
+      paraBirimi,
+      alacakli: alacakli.trim(),
+      iban: iban.trim(),
+      aciklama: aciklama.trim(),
+      belgeler: dosyalar ? Array.from(dosyalar) : [],
+      konsimento:
+        odemeTipi === "depo_teminat" && konsimento.dosya
+          ? { dosya: konsimento.dosya, konsimentoNo: konsimento.konsimentoNo.trim(), tasiyici: konsimento.tasiyici.trim() }
+          : null,
+      durum: "bekliyor",
+    };
+    setKalemler((prev) => [...prev, yeni]);
+    kalemFormunuSifirla();
+  };
+
+  const kalemKaldir = (i: number) => {
+    if (gonderimAktif) return;
+    setKalemler((prev) => {
+      const kalan = prev.filter((_, idx) => idx !== i);
+      // Kalanların hepsi gönderilmişse liste görevini bitirmiştir — tamamen temizle
+      if (kalan.length > 0 && kalan.every((k) => k.durum === "gonderildi")) return [];
+      return kalan;
+    });
+  };
+
+  const kalemGonder = async (k: Kalem): Promise<void> => {
+    const fd = new FormData();
+    if (!dosyaYok) fd.set("beyannameId", beyannameId);
+    fd.set("odemeTipi", k.odemeTipi);
+    fd.set("masrafTuru", k.odemeTipi === "masraf" ? k.masrafTuru : "");
+    fd.set("tutar", k.tutar);
+    fd.set("paraBirimi", k.paraBirimi);
+    fd.set("alacakli", k.alacakli);
+    fd.set("iban", k.iban);
+    fd.set("aciklama", k.aciklama);
+    k.belgeler.forEach((f) => fd.append("belgeler", f));
+    if (k.odemeTipi === "depo_teminat" && k.konsimento) {
+      fd.set("konsimento", k.konsimento.dosya);
+      fd.set("konsimentoNo", k.konsimento.konsimentoNo);
+      fd.set("tasiyici", k.konsimento.tasiyici);
+    }
+    const res = await fetch("/api/portal/talepler", { method: "POST", body: fd, credentials: "include" });
+    if (!res.ok) throw new Error((await res.json()).error || "Talep gönderilemedi");
+  };
+
+  const topluGonder = async () => {
+    if (gonderimAktif || bekleyenSayisi === 0) return;
+    // Eklenmemiş form koruması: formda anlamlı veri varsa sessizce gönderme
+    if (tutar.trim() || alacakli.trim()) {
+      toast({
+        title: "Formda eklenmemiş kalem var",
+        description: "Önce Ekle'ye basın ya da formu temizleyin.",
+        variant: "destructive",
       });
-      if (!res.ok) throw new Error((await res.json()).error || "Talep gönderilemedi");
-      toast({ title: "Talep gönderildi", description: "Muhasebe listesine düştü." });
-      setBeyannameId("");
-      setDosyaYok(false);
-      setMasrafTuru("");
-      setTutar("");
-      setAlacakli("");
-      setIban("");
-      setAciklama("");
-      setDosyalar(null);
-      setKonsimento({ ...BOS_KONSIMENTO });
-      sonAlacakliOnerisi.current = null;
-      setFormSayac((s) => s + 1);
+      return;
+    }
+    setGonderimAktif(true);
+    let gidenler = 0;
+    let hatalar = 0;
+    try {
+      for (let i = 0; i < kalemler.length; i++) {
+        if (kalemler[i].durum === "gonderildi") continue;
+        setKalemler((prev) => prev.map((k, idx) => (idx === i ? { ...k, durum: "gonderiliyor", hataMesaji: undefined } : k)));
+        try {
+          await kalemGonder(kalemler[i]);
+          gidenler++;
+          setKalemler((prev) => prev.map((k, idx) => (idx === i ? { ...k, durum: "gonderildi" } : k)));
+        } catch (err: any) {
+          hatalar++;
+          setKalemler((prev) => prev.map((k, idx) => (idx === i ? { ...k, durum: "hata", hataMesaji: err.message } : k)));
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/portal/talepler"] });
       queryClient.invalidateQueries({ queryKey: ["/api/portal/odeme-sirketleri"] });
-    } catch (err: any) {
-      toast({ title: "Hata", description: err.message, variant: "destructive" });
+      if (hatalar === 0) {
+        toast({ title: `${gidenler} talep muhasebeye gönderildi` });
+        setKalemler([]);
+        setBeyannameId("");
+        setDosyaYok(false);
+        kalemFormunuSifirla();
+      } else {
+        toast({
+          title: `${gidenler} talep gönderildi, ${hatalar} kalem hata aldı`,
+          description: "Hatalı kalemler listede kaldı — 'Kalanları Tekrar Gönder' ile yeniden deneyin.",
+          variant: "destructive",
+        });
+      }
     } finally {
-      setGonderiliyor(false);
+      setGonderimAktif(false);
+    }
+  };
+
+  const durumEtiketi = (k: Kalem): { metin: string; sinif: string } => {
+    switch (k.durum) {
+      case "gonderiliyor": return { metin: "Gönderiliyor…", sinif: "text-muted-foreground" };
+      case "gonderildi": return { metin: "✓ Gönderildi", sinif: "text-green-600" };
+      case "hata": return { metin: `✗ ${k.hataMesaji ?? "Hata"}`, sinif: "text-destructive" };
+      default: return { metin: "", sinif: "text-muted-foreground" };
     }
   };
 
@@ -154,13 +269,14 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
           <CardTitle>Yeni Ödeme Talebi</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={gonder} className="space-y-4">
+          <form onSubmit={kalemEkle} className="space-y-4">
             <div className="space-y-2">
               <Label>Beyanname / Dosya</Label>
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="dosya-yok"
                   checked={dosyaYok}
+                  disabled={listeDolu || gonderimAktif}
                   onCheckedChange={(v) => {
                     setDosyaYok(v === true);
                     if (v === true) setBeyannameId("");
@@ -172,26 +288,32 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                   (ödeme sonrası eşleştirmeniz istenir)
                 </Label>
               </div>
+              {listeDolu && (
+                <p className="text-xs text-muted-foreground" data-testid="text-dosya-kilidi">
+                  Dosyayı değiştirmek için önce listedeki kalemleri kaldırın.
+                </p>
+              )}
               {!dosyaYok && (
                 <>
-              <Input
-                placeholder="Dosya no, müşteri veya beyan no ara…"
-                value={arama}
-                onChange={(e) => setArama(e.target.value)}
-                data-testid="input-beyanname-arama"
-              />
-              <Select value={beyannameId} onValueChange={setBeyannameId}>
-                <SelectTrigger data-testid="select-beyanname">
-                  <SelectValue placeholder="Beyanname seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filtreliBeyannameler.slice(0, 100).map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.dosyaNo} — {b.alici ?? "?"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <Input
+                    placeholder="Dosya no, müşteri veya beyan no ara…"
+                    value={arama}
+                    onChange={(e) => setArama(e.target.value)}
+                    disabled={listeDolu || gonderimAktif}
+                    data-testid="input-beyanname-arama"
+                  />
+                  <Select value={beyannameId} onValueChange={setBeyannameId} disabled={listeDolu || gonderimAktif}>
+                    <SelectTrigger data-testid="select-beyanname">
+                      <SelectValue placeholder="Beyanname seçin" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filtreliBeyannameler.slice(0, 100).map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.dosyaNo} — {b.alici ?? "?"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </>
               )}
               {!dosyaYok && secili && (
@@ -312,7 +434,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
             </div>
 
             <div className="space-y-2">
-              <Label>Belgeler (fatura vb. — birden fazla seçilebilir)</Label>
+              <Label>Belgeler (fatura vb. — birden fazla seçilebilir, bu kaleme bağlanır)</Label>
               <Input
                 key={formSayac}
                 type="file"
@@ -322,12 +444,82 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
               />
             </div>
 
-            <Button type="submit" disabled={gonderiliyor} data-testid="button-talep-gonder">
-              {gonderiliyor ? "Gönderiliyor…" : "Talebi Gönder"}
+            <Button type="submit" disabled={gonderimAktif} data-testid="button-kalem-ekle">
+              Ekle
             </Button>
           </form>
         </CardContent>
       </Card>
+
+      {listeDolu && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Eklenen Kalemler ({kalemler.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2" data-testid="list-kalemler">
+              {kalemler.map((k, i) => {
+                const d = durumEtiketi(k);
+                return (
+                  <div
+                    key={i}
+                    className={`flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 ${k.durum === "gonderildi" ? "opacity-60" : ""}`}
+                    data-testid={`row-kalem-${i}`}
+                  >
+                    <div className="space-y-0.5 text-sm">
+                      <div className="font-medium">
+                        {k.odemeTipi === "depo_teminat" ? "Depo Teminatı" : k.masrafTuru}
+                        {" — "}
+                        {k.alacakli}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatPara(k.tutar, k.paraBirimi)}
+                        {k.belgeler.length > 0 && ` · ${k.belgeler.length} belge`}
+                        {k.konsimento && ` · Konşimento: ${k.konsimento.konsimentoNo}`}
+                      </div>
+                      {d.metin && (
+                        <div className={`text-xs ${d.sinif}`} data-testid={`text-kalem-durum-${i}`}>{d.metin}</div>
+                      )}
+                    </div>
+                    {k.durum !== "gonderildi" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={gonderimAktif}
+                        onClick={() => kalemKaldir(i)}
+                        data-testid={`button-kalem-kaldir-${i}`}
+                      >
+                        Kaldır
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+              <div className="text-sm text-muted-foreground" data-testid="text-kalem-toplamlar">
+                {kalemler.length} kalem —{" "}
+                {Object.entries(toplamlar)
+                  .map(([pb, top]) => `${top.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${pb}`)
+                  .join(" + ")}
+              </div>
+              <Button
+                type="button"
+                disabled={gonderimAktif || bekleyenSayisi === 0}
+                onClick={topluGonder}
+                data-testid="button-toplu-gonder"
+              >
+                {gonderimAktif
+                  ? "Gönderiliyor…"
+                  : hataVar
+                    ? "Kalanları Tekrar Gönder"
+                    : "Tümünü Muhasebeye Gönder"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
