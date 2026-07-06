@@ -60,17 +60,19 @@ export function belgeUrl(b: OdemeBelge): string {
 
 // Firma adı eşleştirme — konşimento/AI'ın çıkardığı ad kayıtlı firmayla birebir
 // tutmayabilir; normalize + benzerlik ile öneri sunulur. Saklama DEĞİŞMEZ.
-// NOT: \b kelime sınırı JS'te yalnızca ASCII \w karakterlerini tanır — "ş" gibi
-// Türkçe harfler \w SAYILMAZ, bu yüzden \b burada "a.ş." / "şti." gibi son ekleri
-// HİÇ YAKALAMAZ. Unicode-uyumlu \p{L}\p{N} tabanlı lookaround sınırları (/u bayrağı)
-// kullanılır — Türkçe harfleri korur; tsconfig target: ES2020 bu bayrağı sağlar.
-const FIRMA_EKLERI = /(?<![\p{L}\p{N}])(a\.?\s*ş\.?|a\.?\s*s\.?|ltd\.?|şti\.?|sti\.?|ş\.?t\.?i\.?)(?![\p{L}\p{N}])/gu;
+// Türkçe "I" tuzağı: tr-locale küçültme "I"→"ı" yapar, "i" değişmez; aynı firmanın
+// büyük/küçük harf varyantları farklı normalize olmasın diye ı→i katlanır.
+// Hukuki ekler (A.Ş./LTD/ŞTİ) YALNIZ string sonunda temizlenir — "AS GIDA" gibi
+// baştaki iki-harfli kelimeler korunur (Türkçe'de hukuki form hep sonda gelir).
+const FIRMA_EKLERI = /(?:\s*(?:a\.?\s*ş\.?|a\.?\s*s\.?|ltd\.?|şti\.?|sti\.?|ş\.?t\.?i\.?)\s*)+$/giu;
 
 export function firmaNormalize(s: string): string {
   return (s ?? "")
     .toLocaleLowerCase("tr")
-    .replace(FIRMA_EKLERI, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ") // noktalama → boşluk (\p ile Türkçe harfleri korur)
+    .replace(/ı/g, "i")      // noktasız ı → i (tr-lower "I" tuzağını kapatır)
+    .replace(/̇/g, "")  // birleşik nokta (İ küçültme artığı) temizlenir
+    .replace(FIRMA_EKLERI, "")        // sondaki hukuki ekler
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // kalan noktalama → boşluk (Türkçe harfleri korur)
     .replace(/\s+/g, " ")
     .trim();
 }
