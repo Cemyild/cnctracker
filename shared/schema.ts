@@ -965,7 +965,7 @@ export const portalKullanicilar = pgTable("portal_kullanicilar", {
   kullaniciAdi: text("kullanici_adi").notNull().unique(),
   sifreHash: text("sifre_hash").notNull(), // "salt:hash" (crypto.scrypt)
   adSoyad: text("ad_soyad").notNull(),
-  rol: text("rol").notNull(), // 'temsilci' | 'muhasebe'
+  rol: text("rol").notNull(), // 'temsilci' | 'muhasebe' | 'operasyon'
   avAdi: text("av_adi"), // Beyanname Excel AV sütunu eşleşmesi (örn. "SÜLEYMAN")
   aktif: boolean("aktif").notNull().default(true),
   olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
@@ -1110,6 +1110,58 @@ export const insertFirmaIbanSchema = createInsertSchema(firmaIbanlari).omit({ id
 export type InsertFirmaIban = z.infer<typeof insertFirmaIbanSchema>;
 export type FirmaIban = typeof firmaIbanlari.$inferSelect;
 export type OdemeSirketiDetay = OdemeSirketi & { ibanlar: FirmaIban[] };
+
+// ==================== OPERASYON KASASI (ŞUBE MASRAF) ====================
+// Muhasebe → operasyon avans yüklemeleri
+export const operasyonAvanslar = pgTable("operasyon_avanslar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  operasyonId: varchar("operasyon_id").notNull(),
+  tutar: decimal("tutar", { precision: 14, scale: 2 }).notNull(),
+  aciklama: text("aciklama"),
+  tarih: text("tarih").notNull(),
+  gonderenId: varchar("gonderen_id").notNull(),
+  kapanisId: varchar("kapanis_id"),
+  olusturma: timestamp("olusturma").defaultNow(),
+}, (t) => [index("IDX_op_avans_operasyon").on(t.operasyonId)]);
+
+// Operasyonun yaptığı ödemelerin kaydı (belge zorunlu)
+export const operasyonMasraflar = pgTable("operasyon_masraflar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  operasyonId: varchar("operasyon_id").notNull(),
+  beyannameId: varchar("beyanname_id"),
+  dosyaYok: boolean("dosya_yok").notNull().default(false),
+  masrafTuru: text("masraf_turu"),
+  tutar: decimal("tutar", { precision: 14, scale: 2 }).notNull(),
+  alacakli: text("alacakli").notNull(),
+  iban: text("iban"),
+  aciklama: text("aciklama"),
+  tarih: text("tarih").notNull(),
+  belgeDosya: text("belge_dosya").notNull(),
+  belgeAdi: text("belge_adi").notNull(),
+  kapanisId: varchar("kapanis_id"),
+  olusturma: timestamp("olusturma").defaultNow(),
+}, (t) => [index("IDX_op_masraf_operasyon").on(t.operasyonId)]);
+
+// Gün kapanış snapshot'ı (değişmez rapor)
+export const operasyonGunKapanis = pgTable("operasyon_gun_kapanis", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  operasyonId: varchar("operasyon_id").notNull(),
+  gunTarihi: text("gun_tarihi").notNull(),
+  kapanisZamani: timestamp("kapanis_zamani").defaultNow(),
+  acilisBakiye: decimal("acilis_bakiye", { precision: 14, scale: 2 }).notNull(),
+  avansToplam: decimal("avans_toplam", { precision: 14, scale: 2 }).notNull(),
+  masrafToplam: decimal("masraf_toplam", { precision: 14, scale: 2 }).notNull(),
+  kapanisBakiye: decimal("kapanis_bakiye", { precision: 14, scale: 2 }).notNull(),
+  durum: text("durum").notNull().default("kapali"),
+  geriAcanId: varchar("geri_acan_id"),
+}, (t) => [index("IDX_op_kapanis_operasyon").on(t.operasyonId)]);
+
+export const insertOperasyonAvansSchema = createInsertSchema(operasyonAvanslar).omit({ id: true, olusturma: true });
+export const insertOperasyonMasrafSchema = createInsertSchema(operasyonMasraflar).omit({ id: true, olusturma: true });
+export const insertOperasyonGunKapanisSchema = createInsertSchema(operasyonGunKapanis).omit({ id: true, kapanisZamani: true });
+export type OperasyonAvans = typeof operasyonAvanslar.$inferSelect;
+export type OperasyonMasraf = typeof operasyonMasraflar.$inferSelect;
+export type OperasyonGunKapanis = typeof operasyonGunKapanis.$inferSelect;
 
 // connect-pg-simple'ın çalışma anında oluşturduğu oturum tablosu.
 // Şemada tanımlı olmazsa drizzle-kit push bu tabloyu SİLMEYE çalışır ve

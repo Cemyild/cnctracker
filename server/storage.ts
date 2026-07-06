@@ -30,6 +30,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   odemeBelgeleri, type OdemeBelge, type InsertOdemeBelge,
   odemeSirketleri, type OdemeSirketi, type InsertOdemeSirketi,
   firmaIbanlari, type FirmaIban, type OdemeSirketiDetay,
+  operasyonAvanslar, operasyonMasraflar, operasyonGunKapanis, type OperasyonAvans, type OperasyonMasraf, type OperasyonGunKapanis,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
@@ -408,6 +409,19 @@ export interface IStorage {
   bulkUpsertOdemeSirketleri(rows: { ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
   bulkUpsertFirmaIbanRows(rows: { ad: string; paraBirimi: string; iban: string; etiket?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
   firmaIbanlariExcelSablonu(): Promise<Buffer>;
+
+  // Operasyon Kasası (Şube Masraf)
+  getOperasyonKullanicilar(): Promise<PortalKullanici[]>;
+  getOperasyonBakiye(operasyonId: string): Promise<number>;
+  avansYukle(d: { operasyonId: string; tutar: number; aciklama: string | null; tarih: string; gonderenId: string }): Promise<OperasyonAvans>;
+  masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string; belgeAdi: string }): Promise<OperasyonMasraf>;
+  getOperasyonMasraf(id: string): Promise<OperasyonMasraf | undefined>;
+  masrafSil(id: string): Promise<void>;
+  getAcikHareketler(operasyonId: string): Promise<{ avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>;
+  gunuKapat(operasyonId: string, gunTarihi: string): Promise<OperasyonGunKapanis | null>;
+  getKapanislar(operasyonId: string): Promise<Array<OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>>;
+  getKapanis(id: string): Promise<OperasyonGunKapanis | undefined>;
+  geriAc(kapanisId: string, geriAcanId: string): Promise<OperasyonGunKapanis | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -3759,6 +3773,107 @@ export class DatabaseStorage implements IStorage {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Firmalar");
     return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  }
+
+  // ==================== OPERASYON KASASI (ŞUBE MASRAF) ====================
+
+  async getOperasyonKullanicilar(): Promise<PortalKullanici[]> {
+    return db.select().from(portalKullanicilar)
+      .where(and(eq(portalKullanicilar.rol, "operasyon"), eq(portalKullanicilar.aktif, true)))
+      .orderBy(asc(portalKullanicilar.adSoyad));
+  }
+
+  async getOperasyonBakiye(operasyonId: string): Promise<number> {
+    const [av] = await db.select({ t: sql<string>`COALESCE(SUM(${operasyonAvanslar.tutar}),0)` })
+      .from(operasyonAvanslar).where(eq(operasyonAvanslar.operasyonId, operasyonId));
+    const [ma] = await db.select({ t: sql<string>`COALESCE(SUM(${operasyonMasraflar.tutar}),0)` })
+      .from(operasyonMasraflar).where(eq(operasyonMasraflar.operasyonId, operasyonId));
+    return Math.round((parseFloat(av.t) - parseFloat(ma.t)) * 100) / 100;
+  }
+
+  async avansYukle(d: { operasyonId: string; tutar: number; aciklama: string | null; tarih: string; gonderenId: string }): Promise<OperasyonAvans> {
+    const [yeni] = await db.insert(operasyonAvanslar).values({
+      operasyonId: d.operasyonId, tutar: d.tutar.toFixed(2), aciklama: d.aciklama,
+      tarih: d.tarih, gonderenId: d.gonderenId,
+    }).returning();
+    return yeni;
+  }
+
+  async masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string; belgeAdi: string }): Promise<OperasyonMasraf> {
+    const [yeni] = await db.insert(operasyonMasraflar).values({
+      operasyonId: d.operasyonId, beyannameId: d.beyannameId, dosyaYok: d.dosyaYok,
+      masrafTuru: d.masrafTuru, tutar: d.tutar.toFixed(2), alacakli: d.alacakli, iban: d.iban,
+      aciklama: d.aciklama, tarih: d.tarih, belgeDosya: d.belgeDosya, belgeAdi: d.belgeAdi,
+    }).returning();
+    return yeni;
+  }
+
+  async getOperasyonMasraf(id: string): Promise<OperasyonMasraf | undefined> {
+    const [m] = await db.select().from(operasyonMasraflar).where(eq(operasyonMasraflar.id, id)).limit(1);
+    return m;
+  }
+
+  async masrafSil(id: string): Promise<void> {
+    await db.delete(operasyonMasraflar).where(eq(operasyonMasraflar.id, id));
+  }
+
+  async getAcikHareketler(operasyonId: string): Promise<{ avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }> {
+    const avanslar = await db.select().from(operasyonAvanslar)
+      .where(and(eq(operasyonAvanslar.operasyonId, operasyonId), sql`${operasyonAvanslar.kapanisId} IS NULL`))
+      .orderBy(desc(operasyonAvanslar.olusturma));
+    const masraflar = await db.select().from(operasyonMasraflar)
+      .where(and(eq(operasyonMasraflar.operasyonId, operasyonId), sql`${operasyonMasraflar.kapanisId} IS NULL`))
+      .orderBy(desc(operasyonMasraflar.olusturma));
+    return { avanslar, masraflar };
+  }
+
+  async gunuKapat(operasyonId: string, gunTarihi: string): Promise<OperasyonGunKapanis | null> {
+    const { avanslar, masraflar } = await this.getAcikHareketler(operasyonId);
+    if (avanslar.length === 0 && masraflar.length === 0) return null;
+    const avansToplam = avanslar.reduce((s, a) => s + parseFloat(a.tutar), 0);
+    const masrafToplam = masraflar.reduce((s, m) => s + parseFloat(m.tutar), 0);
+    const kapanisBakiye = await this.getOperasyonBakiye(operasyonId);
+    const acilisBakiye = Math.round((kapanisBakiye - (avansToplam - masrafToplam)) * 100) / 100;
+    const [kapanis] = await db.insert(operasyonGunKapanis).values({
+      operasyonId, gunTarihi,
+      acilisBakiye: acilisBakiye.toFixed(2), avansToplam: avansToplam.toFixed(2),
+      masrafToplam: masrafToplam.toFixed(2), kapanisBakiye: kapanisBakiye.toFixed(2), durum: "kapali",
+    }).returning();
+    await db.update(operasyonAvanslar).set({ kapanisId: kapanis.id })
+      .where(and(eq(operasyonAvanslar.operasyonId, operasyonId), sql`${operasyonAvanslar.kapanisId} IS NULL`));
+    await db.update(operasyonMasraflar).set({ kapanisId: kapanis.id })
+      .where(and(eq(operasyonMasraflar.operasyonId, operasyonId), sql`${operasyonMasraflar.kapanisId} IS NULL`));
+    return kapanis;
+  }
+
+  async getKapanislar(operasyonId: string): Promise<Array<OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>> {
+    const kapanislar = await db.select().from(operasyonGunKapanis)
+      .where(eq(operasyonGunKapanis.operasyonId, operasyonId))
+      .orderBy(desc(operasyonGunKapanis.kapanisZamani));
+    if (kapanislar.length === 0) return [];
+    const ids = kapanislar.map((k) => k.id);
+    const avanslar = await db.select().from(operasyonAvanslar).where(inArray(operasyonAvanslar.kapanisId, ids));
+    const masraflar = await db.select().from(operasyonMasraflar).where(inArray(operasyonMasraflar.kapanisId, ids));
+    const avMap = new Map<string, OperasyonAvans[]>();
+    for (const a of avanslar) { if (!a.kapanisId) continue; const arr = avMap.get(a.kapanisId) ?? []; arr.push(a); avMap.set(a.kapanisId, arr); }
+    const maMap = new Map<string, OperasyonMasraf[]>();
+    for (const m of masraflar) { if (!m.kapanisId) continue; const arr = maMap.get(m.kapanisId) ?? []; arr.push(m); maMap.set(m.kapanisId, arr); }
+    return kapanislar.map((k) => ({ ...k, avanslar: avMap.get(k.id) ?? [], masraflar: maMap.get(k.id) ?? [] }));
+  }
+
+  async getKapanis(id: string): Promise<OperasyonGunKapanis | undefined> {
+    const [k] = await db.select().from(operasyonGunKapanis).where(eq(operasyonGunKapanis.id, id)).limit(1);
+    return k;
+  }
+
+  async geriAc(kapanisId: string, geriAcanId: string): Promise<OperasyonGunKapanis | null> {
+    const [k] = await db.update(operasyonGunKapanis)
+      .set({ durum: "geri_acildi", geriAcanId })
+      .where(eq(operasyonGunKapanis.id, kapanisId)).returning();
+    if (!k) return null;
+    await db.update(operasyonAvanslar).set({ kapanisId: null }).where(eq(operasyonAvanslar.kapanisId, kapanisId));
+    await db.update(operasyonMasraflar).set({ kapanisId: null }).where(eq(operasyonMasraflar.kapanisId, kapanisId));
+    return k;
   }
 }
 
