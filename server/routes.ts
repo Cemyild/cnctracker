@@ -107,6 +107,9 @@ const uploadMizanMemory = multer({ storage: multer.memoryStorage() });
 // Beyanname Excel — memory storage; upsert route handler'ında yapılır
 const uploadBeyannameMemory = multer({ storage: multer.memoryStorage() });
 
+// Ödeme firmaları Excel içe aktarımı (bellekte; ay/yıl yok)
+const uploadOdemeSirketExcel = multer({ storage: multer.memoryStorage() });
+
 // Konşimento analizi — memory storage: analiz aşamasında diske yazılmaz
 const uploadKonsimentoMemory = multer({
   storage: multer.memoryStorage(),
@@ -4694,6 +4697,71 @@ export async function registerRoutes(
     }
   });
 
+  // Yönetim tablosu — tüm firmalar (aktif+pasif), ad sıralı
+  app.get("/api/portal/odeme-sirketleri/tumu", requireMuhasebe, async (_req, res) => {
+    try {
+      res.json(await storage.getOdemeSirketleriTumu());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Elle firma ekleme
+  app.post("/api/portal/odeme-sirketleri", requireMuhasebe, async (req, res) => {
+    try {
+      const { ad, iban, banka, vergiNo, notlar } = req.body || {};
+      if (!String(ad ?? "").trim()) return res.status(400).json({ error: "Firma adı zorunlu" });
+      const yeni = await storage.createOdemeSirketi({
+        ad: String(ad), iban, banka, vergiNo, notlar,
+      });
+      if (!yeni) return res.status(409).json({ error: "Bu firma zaten kayıtlı" });
+      res.json(yeni);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Firma güncelleme (IBAN tamamlama + aktif/pasif)
+  app.put("/api/portal/odeme-sirketleri/:id", requireMuhasebe, async (req, res) => {
+    try {
+      const { ad, iban, banka, vergiNo, notlar, aktif } = req.body || {};
+      const data: any = {};
+      if (ad !== undefined) data.ad = String(ad);
+      if (iban !== undefined) data.iban = iban;
+      if (banka !== undefined) data.banka = banka;
+      if (vergiNo !== undefined) data.vergiNo = vergiNo;
+      if (notlar !== undefined) data.notlar = notlar;
+      if (aktif !== undefined) data.aktif = aktif === true || aktif === "true";
+      const guncel = await storage.updateOdemeSirketi(req.params.id, data);
+      if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(guncel);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Excel içe aktarım — başlıklar: Firma Adı | IBAN | Banka | Vergi/TC No | Not
+  app.post("/api/portal/odeme-sirketleri/excel", requireMuhasebe, uploadOdemeSirketExcel.single("excel"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Dosya yüklenmedi" });
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[];
+      // İlk satır başlık — atla. A:Ad B:IBAN C:Banka D:VergiNo E:Not
+      const rows = rawData.slice(1).map((r) => ({
+        ad: String(r[0] ?? "").trim(),
+        iban: r[1] != null ? String(r[1]).trim() : null,
+        banka: r[2] != null ? String(r[2]).trim() : null,
+        vergiNo: r[3] != null ? String(r[3]).trim() : null,
+        notlar: r[4] != null ? String(r[4]).trim() : null,
+      })).filter((r) => r.ad);
+      const sonuc = await storage.bulkUpsertOdemeSirketleri(rows);
+      res.json(sonuc);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   app.post(
     "/api/portal/talepler",
     requirePortal,
@@ -4805,12 +4873,11 @@ export async function registerRoutes(
           yukleyenId: ben.id,
         });
       }
-      // Onaylanan depo alacaklısını öneri listesine kaydet (best-effort — talebi bozmaz)
-      if (odemeTipi === "depo_teminat") {
-        storage.upsertOdemeSirketi(alacakliStr).catch((e) =>
-          console.warn(`[odeme-sirketleri] upsert hatası: ${e.message}`),
-        );
-      }
+      // Girilen alacaklıyı firma listesine kaydet (best-effort — talebi bozmaz)
+      storage.upsertOdemeSirketi(alacakliStr, {
+        iban: iban ? String(iban).trim() : null,
+        kaynak: odemeTipi === "depo_teminat" ? "depo" : "temsilci",
+      }).catch((e) => console.warn(`[odeme-sirketleri] upsert hatası: ${e.message}`));
       res.json(talep);
     } catch (e: any) {
       yuklenenleriSil();
@@ -5096,12 +5163,11 @@ export async function registerRoutes(
             yukleyenId: ben.id,
           });
         }
-        // Onaylanan depo alacaklısını öneri listesine kaydet (best-effort — talebi bozmaz)
-        if (odemeTipi === "depo_teminat") {
-          storage.upsertOdemeSirketi(alacakliStr).catch((e) =>
-            console.warn(`[odeme-sirketleri] upsert hatası: ${e.message}`),
-          );
-        }
+        // Girilen alacaklıyı firma listesine kaydet (best-effort — kaydı bozmaz)
+        storage.upsertOdemeSirketi(alacakliStr, {
+          iban: iban ? String(iban).trim() : null,
+          kaynak: "muhasebe",
+        }).catch((e) => console.warn(`[odeme-sirketleri] upsert hatası: ${e.message}`));
         res.json(talep);
       } catch (e: any) {
         yuklenenleriSil();
