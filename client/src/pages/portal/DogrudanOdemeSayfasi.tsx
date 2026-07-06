@@ -1,7 +1,7 @@
 import { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import type { Beyanname, MasrafTuru, OdemeSirketi } from "@shared/schema";
+import type { Beyanname, MasrafTuru, OdemeSirketi, OdemeSirketiDetay } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIban, firmaParaBirimleri } from "./portalUtils";
+import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIbanlariByPB, firmaIbanOzet } from "./portalUtils";
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 
 // Muhasebenin talepsiz ödeme girişi — tek adımda "Ödendi" kaydı oluşur (dekont zorunlu).
@@ -24,7 +24,7 @@ export default function DogrudanOdemeSayfasi() {
   const { data: masrafTurleri = [] } = useQuery<MasrafTuru[]>({
     queryKey: ["/api/portal/masraf-turleri"],
   });
-  const { data: odemeSirketleri = [] } = useQuery<OdemeSirketi[]>({
+  const { data: odemeSirketleri = [] } = useQuery<OdemeSirketiDetay[]>({
     queryKey: ["/api/portal/odeme-sirketleri"],
   });
 
@@ -63,27 +63,36 @@ export default function DogrudanOdemeSayfasi() {
     () => (tamFirma ? [] : benzerFirmalar(alacakli, odemeSirketleri)),
     [tamFirma, alacakli, odemeSirketleri],
   );
+  // Firmanın seçili dövizdeki IBAN'ları: 1 → otomatik dolar; >1 → dropdown seçimi; 0 → elle
+  const ibanSecenekleri = useMemo(
+    () => (tamFirma ? firmaIbanlariByPB(tamFirma, paraBirimi) : []),
+    [tamFirma, paraBirimi],
+  );
   useEffect(() => {
     if (!tamFirma) return;
-    const otoIban = firmaIban(tamFirma, paraBirimi);
-    // Yalnız otomatik doldurulmuş (veya boş) IBAN'a dokun — elle yazılanı ezme
     const otomatikDoldurulabilir = !iban.trim() || iban === sonIbanOnerisi.current;
     if (!otomatikDoldurulabilir) return;
-    if (otoIban) {
-      setIban(otoIban);
-      sonIbanOnerisi.current = otoIban;
+    if (ibanSecenekleri.length === 1) {
+      setIban(ibanSecenekleri[0].iban);
+      sonIbanOnerisi.current = ibanSecenekleri[0].iban;
     } else if (sonIbanOnerisi.current && iban === sonIbanOnerisi.current) {
-      // Seçili döviz için IBAN yok → önceki otomatik IBAN'ı temizle (yanlış döviz kalmasın)
+      // 0 veya çok seçenek → önceki otomatik IBAN'ı temizle (çokta insan seçecek)
       setIban("");
       sonIbanOnerisi.current = null;
     }
-  }, [tamFirma, paraBirimi]); // firma VEYA para birimi değişince
+  }, [tamFirma, paraBirimi, ibanSecenekleri]);
 
-  const firmaSec = (f: typeof odemeSirketleri[number]) => {
+  const ibanSecimi = (secilenIban: string) => {
+    setIban(secilenIban);
+    sonIbanOnerisi.current = secilenIban;
+  };
+
+  const firmaSec = (f: OdemeSirketiDetay) => {
     setAlacakli(f.ad);
     sonAlacakliOnerisi.current = f.ad;
-    const secIban = firmaIban(f, paraBirimi);
-    if (secIban) { setIban(secIban); sonIbanOnerisi.current = secIban; }
+    const secenekler = firmaIbanlariByPB(f, paraBirimi);
+    if (secenekler.length === 1) { setIban(secenekler[0].iban); sonIbanOnerisi.current = secenekler[0].iban; }
+    // çok/0 → temsilci dropdown'dan/elle seçer
   };
 
   // Son GEÇERLİ öneriyi ref'te izle: dosya değişimindeki ara null-öneri çağrısı
@@ -325,9 +334,24 @@ export default function DogrudanOdemeSayfasi() {
                       data-testid={`cip-firma-${i}`}
                     >
                       {f.ad}
-                      {firmaParaBirimleri(f).length > 0 ? ` · ${firmaParaBirimleri(f).join(", ")}` : " · IBAN yok"}
+                      {firmaIbanOzet(f).length > 0
+                        ? ` · ${firmaIbanOzet(f).map((o) => `${o.paraBirimi}${o.adet > 1 ? `×${o.adet}` : ""}`).join(", ")}`
+                        : " · IBAN yok"}
                     </button>
                   ))}
+                </div>
+              )}
+              {ibanSecenekleri.length > 1 && (
+                <div className="pt-1" data-testid="alan-iban-secim">
+                  <Label className="text-xs text-muted-foreground">Bu firmada {paraBirimi} için {ibanSecenekleri.length} hesap — birini seçin</Label>
+                  <Select value={iban} onValueChange={ibanSecimi}>
+                    <SelectTrigger data-testid="select-firma-iban"><SelectValue placeholder="IBAN seçin" /></SelectTrigger>
+                    <SelectContent>
+                      {ibanSecenekleri.map((s) => (
+                        <SelectItem key={s.id} value={s.iban}>{s.etiket || "—"} · …{s.iban.slice(-4)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
             </div>

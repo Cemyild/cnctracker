@@ -107,17 +107,17 @@ export function firmaBenzerlik(a: string, b: string): number {
   return Math.max(jaccard, 0.6 * overlap);
 }
 
-export function tamEslesme(girilen: string, firmalar: OdemeSirketi[]): OdemeSirketi | null {
+export function tamEslesme<T extends OdemeSirketi>(girilen: string, firmalar: T[]): T | null {
   const n = firmaNormalize(girilen);
   if (!n) return null;
   return firmalar.find((f) => firmaNormalize(f.ad) === n) ?? null;
 }
 
-export function benzerFirmalar(
+export function benzerFirmalar<T extends OdemeSirketi>(
   girilen: string,
-  firmalar: OdemeSirketi[],
+  firmalar: T[],
   opts?: { esik?: number; adet?: number },
-): OdemeSirketi[] {
+): T[] {
   const esik = opts?.esik ?? 0.34;
   const adet = opts?.adet ?? 3;
   const n = firmaNormalize(girilen);
