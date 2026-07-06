@@ -4725,11 +4725,9 @@ export async function registerRoutes(
   // Elle firma ekleme
   app.post("/api/portal/odeme-sirketleri", requireMuhasebe, async (req, res) => {
     try {
-      // iban: eski F1.9 frontend'i tek IBAN gönderir — storage TRY'ye köprüler (kısmi
-      // deploy'da bile IBAN düşmesin; F1.10 frontend'i ibanTry/ibanUsd gönderir).
-      const { ad, iban, ibanTry, ibanUsd, banka, vergiNo, notlar } = req.body || {};
+      const { ad, vergiNo, notlar, ibanlar } = req.body || {};
       if (!String(ad ?? "").trim()) return res.status(400).json({ error: "Firma adı zorunlu" });
-      const yeni = await storage.createOdemeSirketi({ ad: String(ad), iban, ibanTry, ibanUsd, banka, vergiNo, notlar });
+      const yeni = await storage.createOdemeSirketi({ ad: String(ad), vergiNo, notlar, ibanlar: Array.isArray(ibanlar) ? ibanlar : [] });
       if (!yeni) return res.status(409).json({ error: "Bu firma zaten kayıtlı" });
       res.json(yeni);
     } catch (e: any) {
@@ -4740,16 +4738,13 @@ export async function registerRoutes(
   // Firma güncelleme (IBAN tamamlama + aktif/pasif)
   app.put("/api/portal/odeme-sirketleri/:id", requireMuhasebe, async (req, res) => {
     try {
-      const { ad, iban, ibanTry, ibanUsd, banka, vergiNo, notlar, aktif } = req.body || {};
+      const { ad, vergiNo, notlar, aktif, ibanlar } = req.body || {};
       const data: any = {};
       if (ad !== undefined) data.ad = String(ad);
-      if (iban !== undefined) data.iban = iban; // eski frontend yedeği → storage ibanTry'ye köprüler
-      if (ibanTry !== undefined) data.ibanTry = ibanTry;
-      if (ibanUsd !== undefined) data.ibanUsd = ibanUsd;
-      if (banka !== undefined) data.banka = banka;
       if (vergiNo !== undefined) data.vergiNo = vergiNo;
       if (notlar !== undefined) data.notlar = notlar;
       if (aktif !== undefined) data.aktif = aktif === true || aktif === "true";
+      if (Array.isArray(ibanlar)) data.ibanlar = ibanlar;
       const guncel = await storage.updateOdemeSirketi(req.params.id, data);
       if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
       res.json(guncel);
@@ -4758,26 +4753,38 @@ export async function registerRoutes(
     }
   });
 
-  // Excel içe aktarım — başlıklar: Firma Adı | IBAN TRY | IBAN USD | Banka | Vergi/TC No | Not
+  // Excel içe aktarım — her IBAN bir satır: Firma Adı | Para Birimi | IBAN | Etiket | Vergi/TC No | Not
   app.post("/api/portal/odeme-sirketleri/excel", requireMuhasebe, uploadOdemeSirketExcel.single("excel"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "Dosya yüklenmedi" });
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[];
-      // İlk satır başlık — atla. A:Ad B:IBAN TRY C:IBAN USD D:Banka E:VergiNo F:Not
+      // İlk satır başlık — atla. A:Ad B:Para Birimi C:IBAN D:Etiket E:VergiNo F:Not
       const rows = rawData.slice(1).map((r) => ({
         ad: String(r[0] ?? "").trim(),
-        ibanTry: r[1] != null ? String(r[1]).trim() : null,
-        ibanUsd: r[2] != null ? String(r[2]).trim() : null,
-        banka: r[3] != null ? String(r[3]).trim() : null,
+        paraBirimi: String(r[1] ?? "").trim(),
+        iban: String(r[2] ?? "").trim(),
+        etiket: r[3] != null ? String(r[3]).trim() : null,
         vergiNo: r[4] != null ? String(r[4]).trim() : null,
         notlar: r[5] != null ? String(r[5]).trim() : null,
       })).filter((r) => r.ad);
-      const sonuc = await storage.bulkUpsertOdemeSirketleri(rows);
+      const sonuc = await storage.bulkUpsertFirmaIbanRows(rows);
       res.json(sonuc);
     } catch (e: any) {
       res.status(400).json({ error: e.message });
+    }
+  });
+
+  // Excel şablonu indir (doğru başlıklar + örnek satırlar)
+  app.get("/api/portal/odeme-sirketleri/sablon", requireMuhasebe, async (_req, res) => {
+    try {
+      const buf = await storage.firmaIbanlariExcelSablonu();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", 'attachment; filename="odeme-firmalari-sablon.xlsx"');
+      res.end(buf);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 
