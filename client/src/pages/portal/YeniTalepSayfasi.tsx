@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { type PortalMe } from "./PortalApp";
-import { formatTarih, formatPara, tamEslesme, benzerFirmalar } from "./portalUtils";
+import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIban, firmaParaBirimleri } from "./portalUtils";
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 
 type KalemDurum = "bekliyor" | "gonderiliyor" | "gonderildi" | "hata";
@@ -100,23 +100,25 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   );
   useEffect(() => {
     if (!tamFirma) return;
+    const otoIban = firmaIban(tamFirma, paraBirimi);
     // Yalnız otomatik doldurulmuş (veya boş) IBAN'a dokun — elle yazılanı ezme
     const otomatikDoldurulabilir = !iban.trim() || iban === sonIbanOnerisi.current;
     if (!otomatikDoldurulabilir) return;
-    if (tamFirma.iban) {
-      setIban(tamFirma.iban);
-      sonIbanOnerisi.current = tamFirma.iban;
+    if (otoIban) {
+      setIban(otoIban);
+      sonIbanOnerisi.current = otoIban;
     } else if (sonIbanOnerisi.current && iban === sonIbanOnerisi.current) {
-      // Yeni firmanın IBAN'ı yok → önceki firmadan otomatik dolan IBAN'ı temizle
+      // Seçili döviz için IBAN yok → önceki otomatik IBAN'ı temizle (yanlış döviz kalmasın)
       setIban("");
       sonIbanOnerisi.current = null;
     }
-  }, [tamFirma]); // yalnız tam eşleşme değişince
+  }, [tamFirma, paraBirimi]); // firma VEYA para birimi değişince
 
   const firmaSec = (f: typeof odemeSirketleri[number]) => {
     setAlacakli(f.ad);
     sonAlacakliOnerisi.current = f.ad;
-    if (f.iban) { setIban(f.iban); sonIbanOnerisi.current = f.iban; }
+    const secIban = firmaIban(f, paraBirimi);
+    if (secIban) { setIban(secIban); sonIbanOnerisi.current = secIban; }
   };
 
   // Para birimi bazında görsel toplamlar (tüm listelenen kalemler)
@@ -453,7 +455,8 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                         className="text-xs rounded-full border px-2 py-0.5 hover:bg-accent"
                         data-testid={`cip-firma-${i}`}
                       >
-                        {f.ad}{f.iban ? ` · …${f.iban.slice(-4)}` : " · IBAN yok"}
+                        {f.ad}
+                        {firmaParaBirimleri(f).length > 0 ? ` · ${firmaParaBirimleri(f).join(", ")}` : " · IBAN yok"}
                       </button>
                     ))}
                   </div>
