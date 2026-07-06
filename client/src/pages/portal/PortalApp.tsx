@@ -12,6 +12,7 @@ import DepoOdemeleriSayfasi from "./DepoOdemeleriSayfasi";
 import DogrudanOdemeSayfasi from "./DogrudanOdemeSayfasi";
 import FirmalarSayfasi from "./FirmalarSayfasi";
 import OperasyonKasaSayfasi from "./OperasyonKasaSayfasi";
+import OperasyonKapanislarSayfasi from "./OperasyonKapanislarSayfasi";
 import { type TalepDetay } from "./portalUtils";
 import {
   useTalepBildirimleri, bildirimIzniIste, type SayfaAnahtari,
@@ -101,6 +102,9 @@ function PortalIcerik({ me }: { me: PortalMe }) {
               )}
               {me.rol === "operasyon" && (
                 <Route path="/portal/kasam" component={OperasyonKasaSayfasi} />
+              )}
+              {me.rol === "operasyon" && (
+                <Route path="/portal/kapanislarim" component={OperasyonKapanislarSayfasi} />
               )}
               <Route>
                 <Redirect to={varsayilanRota} />
