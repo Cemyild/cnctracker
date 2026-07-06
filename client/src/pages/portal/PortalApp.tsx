@@ -19,7 +19,7 @@ import {
 export type PortalMe = {
   id: string;
   adSoyad: string;
-  rol: "temsilci" | "muhasebe";
+  rol: "temsilci" | "muhasebe" | "operasyon";
   avAdi: string | null;
 };
 
@@ -30,6 +30,9 @@ const SAYFA_BASLIKLARI: Record<string, string> = {
   "/portal/depo": "Depo Ödemeleri",
   "/portal/dogrudan-odeme": "Doğrudan Ödeme",
   "/portal/firmalar": "Ödeme Firmaları",
+  "/portal/kasam": "Kasam",
+  "/portal/kapanislarim": "Kapanışlarım",
+  "/portal/sube-masraf": "Şube Masraf",
 };
 
 const ROTA_SAYFASI: Record<string, SayfaAnahtari> = {
@@ -61,7 +64,7 @@ function PortalIcerik({ me }: { me: PortalMe }) {
     queryClient.setQueryData(["/api/portal/me"], null);
   };
 
-  const varsayilanRota = me.rol === "muhasebe" ? "/portal/gelen-talepler" : "/portal/yeni-talep";
+  const varsayilanRota = me.rol === "muhasebe" ? "/portal/gelen-talepler" : me.rol === "operasyon" ? "/portal/kasam" : "/portal/yeni-talep";
   const baslik = SAYFA_BASLIKLARI[location] ?? "Ödemeler Portalı";
 
   return (

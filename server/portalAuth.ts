@@ -26,7 +26,7 @@ export async function dogrulaSifre(sifre: string, kayitliHash: string): Promise<
 declare module "express-session" {
   interface SessionData {
     portalUserId?: string;
-    portalRol?: string; // 'temsilci' | 'muhasebe'
+    portalRol?: string; // 'temsilci' | 'muhasebe' | 'operasyon'
   }
 }
 

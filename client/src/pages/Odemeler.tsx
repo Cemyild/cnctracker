@@ -199,6 +199,7 @@ function KullaniciFormDialog({
                 <SelectContent>
                   <SelectItem value="temsilci">Müşteri Temsilcisi</SelectItem>
                   <SelectItem value="muhasebe">Muhasebe</SelectItem>
+                  <SelectItem value="operasyon">Operasyon</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -274,7 +275,7 @@ function Kullanicilar() {
               <TableRow key={k.id} data-testid={`row-kullanici-${k.id}`}>
                 <TableCell>{k.kullaniciAdi}</TableCell>
                 <TableCell>{k.adSoyad}</TableCell>
-                <TableCell>{k.rol === "muhasebe" ? "Muhasebe" : "Temsilci"}</TableCell>
+                <TableCell>{k.rol === "muhasebe" ? "Muhasebe" : k.rol === "operasyon" ? "Operasyon" : "Temsilci"}</TableCell>
                 <TableCell>{k.avAdi ?? "—"}</TableCell>
                 <TableCell>
                   <Switch

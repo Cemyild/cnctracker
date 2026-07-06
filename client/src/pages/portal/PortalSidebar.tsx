@@ -5,7 +5,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut } from "lucide-react";
+import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut, Wallet, CalendarCheck, Building } from "lucide-react";
 import { type PortalMe } from "./PortalApp";
 import { type Rozetler, type SayfaAnahtari } from "./useTalepBildirimleri";
 
@@ -26,13 +26,19 @@ const MUHASEBE_MENU: MenuOgesi[] = [
   { title: "Depo Ödemeleri", href: "/portal/depo", icon: Warehouse, rozetAnahtari: "depo" },
   { title: "Doğrudan Ödeme", href: "/portal/dogrudan-odeme", icon: Banknote },
   { title: "Ödeme Firmaları", href: "/portal/firmalar", icon: Building2 },
+  { title: "Şube Masraf", href: "/portal/sube-masraf", icon: Building },
+];
+
+const OPERASYON_MENU: MenuOgesi[] = [
+  { title: "Kasam", href: "/portal/kasam", icon: Wallet },
+  { title: "Kapanışlarım", href: "/portal/kapanislarim", icon: CalendarCheck },
 ];
 
 export default function PortalSidebar({
   me, rozetler, cikisYap,
 }: { me: PortalMe; rozetler: Rozetler; cikisYap: () => void }) {
   const [location] = useLocation();
-  const menu = me.rol === "muhasebe" ? MUHASEBE_MENU : TEMSILCI_MENU;
+  const menu = me.rol === "muhasebe" ? MUHASEBE_MENU : me.rol === "operasyon" ? OPERASYON_MENU : TEMSILCI_MENU;
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -82,7 +88,7 @@ export default function PortalSidebar({
             {me.adSoyad}
           </span>
           <span className="text-xs text-muted-foreground truncate">
-            {me.rol === "muhasebe" ? "Muhasebe" : "Müşteri Temsilcisi"}
+            {me.rol === "muhasebe" ? "Muhasebe" : me.rol === "operasyon" ? "Operasyon" : "Müşteri Temsilcisi"}
           </span>
         </div>
         <Button

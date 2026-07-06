@@ -4649,7 +4649,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Şifre en az 4 karakter olmalı" });
       }
       const parsed = insertPortalKullaniciSchema.omit({ sifreHash: true }).parse(alanlar);
-      if (!["temsilci", "muhasebe"].includes(parsed.rol)) {
+      if (!["temsilci", "muhasebe", "operasyon"].includes(parsed.rol)) {
         return res.status(400).json({ error: "Geçersiz rol" });
       }
       const mevcut = await storage.getPortalKullaniciByKullaniciAdi(parsed.kullaniciAdi);
@@ -4672,7 +4672,7 @@ export async function registerRoutes(
       if (typeof req.body?.adSoyad === "string" && req.body.adSoyad.trim()) {
         izinli.adSoyad = req.body.adSoyad.trim();
       }
-      if (["temsilci", "muhasebe"].includes(req.body?.rol)) izinli.rol = req.body.rol;
+      if (["temsilci", "muhasebe", "operasyon"].includes(req.body?.rol)) izinli.rol = req.body.rol;
       if (req.body?.avAdi !== undefined) {
         izinli.avAdi = req.body.avAdi ? String(req.body.avAdi).trim() : null;
       }
