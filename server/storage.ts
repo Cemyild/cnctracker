@@ -397,8 +397,12 @@ export interface IStorage {
   getOdemeTalep(id: string): Promise<OdemeTalep | undefined>;
   updateOdemeTalep(id: string, t: Partial<InsertOdemeTalep>): Promise<OdemeTalep | undefined>;
   createOdemeBelge(b: InsertOdemeBelge): Promise<OdemeBelge>;
-  upsertOdemeSirketi(ad: string): Promise<void>;
+  upsertOdemeSirketi(ad: string, opts?: { iban?: string | null; kaynak?: string }): Promise<void>;
   getOdemeSirketleri(): Promise<OdemeSirketi[]>;
+  getOdemeSirketleriTumu(): Promise<OdemeSirketi[]>;
+  createOdemeSirketi(data: { ad: string; iban?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }): Promise<OdemeSirketi | null>;
+  updateOdemeSirketi(id: string, data: Partial<{ ad: string; iban: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean }>): Promise<OdemeSirketi | null>;
+  bulkUpsertOdemeSirketleri(rows: { ad: string; iban?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -3512,12 +3516,18 @@ export class DatabaseStorage implements IStorage {
     return yeni;
   }
 
-  async upsertOdemeSirketi(ad: string): Promise<void> {
+  async upsertOdemeSirketi(
+    ad: string,
+    opts?: { iban?: string | null; kaynak?: string },
+  ): Promise<void> {
     const temiz = ad.trim();
     if (!temiz) return;
+    const ibanTemiz = opts?.iban ? String(opts.iban).trim() : null;
+    // Insert'te iban+kaynak yazılır; ÇAKIŞMADA yalnız sayaç+sonKullanim artar
+    // (muhasebenin girdiği iban/banka/vergiNo/kaynak ASLA ezilmez).
     await db
       .insert(odemeSirketleri)
-      .values({ ad: temiz })
+      .values({ ad: temiz, iban: ibanTemiz, kaynak: opts?.kaynak ?? "temsilci" })
       .onConflictDoUpdate({
         target: odemeSirketleri.ad,
         set: {
@@ -3534,6 +3544,83 @@ export class DatabaseStorage implements IStorage {
       .where(eq(odemeSirketleri.aktif, true))
       .orderBy(desc(odemeSirketleri.kullanimSayisi), desc(odemeSirketleri.sonKullanim))
       .limit(100);
+  }
+
+  async getOdemeSirketleriTumu(): Promise<OdemeSirketi[]> {
+    return db.select().from(odemeSirketleri).orderBy(asc(odemeSirketleri.ad));
+  }
+
+  async createOdemeSirketi(data: {
+    ad: string; iban?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null;
+  }): Promise<OdemeSirketi | null> {
+    const temiz = data.ad.trim();
+    if (!temiz) return null;
+    const mevcut = await db.select().from(odemeSirketleri).where(eq(odemeSirketleri.ad, temiz)).limit(1);
+    if (mevcut.length > 0) return null; // ad çakışması → route 409
+    const [yeni] = await db
+      .insert(odemeSirketleri)
+      .values({
+        ad: temiz,
+        iban: data.iban?.trim() || null,
+        banka: data.banka?.trim() || null,
+        vergiNo: data.vergiNo?.trim() || null,
+        notlar: data.notlar?.trim() || null,
+        kaynak: "muhasebe",
+      })
+      .returning();
+    return yeni;
+  }
+
+  async updateOdemeSirketi(
+    id: string,
+    data: Partial<{ ad: string; iban: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean }>,
+  ): Promise<OdemeSirketi | null> {
+    const set: Record<string, unknown> = {};
+    if (data.ad !== undefined) set.ad = data.ad.trim();
+    if (data.iban !== undefined) set.iban = data.iban?.trim() || null;
+    if (data.banka !== undefined) set.banka = data.banka?.trim() || null;
+    if (data.vergiNo !== undefined) set.vergiNo = data.vergiNo?.trim() || null;
+    if (data.notlar !== undefined) set.notlar = data.notlar?.trim() || null;
+    if (data.aktif !== undefined) set.aktif = data.aktif;
+    if (Object.keys(set).length === 0) {
+      const [mevcut] = await db.select().from(odemeSirketleri).where(eq(odemeSirketleri.id, id)).limit(1);
+      return mevcut ?? null;
+    }
+    const [guncel] = await db.update(odemeSirketleri).set(set).where(eq(odemeSirketleri.id, id)).returning();
+    return guncel ?? null;
+  }
+
+  async bulkUpsertOdemeSirketleri(
+    rows: { ad: string; iban?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[],
+  ): Promise<{ eklendi: number; guncellendi: number; atlandi: number }> {
+    let eklendi = 0, guncellendi = 0, atlandi = 0;
+    for (const row of rows) {
+      const temiz = row.ad?.trim();
+      if (!temiz) { atlandi++; continue; }
+      const mevcut = await db.select().from(odemeSirketleri).where(eq(odemeSirketleri.ad, temiz)).limit(1);
+      // Muhasebe Excel'i YETKİLİ: çakışmada dolu gelen alanları GÜNCELLER.
+      const alanlar = {
+        iban: row.iban?.trim() || null,
+        banka: row.banka?.trim() || null,
+        vergiNo: row.vergiNo?.trim() || null,
+        notlar: row.notlar?.trim() || null,
+      };
+      if (mevcut.length > 0) {
+        const set: Record<string, unknown> = {};
+        if (alanlar.iban) set.iban = alanlar.iban;
+        if (alanlar.banka) set.banka = alanlar.banka;
+        if (alanlar.vergiNo) set.vergiNo = alanlar.vergiNo;
+        if (alanlar.notlar) set.notlar = alanlar.notlar;
+        if (Object.keys(set).length > 0) {
+          await db.update(odemeSirketleri).set(set).where(eq(odemeSirketleri.ad, temiz));
+        }
+        guncellendi++;
+      } else {
+        await db.insert(odemeSirketleri).values({ ad: temiz, ...alanlar, kaynak: "muhasebe" });
+        eklendi++;
+      }
+    }
+    return { eklendi, guncellendi, atlandi };
   }
 }
 

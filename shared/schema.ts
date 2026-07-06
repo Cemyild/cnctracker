@@ -1066,10 +1066,16 @@ export const insertOdemeBelgeSchema = createInsertSchema(odemeBelgeleri).omit({
 export type InsertOdemeBelge = z.infer<typeof insertOdemeBelgeSchema>;
 export type OdemeBelge = typeof odemeBelgeleri.$inferSelect;
 
-// Onaylanan depo alacaklıları — analiz yanlışsa temsilci öneri listesinden seçer.
+// Ödeme yapılacak firmalar — muhasebe elle/Excel girer; temsilci talepte seçer.
+// Depo onaylarından ve F1.8 çoklu-kalem gönderiminden de otomatik birikir.
 export const odemeSirketleri = pgTable("odeme_sirketleri", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ad: text("ad").notNull().unique(),
+  iban: text("iban"),
+  banka: text("banka"),
+  vergiNo: text("vergi_no"),
+  notlar: text("notlar"), // "not" SQL rezerve kelimesi — "notlar" kullanılır
+  kaynak: text("kaynak").notNull().default("muhasebe"), // muhasebe | temsilci | depo
   kullanimSayisi: integer("kullanim_sayisi").notNull().default(1),
   sonKullanim: timestamp("son_kullanim").defaultNow(),
   aktif: boolean("aktif").notNull().default(true),
