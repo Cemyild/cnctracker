@@ -132,6 +132,18 @@ const odemeBelgeStorage = multer.diskStorage({
 });
 const uploadOdemeBelge = multer({ storage: odemeBelgeStorage });
 
+const operasyonBelgeStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = "uploads/operasyon";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, file, cb) => {
+    cb(null, `op-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`);
+  },
+});
+const uploadOperasyonBelge = multer({ storage: operasyonBelgeStorage });
+
 // Multer Latin-1 default'undan kaynaklanan UTF-8 mojibake'i düzeltir.
 // Türkçe dosya isimlerinde "ŞUBAT" → "ÅUBAT" gibi bozulmaları çözer.
 function fixUploadFilename(name: string): string {
@@ -172,7 +184,7 @@ import { PDFParse } from "pdf-parse";
 import { getTCMBExchangeRate, normalizeCurrencyCode } from "./currency"; // Helper added
 import { processUserQuery, generateNaturalLanguageResponse } from "./lib/openai";
 import { extractPolicyFields } from "./lib/policeOcr";
-import { hashSifre, dogrulaSifre, requirePortal, requireMuhasebe } from "./portalAuth";
+import { hashSifre, dogrulaSifre, requirePortal, requireMuhasebe, requireOperasyon } from "./portalAuth";
 import { konsimentoAnalizEt, analizYapilandirildiMi } from "./konsimentoAnaliz";
 import { insertPortalKullaniciSchema, type PortalKullanici, type InsertPortalKullanici, type Beyanname } from "@shared/schema";
 import type { Request } from "express";
@@ -5212,6 +5224,129 @@ export async function registerRoutes(
       }
     },
   );
+
+  // ---- OPERASYON (kasa sahibi) ----
+  app.get("/api/portal/operasyon/ozet", requireOperasyon, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const bakiye = await storage.getOperasyonBakiye(ben.id);
+      const { avanslar, masraflar } = await storage.getAcikHareketler(ben.id);
+      res.json({ bakiye, avanslar, masraflar });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/portal/operasyon/masraf", requireOperasyon, uploadOperasyonBelge.single("belge"), async (req, res) => {
+    const belge = req.file;
+    const sil = () => { if (belge) fs.promises.unlink(belge.path).catch(() => {}); };
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) { sil(); return res.status(401).json({ error: "Giriş gerekli" }); }
+      const { beyannameId, dosyaYok, masrafTuru, tutar, alacakli, iban, aciklama } = req.body || {};
+      const dosyaYokB = dosyaYok === "true" || dosyaYok === true;
+      const tutarNum = parseTutar(tutar);
+      if (!belge) return res.status(400).json({ error: "Belge (fiş/fatura) zorunlu" });
+      if (tutarNum === null || tutarNum <= 0) { sil(); return res.status(400).json({ error: "Geçerli tutar girin" }); }
+      if (!String(alacakli ?? "").trim()) { sil(); return res.status(400).json({ error: "Alacaklı zorunlu" }); }
+      if (dosyaYokB && !String(aciklama ?? "").trim()) { sil(); return res.status(400).json({ error: "Dosyasız kayıtta açıklama zorunlu" }); }
+      if (!dosyaYokB && !String(beyannameId ?? "").trim()) { sil(); return res.status(400).json({ error: "Beyanname seçin veya 'Dosya yok' işaretleyin" }); }
+      const masraf = await storage.masrafKaydet({
+        operasyonId: ben.id,
+        beyannameId: dosyaYokB ? null : String(beyannameId),
+        dosyaYok: dosyaYokB,
+        masrafTuru: masrafTuru ? String(masrafTuru) : null,
+        tutar: tutarNum,
+        alacakli: String(alacakli).trim(),
+        iban: iban ? String(iban).trim() : null,
+        aciklama: aciklama ? String(aciklama) : null,
+        tarih: bugunYmd(),
+        belgeDosya: belge.path.replace(/\\/g, "/"),
+        belgeAdi: fixUploadFilename(belge.originalname),
+      });
+      // Alacaklıyı firma listesine kaydet (best-effort — F1.x kalıbı)
+      storage.upsertOdemeSirketi(String(alacakli).trim(), { iban: iban ? String(iban).trim() : null, kaynak: "operasyon" }).catch(() => {});
+      res.json(masraf);
+    } catch (e: any) { sil(); res.status(400).json({ error: e.message }); }
+  });
+
+  app.delete("/api/portal/operasyon/masraf/:id", requireOperasyon, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const m = await storage.getOperasyonMasraf(req.params.id);
+      if (!m || m.operasyonId !== ben.id) return res.status(404).json({ error: "Bulunamadı" });
+      if (m.kapanisId) return res.status(409).json({ error: "Kapanmış gün — silinemez" });
+      await storage.masrafSil(m.id);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/portal/operasyon/gunu-kapat", requireOperasyon, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const kapanis = await storage.gunuKapat(ben.id, bugunYmd());
+      if (!kapanis) return res.status(400).json({ error: "Kapatılacak açık hareket yok" });
+      res.json(kapanis);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/portal/operasyon/kapanislar", requireOperasyon, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      res.json(await storage.getKapanislar(ben.id));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---- MUHASEBE: ŞUBE MASRAF (operasyon takip) ----
+  app.get("/api/portal/operasyon-takip", requireMuhasebe, async (_req, res) => {
+    try {
+      const kullanicilar = await storage.getOperasyonKullanicilar();
+      const bugun = bugunYmd();
+      const sonuc = await Promise.all(kullanicilar.map(async (k) => {
+        const bakiye = await storage.getOperasyonBakiye(k.id);
+        const { masraflar } = await storage.getAcikHareketler(k.id);
+        const bugunHarcanan = masraflar.filter((m) => m.tarih === bugun).reduce((s, m) => s + parseFloat(m.tutar), 0);
+        return { id: k.id, adSoyad: k.adSoyad, kullaniciAdi: k.kullaniciAdi, bakiye, bugunHarcanan: Math.round(bugunHarcanan * 100) / 100 };
+      }));
+      res.json(sonuc);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/portal/operasyon-takip/:operasyonId", requireMuhasebe, async (req, res) => {
+    try {
+      const bakiye = await storage.getOperasyonBakiye(req.params.operasyonId);
+      const acik = await storage.getAcikHareketler(req.params.operasyonId);
+      const kapanislar = await storage.getKapanislar(req.params.operasyonId);
+      res.json({ bakiye, acik, kapanislar });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/portal/operasyon-takip/:operasyonId/avans", requireMuhasebe, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const { tutar, aciklama } = req.body || {};
+      const tutarNum = parseTutar(tutar);
+      if (tutarNum === null || tutarNum <= 0) return res.status(400).json({ error: "Geçerli tutar girin" });
+      const avans = await storage.avansYukle({
+        operasyonId: req.params.operasyonId, tutar: tutarNum,
+        aciklama: aciklama ? String(aciklama) : null, tarih: bugunYmd(), gonderenId: ben.id,
+      });
+      res.json(avans);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/portal/operasyon-takip/kapanis/:kapanisId/geri-ac", requireMuhasebe, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const k = await storage.geriAc(req.params.kapanisId, ben.id);
+      if (!k) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(k);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
 
   // ==================== ÖDEMELER: YÖNETİM PANELİ EK ROTALAR ====================
 

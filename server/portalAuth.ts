@@ -75,3 +75,13 @@ export function requireMuhasebe(req: Request, res: Response, next: NextFunction)
   }
   next();
 }
+
+export function requireOperasyon(req: Request, res: Response, next: NextFunction) {
+  if (!req.session.portalUserId) {
+    return res.status(401).json({ error: "Giriş gerekli" });
+  }
+  if (req.session.portalRol !== "operasyon") {
+    return res.status(403).json({ error: "Yetkisiz" });
+  }
+  next();
+}
