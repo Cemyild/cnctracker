@@ -827,6 +827,17 @@ export async function registerRoutes(
     }
   });
 
+  // Tekrarlı yüklemelerden oluşan aynı yakıt giderlerini temizler (her gruptan biri kalır)
+  app.post("/api/araclar/yakit-temizle-tekrar", async (_req, res) => {
+    try {
+      const removed = await storage.removeDuplicateAracGiderler();
+      res.json({ removed });
+    } catch (err) {
+      console.error("Yakıt tekrar temizleme hatası:", err);
+      res.status(500).json({ error: "Tekrarlar temizlenirken hata oluştu" });
+    }
+  });
+
 
   // ============================================================================
   // SİGORTA API'LERİ

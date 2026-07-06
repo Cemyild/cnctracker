@@ -90,6 +90,7 @@ export interface IStorage {
   createAracGider(gider: InsertAracGider): Promise<AracGider>;
   insertAracGiderler(giderler: InsertAracGider[]): Promise<AracGider[]>;
   deleteAracGider(id: string): Promise<void>;
+  removeDuplicateAracGiderler(): Promise<number>;
 
   // Nakliye verileri
   getNakliyeVerileri(): Promise<NakliyeVerisi[]>;
@@ -1050,6 +1051,22 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAracGider(id: string): Promise<void> {
     await db.delete(aracGiderler).where(eq(aracGiderler.id, id));
+  }
+
+  // Aynı (araç, tarih, tutar, açıklama) yakıt satırlarından yalnızca birini bırakır.
+  // Eski format dökümlerde (Satış ID yok → rowHash null) oluşan tekrar kayıtları temizler.
+  async removeDuplicateAracGiderler(): Promise<number> {
+    const res = await db.execute(sql`
+      DELETE FROM arac_giderler a
+      USING arac_giderler b
+      WHERE a.kategori = 'Yakıt' AND b.kategori = 'Yakıt'
+        AND a.arac_id = b.arac_id
+        AND a.tarih = b.tarih
+        AND a.tutar = b.tutar
+        AND coalesce(a.aciklama, '') = coalesce(b.aciklama, '')
+        AND a.ctid > b.ctid
+    `);
+    return res.rowCount ?? 0;
   }
 
   async getNakliyeVerileri(): Promise<NakliyeVerisi[]> {
