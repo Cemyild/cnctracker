@@ -114,6 +114,16 @@ export default function OperasyonTakipSayfasi() {
                     </div>
                   </div>
                   <div className="text-xs text-muted-foreground">Açılış {formatPara(k.acilisBakiye, "TL")} · Avans +{formatPara(k.avansToplam, "TL")} · Masraf −{formatPara(k.masrafToplam, "TL")}</div>
+                  {k.masraflar.length > 0 && (
+                    <div className="border-t mt-1 pt-1 space-y-0.5">
+                      {k.masraflar.map((m) => (
+                        <div key={m.id} className="flex justify-between text-xs">
+                          <span>{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                          <span className="text-destructive">−{formatPara(m.tutar, "TL")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
