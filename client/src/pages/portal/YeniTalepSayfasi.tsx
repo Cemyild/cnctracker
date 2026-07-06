@@ -99,11 +99,17 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
     [tamFirma, alacakli, odemeSirketleri],
   );
   useEffect(() => {
-    if (tamFirma?.iban) {
-      if (!iban.trim() || iban === sonIbanOnerisi.current) {
-        setIban(tamFirma.iban);
-        sonIbanOnerisi.current = tamFirma.iban;
-      }
+    if (!tamFirma) return;
+    // Yalnız otomatik doldurulmuş (veya boş) IBAN'a dokun — elle yazılanı ezme
+    const otomatikDoldurulabilir = !iban.trim() || iban === sonIbanOnerisi.current;
+    if (!otomatikDoldurulabilir) return;
+    if (tamFirma.iban) {
+      setIban(tamFirma.iban);
+      sonIbanOnerisi.current = tamFirma.iban;
+    } else if (sonIbanOnerisi.current && iban === sonIbanOnerisi.current) {
+      // Yeni firmanın IBAN'ı yok → önceki firmadan otomatik dolan IBAN'ı temizle
+      setIban("");
+      sonIbanOnerisi.current = null;
     }
   }, [tamFirma]); // yalnız tam eşleşme değişince
 
@@ -144,6 +150,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
     setDosyalar(null);
     setKonsimento({ ...BOS_KONSIMENTO });
     sonAlacakliOnerisi.current = null;
+    sonIbanOnerisi.current = null;
     setFormSayac((s) => s + 1);
   };
 
@@ -366,6 +373,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                     // Tip değişince konşimento bilgisi geçersiz — sıfırla (yanıltıcı bayat durum kalmasın)
                     setKonsimento({ ...BOS_KONSIMENTO });
                     sonAlacakliOnerisi.current = null;
+                    sonIbanOnerisi.current = null;
                   }}
                 >
                   <SelectTrigger data-testid="select-odeme-tipi">

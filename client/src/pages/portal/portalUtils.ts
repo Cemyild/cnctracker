@@ -81,16 +81,28 @@ function tokenSet(s: string): Set<string> {
   return new Set(firmaNormalize(s).split(" ").filter((t) => t.length >= 2));
 }
 
+// Türk firma adlarında ayırt edici olmayan yaygın kelimeler — tek başlarına
+// paylaşıldıklarında overlap bonusu tetiklemezler (yanlış firma önerisini önler).
+// firmaNormalize ile aynı katlamadan (ı→i) geçirilerek tutulur.
+const JENERIK = new Set(
+  ["lojistik", "ticaret", "nakliyat", "sanayi", "gümrük", "dış", "grup",
+   "taşımacılık", "denizcilik", "uluslararası", "şirketi", "ithalat", "ihracat"]
+    .flatMap((w) => [...tokenSet(w)]),
+);
+
 export function firmaBenzerlik(a: string, b: string): number {
   const A = tokenSet(a), B = tokenSet(b);
   if (A.size === 0 || B.size === 0) return 0;
-  let kesisim = 0;
-  A.forEach((t) => { if (B.has(t)) kesisim++; });
+  let kesisim = 0, ayirtEdiciOrtak = false;
+  A.forEach((t) => { if (B.has(t)) { kesisim++; if (!JENERIK.has(t)) ayirtEdiciOrtak = true; } });
   if (kesisim === 0) return 0;
+  // Yalnız jenerik kelime paylaşımı (ayırt edici ortak token yok) → eşleşme sinyali yok, 0 dön.
+  // (Saf Jaccard'a düşülseydi kısa jenerik sorgularda [ör. tek kelime "Lojistik"] eşiğin
+  // üstünde kalıp yine alakasız firmaları yüzeye çıkarabiliyordu.)
+  if (!ayirtEdiciOrtak) return 0;
   const jaccard = kesisim / (A.size + B.size - kesisim);
   // İçerme (overlap): girilen ad kayıtlı adın alt kümesiyse (ör. "ASAV" ⊂
-  // "ASAV LOJİSTİK HİZMETLERİ") Jaccard uzunluk farkını cezalandırır; overlap
-  // bunu telafi eder — kullanıcı ayırt edici ilk kelimeyi yazınca öneri çıkar.
+  // "ASAV LOJİSTİK HİZMETLERİ") Jaccard uzunluk farkını cezalandırır; overlap telafi eder.
   const overlap = kesisim / Math.min(A.size, B.size);
   return Math.max(jaccard, 0.6 * overlap);
 }

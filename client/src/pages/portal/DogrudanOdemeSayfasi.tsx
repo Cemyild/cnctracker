@@ -64,11 +64,17 @@ export default function DogrudanOdemeSayfasi() {
     [tamFirma, alacakli, odemeSirketleri],
   );
   useEffect(() => {
-    if (tamFirma?.iban) {
-      if (!iban.trim() || iban === sonIbanOnerisi.current) {
-        setIban(tamFirma.iban);
-        sonIbanOnerisi.current = tamFirma.iban;
-      }
+    if (!tamFirma) return;
+    // Yalnız otomatik doldurulmuş (veya boş) IBAN'a dokun — elle yazılanı ezme
+    const otomatikDoldurulabilir = !iban.trim() || iban === sonIbanOnerisi.current;
+    if (!otomatikDoldurulabilir) return;
+    if (tamFirma.iban) {
+      setIban(tamFirma.iban);
+      sonIbanOnerisi.current = tamFirma.iban;
+    } else if (sonIbanOnerisi.current && iban === sonIbanOnerisi.current) {
+      // Yeni firmanın IBAN'ı yok → önceki firmadan otomatik dolan IBAN'ı temizle
+      setIban("");
+      sonIbanOnerisi.current = null;
     }
   }, [tamFirma]); // yalnız tam eşleşme değişince
 
@@ -156,6 +162,7 @@ export default function DogrudanOdemeSayfasi() {
       setBeyannameId(""); setDosyaYok(false); setMasrafTuru(""); setTutar("");
       setAlacakli(""); setIban(""); setAciklama(""); setDekont(null); setKonsimento({ ...BOS_KONSIMENTO });
       sonAlacakliOnerisi.current = null;
+      sonIbanOnerisi.current = null;
       setFormSayac((s) => s + 1);
       queryClient.invalidateQueries({ queryKey: ["/api/portal/talepler"] });
       queryClient.invalidateQueries({ queryKey: ["/api/portal/odeme-sirketleri"] });
@@ -237,6 +244,7 @@ export default function DogrudanOdemeSayfasi() {
                   // Tip değişince konşimento bilgisi geçersiz — sıfırla (yanıltıcı bayat durum kalmasın)
                   setKonsimento({ ...BOS_KONSIMENTO });
                   sonAlacakliOnerisi.current = null;
+                  sonIbanOnerisi.current = null;
                 }}
               >
                 <SelectTrigger data-testid="select-dogrudan-tip">
@@ -322,7 +330,12 @@ export default function DogrudanOdemeSayfasi() {
             </div>
             <div className="space-y-2">
               <Label>IBAN (varsa)</Label>
-              <Input placeholder="TR.." value={iban} onChange={(e) => setIban(e.target.value)} />
+              <Input
+                placeholder="TR.."
+                value={iban}
+                onChange={(e) => setIban(e.target.value)}
+                data-testid="input-dogrudan-iban"
+              />
             </div>
           </div>
 
