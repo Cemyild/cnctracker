@@ -12,9 +12,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { firmaParaBirimleri } from "./portalUtils";
 
-type FirmaFormu = { id?: string; ad: string; iban: string; banka: string; vergiNo: string; notlar: string };
-const BOS_FORM: FirmaFormu = { ad: "", iban: "", banka: "", vergiNo: "", notlar: "" };
+type FirmaFormu = { id?: string; ad: string; ibanTry: string; ibanUsd: string; banka: string; vergiNo: string; notlar: string };
+const BOS_FORM: FirmaFormu = { ad: "", ibanTry: "", ibanUsd: "", banka: "", vergiNo: "", notlar: "" };
 
 const KAYNAK_ETIKET: Record<string, string> = { muhasebe: "Muhasebe", temsilci: "Temsilci", depo: "Depo" };
 
@@ -35,6 +36,8 @@ export default function FirmalarSayfasi() {
     return firmalar.filter(
       (f) =>
         f.ad.toLocaleLowerCase("tr").includes(q) ||
+        (f.ibanTry ?? "").toLocaleLowerCase("tr").includes(q) ||
+        (f.ibanUsd ?? "").toLocaleLowerCase("tr").includes(q) ||
         (f.iban ?? "").toLocaleLowerCase("tr").includes(q) ||
         (f.vergiNo ?? "").toLocaleLowerCase("tr").includes(q),
     );
@@ -42,7 +45,7 @@ export default function FirmalarSayfasi() {
 
   const yeniAc = () => { setForm({ ...BOS_FORM }); setDialogAcik(true); };
   const duzenleAc = (f: OdemeSirketi) => {
-    setForm({ id: f.id, ad: f.ad, iban: f.iban ?? "", banka: f.banka ?? "", vergiNo: f.vergiNo ?? "", notlar: f.notlar ?? "" });
+    setForm({ id: f.id, ad: f.ad, ibanTry: f.ibanTry ?? f.iban ?? "", ibanUsd: f.ibanUsd ?? "", banka: f.banka ?? "", vergiNo: f.vergiNo ?? "", notlar: f.notlar ?? "" });
     setDialogAcik(true);
   };
 
@@ -54,7 +57,7 @@ export default function FirmalarSayfasi() {
     if (!form.ad.trim()) { toast({ title: "Firma adı zorunlu", variant: "destructive" }); return; }
     setKaydediliyor(true);
     try {
-      const govde = { ad: form.ad, iban: form.iban, banka: form.banka, vergiNo: form.vergiNo, notlar: form.notlar };
+      const govde = { ad: form.ad, ibanTry: form.ibanTry, ibanUsd: form.ibanUsd, banka: form.banka, vergiNo: form.vergiNo, notlar: form.notlar };
       const url = form.id ? `/api/portal/odeme-sirketleri/${form.id}` : "/api/portal/odeme-sirketleri";
       const res = await fetch(url, {
         method: form.id ? "PUT" : "POST",
@@ -144,7 +147,13 @@ export default function FirmalarSayfasi() {
                   <tr key={f.id} className={`border-b ${f.aktif ? "" : "opacity-50"}`} data-testid={`row-firma-${f.id}`}>
                     <td className="p-2 font-medium">{f.ad}</td>
                     <td className="p-2">
-                      {f.iban ? f.iban : <Badge variant="destructive" data-testid={`rozet-iban-yok-${f.id}`}>IBAN yok</Badge>}
+                      {firmaParaBirimleri(f).length > 0 ? (
+                        firmaParaBirimleri(f).map((pb) => (
+                          <Badge key={pb} variant="secondary" className="mr-1">{pb}</Badge>
+                        ))
+                      ) : (
+                        <Badge variant="destructive" data-testid={`rozet-iban-yok-${f.id}`}>IBAN yok</Badge>
+                      )}
                     </td>
                     <td className="p-2 text-muted-foreground">{f.banka ?? "—"}</td>
                     <td className="p-2 text-muted-foreground">{f.vergiNo ?? "—"}</td>
@@ -178,9 +187,15 @@ export default function FirmalarSayfasi() {
               <Label>Firma Adı</Label>
               <Input value={form.ad} onChange={(e) => setForm({ ...form, ad: e.target.value })} data-testid="input-firma-ad" />
             </div>
-            <div className="space-y-1">
-              <Label>IBAN</Label>
-              <Input value={form.iban} onChange={(e) => setForm({ ...form, iban: e.target.value })} placeholder="TR.." data-testid="input-firma-iban" />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>IBAN (TRY)</Label>
+                <Input value={form.ibanTry} onChange={(e) => setForm({ ...form, ibanTry: e.target.value })} placeholder="TR.." data-testid="input-firma-iban-try" />
+              </div>
+              <div className="space-y-1">
+                <Label>IBAN (USD)</Label>
+                <Input value={form.ibanUsd} onChange={(e) => setForm({ ...form, ibanUsd: e.target.value })} placeholder="TR.." data-testid="input-firma-iban-usd" />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
