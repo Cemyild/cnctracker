@@ -4714,11 +4714,9 @@ export async function registerRoutes(
   // Elle firma ekleme
   app.post("/api/portal/odeme-sirketleri", requireMuhasebe, async (req, res) => {
     try {
-      const { ad, iban, banka, vergiNo, notlar } = req.body || {};
+      const { ad, ibanTry, ibanUsd, banka, vergiNo, notlar } = req.body || {};
       if (!String(ad ?? "").trim()) return res.status(400).json({ error: "Firma adı zorunlu" });
-      const yeni = await storage.createOdemeSirketi({
-        ad: String(ad), iban, banka, vergiNo, notlar,
-      });
+      const yeni = await storage.createOdemeSirketi({ ad: String(ad), ibanTry, ibanUsd, banka, vergiNo, notlar });
       if (!yeni) return res.status(409).json({ error: "Bu firma zaten kayıtlı" });
       res.json(yeni);
     } catch (e: any) {
@@ -4729,10 +4727,11 @@ export async function registerRoutes(
   // Firma güncelleme (IBAN tamamlama + aktif/pasif)
   app.put("/api/portal/odeme-sirketleri/:id", requireMuhasebe, async (req, res) => {
     try {
-      const { ad, iban, banka, vergiNo, notlar, aktif } = req.body || {};
+      const { ad, ibanTry, ibanUsd, banka, vergiNo, notlar, aktif } = req.body || {};
       const data: any = {};
       if (ad !== undefined) data.ad = String(ad);
-      if (iban !== undefined) data.iban = iban;
+      if (ibanTry !== undefined) data.ibanTry = ibanTry;
+      if (ibanUsd !== undefined) data.ibanUsd = ibanUsd;
       if (banka !== undefined) data.banka = banka;
       if (vergiNo !== undefined) data.vergiNo = vergiNo;
       if (notlar !== undefined) data.notlar = notlar;
@@ -4745,20 +4744,21 @@ export async function registerRoutes(
     }
   });
 
-  // Excel içe aktarım — başlıklar: Firma Adı | IBAN | Banka | Vergi/TC No | Not
+  // Excel içe aktarım — başlıklar: Firma Adı | IBAN TRY | IBAN USD | Banka | Vergi/TC No | Not
   app.post("/api/portal/odeme-sirketleri/excel", requireMuhasebe, uploadOdemeSirketExcel.single("excel"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "Dosya yüklenmedi" });
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[];
-      // İlk satır başlık — atla. A:Ad B:IBAN C:Banka D:VergiNo E:Not
+      // İlk satır başlık — atla. A:Ad B:IBAN TRY C:IBAN USD D:Banka E:VergiNo F:Not
       const rows = rawData.slice(1).map((r) => ({
         ad: String(r[0] ?? "").trim(),
-        iban: r[1] != null ? String(r[1]).trim() : null,
-        banka: r[2] != null ? String(r[2]).trim() : null,
-        vergiNo: r[3] != null ? String(r[3]).trim() : null,
-        notlar: r[4] != null ? String(r[4]).trim() : null,
+        ibanTry: r[1] != null ? String(r[1]).trim() : null,
+        ibanUsd: r[2] != null ? String(r[2]).trim() : null,
+        banka: r[3] != null ? String(r[3]).trim() : null,
+        vergiNo: r[4] != null ? String(r[4]).trim() : null,
+        notlar: r[5] != null ? String(r[5]).trim() : null,
       })).filter((r) => r.ad);
       const sonuc = await storage.bulkUpsertOdemeSirketleri(rows);
       res.json(sonuc);
@@ -4881,6 +4881,7 @@ export async function registerRoutes(
       // Girilen alacaklıyı firma listesine kaydet (best-effort — talebi bozmaz)
       storage.upsertOdemeSirketi(alacakliStr, {
         iban: iban ? String(iban).trim() : null,
+        paraBirimi: ["TRY", "USD", "EUR"].includes(String(paraBirimi)) ? String(paraBirimi) : "TRY",
         kaynak: odemeTipi === "depo_teminat" ? "depo" : "temsilci",
       }).catch((e) => console.warn(`[odeme-sirketleri] upsert hatası: ${e.message}`));
       res.json(talep);
@@ -5171,6 +5172,7 @@ export async function registerRoutes(
         // Girilen alacaklıyı firma listesine kaydet (best-effort — kaydı bozmaz)
         storage.upsertOdemeSirketi(alacakliStr, {
           iban: iban ? String(iban).trim() : null,
+          paraBirimi: ["TRY", "USD", "EUR"].includes(String(paraBirimi)) ? String(paraBirimi) : "TRY",
           kaynak: "muhasebe",
         }).catch((e) => console.warn(`[odeme-sirketleri] upsert hatası: ${e.message}`));
         res.json(talep);
