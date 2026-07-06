@@ -4699,7 +4699,8 @@ export async function registerRoutes(
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
       // Filtre SUNUCUDA: temsilci yalnız kendi (avAdi) beyannamelerini görür.
       // avAdi atanmamış temsilci hiçbir şey görmez (boş string hiçbir kullaniciyla eşleşmez).
-      const liste = ben.rol === "muhasebe"
+      // Muhasebe ve operasyon (şube) TÜM beyannameleri görür (spec: şube tüm dosyalara ödeme yapabilir).
+      const liste = ben.rol === "muhasebe" || ben.rol === "operasyon"
         ? await storage.getBeyannameler()
         : await storage.getBeyannameler(ben.avAdi ?? "");
       res.json(liste);
