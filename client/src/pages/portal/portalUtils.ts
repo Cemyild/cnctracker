@@ -1,4 +1,4 @@
-import type { OdemeTalep, Beyanname, OdemeBelge } from "@shared/schema";
+import type { OdemeTalep, Beyanname, OdemeBelge, OdemeSirketi } from "@shared/schema";
 
 // Sunucudaki OdemeTalepDetay'ın istemci karşılığı
 export type TalepDetay = OdemeTalep & {
@@ -56,4 +56,63 @@ export const BELGE_ETIKET: Record<string, string> = {
 
 export function belgeUrl(b: OdemeBelge): string {
   return "/" + b.filepath.replace(/^\/+/, "");
+}
+
+// Firma adı eşleştirme — konşimento/AI'ın çıkardığı ad kayıtlı firmayla birebir
+// tutmayabilir; normalize + benzerlik ile öneri sunulur. Saklama DEĞİŞMEZ.
+// NOT: \b kelime sınırı JS'te yalnızca ASCII \w karakterlerini tanır — "ş" gibi
+// Türkçe harfler \w SAYILMAZ, bu yüzden \b burada "a.ş." / "şti." gibi son ekleri
+// HİÇ YAKALAMAZ (sessizce eşleşmez). Unicode-uyumlu \p{L}\p{N} tabanlı lookaround
+// sınırları kullanılır — davranış aynı kalır, yalnızca sınır tanımı düzeltilir.
+// @ts-ignore TS1501: proje tsconfig'inde "target" tanımsız (varsayılan ES3);
+// 'u' bayrağı yalnızca derleyiciyi rahatsız ediyor, çalışma zamanını etkilemez.
+const FIRMA_EKLERI = /(?<![\p{L}\p{N}])(a\.?\s*ş\.?|a\.?\s*s\.?|ltd\.?|şti\.?|sti\.?|ş\.?t\.?i\.?)(?![\p{L}\p{N}])/gu;
+
+export function firmaNormalize(s: string): string {
+  return (s ?? "")
+    .toLocaleLowerCase("tr")
+    .replace(FIRMA_EKLERI, " ")
+    // @ts-ignore TS1501: proje tsconfig'inde "target" tanımsız (varsayılan ES3) ama
+    // lib: esnext derleniyor; 'u' bayrağı (Türkçe harfleri korumak için gerekli
+    // \p{L}\p{N} unicode sınıfları) yalnızca bu satırda derleyiciyi rahatsız ediyor.
+    // Çalışma zamanı davranışını etkilemez (noEmit); tsconfig kapsam dışı bırakıldı.
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // noktalama → boşluk
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenSet(s: string): Set<string> {
+  return new Set(firmaNormalize(s).split(" ").filter((t) => t.length >= 2));
+}
+
+export function firmaBenzerlik(a: string, b: string): number {
+  const A = tokenSet(a), B = tokenSet(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let kesisim = 0;
+  A.forEach((t) => { if (B.has(t)) kesisim++; });
+  const birlesim = A.size + B.size - kesisim;
+  return birlesim === 0 ? 0 : kesisim / birlesim; // Jaccard
+}
+
+export function tamEslesme(girilen: string, firmalar: OdemeSirketi[]): OdemeSirketi | null {
+  const n = firmaNormalize(girilen);
+  if (!n) return null;
+  return firmalar.find((f) => firmaNormalize(f.ad) === n) ?? null;
+}
+
+export function benzerFirmalar(
+  girilen: string,
+  firmalar: OdemeSirketi[],
+  opts?: { esik?: number; adet?: number },
+): OdemeSirketi[] {
+  const esik = opts?.esik ?? 0.34;
+  const adet = opts?.adet ?? 3;
+  const n = firmaNormalize(girilen);
+  if (!n) return [];
+  return firmalar
+    .map((f) => ({ f, skor: firmaBenzerlik(girilen, f.ad) }))
+    .filter((x) => x.skor >= esik && firmaNormalize(x.f.ad) !== n) // tam eşleşenler hariç
+    .sort((a, b) => b.skor - a.skor)
+    .slice(0, adet)
+    .map((x) => x.f);
 }
