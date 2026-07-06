@@ -1,4 +1,4 @@
-import type { OdemeTalep, Beyanname, OdemeBelge, OdemeSirketi } from "@shared/schema";
+import type { OdemeTalep, Beyanname, OdemeBelge, OdemeSirketi, FirmaIban, OdemeSirketiDetay } from "@shared/schema";
 
 // Sunucudaki OdemeTalepDetay'ın istemci karşılığı
 export type TalepDetay = OdemeTalep & {
@@ -150,4 +150,16 @@ export function firmaParaBirimleri(
   if (f.ibanTry || f.iban) r.push("TRY");
   if (f.ibanUsd) r.push("USD");
   return r;
+}
+
+// Firmanın seçili dövizdeki IBAN'ları (etiketli seçim / otomatik dolum için)
+export function firmaIbanlariByPB(f: OdemeSirketiDetay, paraBirimi: string): FirmaIban[] {
+  return (f.ibanlar ?? []).filter((i) => i.paraBirimi === paraBirimi);
+}
+
+// Firmanın döviz özeti: [{paraBirimi, adet}] (tablo/çip rozetleri) — TRY, USD, EUR sırası
+export function firmaIbanOzet(f: OdemeSirketiDetay): { paraBirimi: string; adet: number }[] {
+  const sayac: Record<string, number> = {};
+  for (const i of f.ibanlar ?? []) sayac[i.paraBirimi] = (sayac[i.paraBirimi] ?? 0) + 1;
+  return ["TRY", "USD", "EUR"].filter((pb) => sayac[pb] > 0).map((pb) => ({ paraBirimi: pb, adet: sayac[pb] }));
 }
