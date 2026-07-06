@@ -29,9 +29,11 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   odemeTalepleri, type OdemeTalep, type InsertOdemeTalep,
   odemeBelgeleri, type OdemeBelge, type InsertOdemeBelge,
   odemeSirketleri, type OdemeSirketi, type InsertOdemeSirketi,
+  firmaIbanlari, type FirmaIban, type OdemeSirketiDetay,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
+import * as XLSX from "xlsx";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count, notInArray } from "drizzle-orm";
 import { buildDedupKey } from "./dedup";
@@ -399,11 +401,13 @@ export interface IStorage {
   updateOdemeTalep(id: string, t: Partial<InsertOdemeTalep>): Promise<OdemeTalep | undefined>;
   createOdemeBelge(b: InsertOdemeBelge): Promise<OdemeBelge>;
   upsertOdemeSirketi(ad: string, opts?: { iban?: string | null; paraBirimi?: string; kaynak?: string }): Promise<void>;
-  getOdemeSirketleri(): Promise<OdemeSirketi[]>;
-  getOdemeSirketleriTumu(): Promise<OdemeSirketi[]>;
-  createOdemeSirketi(data: { ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }): Promise<OdemeSirketi | null>;
-  updateOdemeSirketi(id: string, data: Partial<{ ad: string; iban: string | null; ibanTry: string | null; ibanUsd: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean }>): Promise<OdemeSirketi | null>;
+  getOdemeSirketleri(): Promise<OdemeSirketiDetay[]>;
+  getOdemeSirketleriTumu(): Promise<OdemeSirketiDetay[]>;
+  createOdemeSirketi(data: { ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null; ibanlar?: { paraBirimi: string; iban: string; etiket?: string | null }[] }): Promise<OdemeSirketi | null>;
+  updateOdemeSirketi(id: string, data: Partial<{ ad: string; iban: string | null; ibanTry: string | null; ibanUsd: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean; ibanlar: { paraBirimi: string; iban: string; etiket?: string | null }[] }>): Promise<OdemeSirketi | null>;
   bulkUpsertOdemeSirketleri(rows: { ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
+  bulkUpsertFirmaIbanRows(rows: { ad: string; paraBirimi: string; iban: string; etiket?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
+  firmaIbanlariExcelSablonu(): Promise<Buffer>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -3544,47 +3548,84 @@ export class DatabaseStorage implements IStorage {
     return yeni;
   }
 
-  async upsertOdemeSirketi(
-    ad: string,
-    opts?: { iban?: string | null; paraBirimi?: string; kaynak?: string },
-  ): Promise<void> {
+  // Çocuk satırı olmayan firma için eski tekil kolonlardan sanal IBAN üretir (göç yok)
+  private eskiKolonlardanIban(f: OdemeSirketi): FirmaIban[] {
+    const r: FirmaIban[] = [];
+    const tryVal = (f.ibanTry || f.iban || "").trim();
+    if (tryVal) r.push({ id: `legacy-${f.id}-try`, firmaId: f.id, paraBirimi: "TRY", iban: tryVal, etiket: null });
+    const usdVal = (f.ibanUsd || "").trim();
+    if (usdVal) r.push({ id: `legacy-${f.id}-usd`, firmaId: f.id, paraBirimi: "USD", iban: usdVal, etiket: null });
+    return r;
+  }
+
+  private async firmalaraIbanEkle(firmalar: OdemeSirketi[]): Promise<OdemeSirketiDetay[]> {
+    if (firmalar.length === 0) return [];
+    const satirlar = await db.select().from(firmaIbanlari).where(inArray(firmaIbanlari.firmaId, firmalar.map((f) => f.id)));
+    const map = new Map<string, FirmaIban[]>();
+    for (const s of satirlar) {
+      const arr = map.get(s.firmaId) ?? [];
+      arr.push(s);
+      map.set(s.firmaId, arr);
+    }
+    return firmalar.map((f) => {
+      const cocuk = map.get(f.id) ?? [];
+      return { ...f, ibanlar: cocuk.length > 0 ? cocuk : this.eskiKolonlardanIban(f) };
+    });
+  }
+
+  private async ibanlariYaz(firmaId: string, ibanlar?: { paraBirimi: string; iban: string; etiket?: string | null }[]): Promise<void> {
+    const temizler = (ibanlar ?? [])
+      .map((x) => ({ firmaId, paraBirimi: String(x.paraBirimi), iban: String(x.iban ?? "").trim(), etiket: x.etiket?.trim() || null }))
+      .filter((x) => x.iban && ["TRY", "USD", "EUR"].includes(x.paraBirimi));
+    if (temizler.length === 0) return;
+    await db.insert(firmaIbanlari).values(temizler);
+  }
+
+  // Eski tekil iban alanlarını (F1.10 çağrıları) çocuk-satır listesine köprüler
+  private legacyIbanlar(data: { iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null }): { paraBirimi: string; iban: string; etiket?: string | null }[] {
+    const r: { paraBirimi: string; iban: string; etiket?: string | null }[] = [];
+    const tryVal = (data.ibanTry ?? data.iban ?? "").trim();
+    if (tryVal) r.push({ paraBirimi: "TRY", iban: tryVal });
+    const usdVal = (data.ibanUsd ?? "").trim();
+    if (usdVal) r.push({ paraBirimi: "USD", iban: usdVal });
+    return r;
+  }
+
+  async upsertOdemeSirketi(ad: string, opts?: { iban?: string | null; paraBirimi?: string; kaynak?: string }): Promise<void> {
     const temiz = ad.trim();
     if (!temiz) return;
     const ibanTemiz = opts?.iban ? String(opts.iban).trim() : null;
-    const values: typeof odemeSirketleri.$inferInsert = { ad: temiz, kaynak: opts?.kaynak ?? "temsilci" };
-    if (ibanTemiz) {
-      // Talebin para birimine uyan kolona yaz; EUR firma hesabı tutulmuyor → yazma
-      if (opts?.paraBirimi === "USD") values.ibanUsd = ibanTemiz;
-      else if (!opts?.paraBirimi || opts.paraBirimi === "TRY") values.ibanTry = ibanTemiz;
+    const pb = ["TRY", "USD", "EUR"].includes(String(opts?.paraBirimi)) ? String(opts?.paraBirimi) : "TRY";
+    const mevcut = await db.select({ id: odemeSirketleri.id }).from(odemeSirketleri).where(eq(odemeSirketleri.ad, temiz)).limit(1);
+    if (mevcut.length > 0) {
+      // Mevcut firma: yalnız sayaç — çocuk IBAN EKLENMEZ (muhasebe yönetir, F1.9 kuralı)
+      await db.update(odemeSirketleri)
+        .set({ kullanimSayisi: sql`${odemeSirketleri.kullanimSayisi} + 1`, sonKullanim: sql`now()` })
+        .where(eq(odemeSirketleri.id, mevcut[0].id));
+    } else {
+      const [yeni] = await db.insert(odemeSirketleri).values({ ad: temiz, kaynak: opts?.kaynak ?? "temsilci" }).returning();
+      if (ibanTemiz) await db.insert(firmaIbanlari).values({ firmaId: yeni.id, paraBirimi: pb, iban: ibanTemiz, etiket: null });
     }
-    // ÇAKIŞMADA yalnız sayaç+sonKullanim artar; IBAN kolonları ASLA ezilmez (F1.9 güvencesi).
-    await db
-      .insert(odemeSirketleri)
-      .values(values)
-      .onConflictDoUpdate({
-        target: odemeSirketleri.ad,
-        set: {
-          kullanimSayisi: sql`${odemeSirketleri.kullanimSayisi} + 1`,
-          sonKullanim: sql`now()`,
-        },
-      });
   }
 
-  async getOdemeSirketleri(): Promise<OdemeSirketi[]> {
-    return db
+  async getOdemeSirketleri(): Promise<OdemeSirketiDetay[]> {
+    const firmalar = await db
       .select()
       .from(odemeSirketleri)
       .where(eq(odemeSirketleri.aktif, true))
       .orderBy(desc(odemeSirketleri.kullanimSayisi), desc(odemeSirketleri.sonKullanim))
       .limit(100);
+    return this.firmalaraIbanEkle(firmalar);
   }
 
-  async getOdemeSirketleriTumu(): Promise<OdemeSirketi[]> {
-    return db.select().from(odemeSirketleri).orderBy(asc(odemeSirketleri.ad));
+  async getOdemeSirketleriTumu(): Promise<OdemeSirketiDetay[]> {
+    const firmalar = await db.select().from(odemeSirketleri).orderBy(asc(odemeSirketleri.ad));
+    return this.firmalaraIbanEkle(firmalar);
   }
 
   async createOdemeSirketi(data: {
     ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null;
+    ibanlar?: { paraBirimi: string; iban: string; etiket?: string | null }[];
   }): Promise<OdemeSirketi | null> {
     const temiz = data.ad.trim();
     if (!temiz) return null;
@@ -3592,38 +3633,40 @@ export class DatabaseStorage implements IStorage {
     if (mevcut.length > 0) return null; // ad çakışması → route 409
     const [yeni] = await db
       .insert(odemeSirketleri)
-      .values({
-        ad: temiz,
-        ibanTry: (data.ibanTry ?? data.iban)?.trim() || null, // eski iban → TRY (geriye uyum köprüsü)
-        ibanUsd: data.ibanUsd?.trim() || null,
-        banka: data.banka?.trim() || null,
-        vergiNo: data.vergiNo?.trim() || null,
-        notlar: data.notlar?.trim() || null,
-        kaynak: "muhasebe",
-      })
+      .values({ ad: temiz, banka: data.banka?.trim() || null, vergiNo: data.vergiNo?.trim() || null, notlar: data.notlar?.trim() || null, kaynak: "muhasebe" })
       .returning();
+    // ibanlar verildiyse onu, verilmediyse eski tekil alanları köprüle (F1.10 çağrıları)
+    await this.ibanlariYaz(yeni.id, data.ibanlar ?? this.legacyIbanlar(data));
     return yeni;
   }
 
   async updateOdemeSirketi(
     id: string,
-    data: Partial<{ ad: string; iban: string | null; ibanTry: string | null; ibanUsd: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean }>,
+    data: Partial<{ ad: string; iban: string | null; ibanTry: string | null; ibanUsd: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean; ibanlar: { paraBirimi: string; iban: string; etiket?: string | null }[] }>,
   ): Promise<OdemeSirketi | null> {
     const set: Record<string, unknown> = {};
     if (data.ad !== undefined) set.ad = data.ad.trim();
-    if (data.ibanTry !== undefined) set.ibanTry = data.ibanTry?.trim() || null;
-    else if (data.iban?.trim()) set.ibanTry = data.iban.trim(); // eski iban → TRY köprüsü (yalnız DOLU; boş iban ibanTry'yi silmesin — bayat F1.9 sekmesi koruması)
-    if (data.ibanUsd !== undefined) set.ibanUsd = data.ibanUsd?.trim() || null;
     if (data.banka !== undefined) set.banka = data.banka?.trim() || null;
     if (data.vergiNo !== undefined) set.vergiNo = data.vergiNo?.trim() || null;
     if (data.notlar !== undefined) set.notlar = data.notlar?.trim() || null;
     if (data.aktif !== undefined) set.aktif = data.aktif;
-    if (Object.keys(set).length === 0) {
-      const [mevcut] = await db.select().from(odemeSirketleri).where(eq(odemeSirketleri.id, id)).limit(1);
-      return mevcut ?? null;
+    let firma: OdemeSirketi | undefined;
+    if (Object.keys(set).length > 0) {
+      [firma] = await db.update(odemeSirketleri).set(set).where(eq(odemeSirketleri.id, id)).returning();
+    } else {
+      [firma] = await db.select().from(odemeSirketleri).where(eq(odemeSirketleri.id, id)).limit(1);
     }
-    const [guncel] = await db.update(odemeSirketleri).set(set).where(eq(odemeSirketleri.id, id)).returning();
-    return guncel ?? null;
+    if (!firma) return null;
+    // ibanlar verildiyse çocuk satırları DEĞİŞTİR; yoksa eski tekil alan geldiyse onu köprüle;
+    // ikisi de yoksa (ör. yalnız aktif toggle) çocuk satırlara DOKUNMA.
+    const yeniIbanlar = data.ibanlar !== undefined
+      ? data.ibanlar
+      : (data.iban !== undefined || data.ibanTry !== undefined || data.ibanUsd !== undefined ? this.legacyIbanlar(data) : undefined);
+    if (yeniIbanlar !== undefined) {
+      await db.delete(firmaIbanlari).where(eq(firmaIbanlari.firmaId, id));
+      await this.ibanlariYaz(id, yeniIbanlar);
+    }
+    return firma;
   }
 
   async bulkUpsertOdemeSirketleri(
@@ -3659,6 +3702,59 @@ export class DatabaseStorage implements IStorage {
       }
     }
     return { eklendi, guncellendi, atlandi };
+  }
+
+  async bulkUpsertFirmaIbanRows(
+    rows: { ad: string; paraBirimi: string; iban: string; etiket?: string | null; vergiNo?: string | null; notlar?: string | null }[],
+  ): Promise<{ eklendi: number; guncellendi: number; atlandi: number }> {
+    // Satırları firma adına göre grupla (bir firmanın birden çok IBAN satırı olabilir)
+    const gruplar = new Map<string, { vergiNo: string | null; notlar: string | null; ibanlar: { paraBirimi: string; iban: string; etiket: string | null }[] }>();
+    let atlandi = 0;
+    for (const row of rows) {
+      const ad = String(row.ad ?? "").trim();
+      const iban = String(row.iban ?? "").trim();
+      const pb = String(row.paraBirimi ?? "").trim().toUpperCase();
+      if (!ad) { atlandi++; continue; }
+      const g = gruplar.get(ad) ?? { vergiNo: null, notlar: null, ibanlar: [] };
+      if (!g.vergiNo && row.vergiNo?.trim()) g.vergiNo = row.vergiNo.trim();
+      if (!g.notlar && row.notlar?.trim()) g.notlar = row.notlar.trim();
+      if (iban && ["TRY", "USD", "EUR"].includes(pb)) g.ibanlar.push({ paraBirimi: pb, iban, etiket: row.etiket?.trim() || null });
+      else if (iban) atlandi++; // geçersiz para birimi
+      gruplar.set(ad, g);
+    }
+    let eklendi = 0, guncellendi = 0;
+    for (const [ad, g] of gruplar) {
+      const mevcut = await db.select({ id: odemeSirketleri.id }).from(odemeSirketleri).where(eq(odemeSirketleri.ad, ad)).limit(1);
+      let firmaId: string;
+      if (mevcut.length > 0) {
+        firmaId = mevcut[0].id;
+        const set: Record<string, unknown> = {};
+        if (g.vergiNo) set.vergiNo = g.vergiNo;
+        if (g.notlar) set.notlar = g.notlar;
+        if (Object.keys(set).length > 0) await db.update(odemeSirketleri).set(set).where(eq(odemeSirketleri.id, firmaId));
+        // Muhasebe Excel'i YETKİLİ: firmanın çocuk IBAN'larını DEĞİŞTİR
+        await db.delete(firmaIbanlari).where(eq(firmaIbanlari.firmaId, firmaId));
+        guncellendi++;
+      } else {
+        const [yeni] = await db.insert(odemeSirketleri).values({ ad, vergiNo: g.vergiNo, notlar: g.notlar, kaynak: "muhasebe" }).returning();
+        firmaId = yeni.id;
+        eklendi++;
+      }
+      if (g.ibanlar.length > 0) await db.insert(firmaIbanlari).values(g.ibanlar.map((x) => ({ firmaId, ...x })));
+    }
+    return { eklendi, guncellendi, atlandi };
+  }
+
+  async firmaIbanlariExcelSablonu(): Promise<Buffer> {
+    const aoa = [
+      ["Firma Adı", "Para Birimi", "IBAN", "Etiket", "Vergi/TC No", "Not"],
+      ["ÖRNEK LOJİSTİK A.Ş.", "USD", "TR000000000000000000000000", "USD - Garanti", "1234567890", "örnek satır — silebilirsiniz"],
+      ["ÖRNEK LOJİSTİK A.Ş.", "TRY", "TR111111111111111111111111", "TRY - İş Bankası", "", ""],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Firmalar");
+    return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
   }
 }
 

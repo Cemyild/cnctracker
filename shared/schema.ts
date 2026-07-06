@@ -1095,6 +1095,22 @@ export const insertOdemeSirketiSchema = createInsertSchema(odemeSirketleri).omit
 export type InsertOdemeSirketi = z.infer<typeof insertOdemeSirketiSchema>;
 export type OdemeSirketi = typeof odemeSirketleri.$inferSelect;
 
+// Firma başına IBAN listesi (çoklu döviz/hesap). odeme_sirketleri'nin eski tekil
+// iban/ibanTry/ibanUsd kolonları drop edilmez; çocuk satır yoksa okuma-yedeği olur.
+export const firmaIbanlari = pgTable("firma_ibanlari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  firmaId: varchar("firma_id").notNull(), // FK odeme_sirketleri.id (açık snake string)
+  paraBirimi: text("para_birimi").notNull(), // TRY | USD | EUR
+  iban: text("iban").notNull(),
+  etiket: text("etiket"), // banka adı / ayırt edici not
+}, (t) => [
+  index("IDX_firma_ibanlari_firma").on(t.firmaId),
+]);
+export const insertFirmaIbanSchema = createInsertSchema(firmaIbanlari).omit({ id: true });
+export type InsertFirmaIban = z.infer<typeof insertFirmaIbanSchema>;
+export type FirmaIban = typeof firmaIbanlari.$inferSelect;
+export type OdemeSirketiDetay = OdemeSirketi & { ibanlar: FirmaIban[] };
+
 // connect-pg-simple'ın çalışma anında oluşturduğu oturum tablosu.
 // Şemada tanımlı olmazsa drizzle-kit push bu tabloyu SİLMEYE çalışır ve
 // CI'daki non-interactive push onay bekleyip HİÇBİR değişikliği uygulamaz.
