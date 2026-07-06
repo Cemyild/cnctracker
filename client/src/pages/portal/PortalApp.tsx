@@ -10,6 +10,7 @@ import TaleplerimSayfasi from "./TaleplerimSayfasi";
 import GelenTaleplerSayfasi from "./GelenTaleplerSayfasi";
 import DepoOdemeleriSayfasi from "./DepoOdemeleriSayfasi";
 import DogrudanOdemeSayfasi from "./DogrudanOdemeSayfasi";
+import FirmalarSayfasi from "./FirmalarSayfasi";
 import { type TalepDetay } from "./portalUtils";
 import {
   useTalepBildirimleri, bildirimIzniIste, type SayfaAnahtari,
@@ -28,6 +29,7 @@ const SAYFA_BASLIKLARI: Record<string, string> = {
   "/portal/gelen-talepler": "Gelen Talepler",
   "/portal/depo": "Depo Ödemeleri",
   "/portal/dogrudan-odeme": "Doğrudan Ödeme",
+  "/portal/firmalar": "Ödeme Firmaları",
 };
 
 const ROTA_SAYFASI: Record<string, SayfaAnahtari> = {
@@ -89,6 +91,9 @@ function PortalIcerik({ me }: { me: PortalMe }) {
               )}
               {me.rol === "muhasebe" && (
                 <Route path="/portal/dogrudan-odeme" component={DogrudanOdemeSayfasi} />
+              )}
+              {me.rol === "muhasebe" && (
+                <Route path="/portal/firmalar" component={FirmalarSayfasi} />
               )}
               <Route>
                 <Redirect to={varsayilanRota} />

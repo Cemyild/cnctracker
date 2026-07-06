@@ -5,7 +5,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, LogOut } from "lucide-react";
+import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut } from "lucide-react";
 import { type PortalMe } from "./PortalApp";
 import { type Rozetler, type SayfaAnahtari } from "./useTalepBildirimleri";
 
@@ -25,6 +25,7 @@ const MUHASEBE_MENU: MenuOgesi[] = [
   { title: "Gelen Talepler", href: "/portal/gelen-talepler", icon: Inbox, rozetAnahtari: "gelenTalepler" },
   { title: "Depo Ödemeleri", href: "/portal/depo", icon: Warehouse, rozetAnahtari: "depo" },
   { title: "Doğrudan Ödeme", href: "/portal/dogrudan-odeme", icon: Banknote },
+  { title: "Ödeme Firmaları", href: "/portal/firmalar", icon: Building2 },
 ];
 
 export default function PortalSidebar({
