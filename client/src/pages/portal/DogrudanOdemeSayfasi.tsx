@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import type { Beyanname, MasrafTuru, OdemeSirketi } from "@shared/schema";
@@ -12,7 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { formatTarih, formatPara } from "./portalUtils";
+import { formatTarih, formatPara, tamEslesme, benzerFirmalar } from "./portalUtils";
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 
 // Muhasebenin talepsiz ödeme girişi — tek adımda "Ödendi" kaydı oluşur (dekont zorunlu).
@@ -56,9 +56,32 @@ export default function DogrudanOdemeSayfasi() {
 
   const secili = beyannameler.find((b) => b.id === beyannameId);
 
+  // Alacaklı bir firmayla TAM eşleşiyorsa IBAN'ı otomatik doldur (elle yazılan ezilmez);
+  // tam değilse benzer kayıtları öneri olarak çıkar (IBAN insan tıklamasıyla dolar).
+  const tamFirma = useMemo(() => tamEslesme(alacakli, odemeSirketleri), [alacakli, odemeSirketleri]);
+  const benzerOneriler = useMemo(
+    () => (tamFirma ? [] : benzerFirmalar(alacakli, odemeSirketleri)),
+    [tamFirma, alacakli, odemeSirketleri],
+  );
+  useEffect(() => {
+    if (tamFirma?.iban) {
+      if (!iban.trim() || iban === sonIbanOnerisi.current) {
+        setIban(tamFirma.iban);
+        sonIbanOnerisi.current = tamFirma.iban;
+      }
+    }
+  }, [tamFirma]); // yalnız tam eşleşme değişince
+
+  const firmaSec = (f: typeof odemeSirketleri[number]) => {
+    setAlacakli(f.ad);
+    sonAlacakliOnerisi.current = f.ad;
+    if (f.iban) { setIban(f.iban); sonIbanOnerisi.current = f.iban; }
+  };
+
   // Son GEÇERLİ öneriyi ref'te izle: dosya değişimindeki ara null-öneri çağrısı
   // izi silmesin — yoksa yeni öneri "elle yazılmış" sanılıp eski acente ekranda kalır.
   const sonAlacakliOnerisi = useRef<string | null>(null);
+  const sonIbanOnerisi = useRef<string | null>(null);
   const konsimentoDegisti = (b: KonsimentoBilgisi) => {
     if (b.alacakliOnerisi && b.alacakliOnerisi !== sonAlacakliOnerisi.current) {
       // Alacaklı boşsa ya da hâlâ önceki öneriyse yeni öneriyle doldur (elle yazılmışsa ezme)
@@ -280,6 +303,22 @@ export default function DogrudanOdemeSayfasi() {
                   <option key={s.id} value={s.ad} />
                 ))}
               </datalist>
+              {benzerOneriler.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-1" data-testid="benzer-firmalar-dogrudan">
+                  <span className="text-xs text-muted-foreground w-full">Benzer kayıtlı firmalar:</span>
+                  {benzerOneriler.map((f, i) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => firmaSec(f)}
+                      className="text-xs rounded-full border px-2 py-0.5 hover:bg-accent"
+                      data-testid={`cip-firma-${i}`}
+                    >
+                      {f.ad}{f.iban ? ` · …${f.iban.slice(-4)}` : " · IBAN yok"}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label>IBAN (varsa)</Label>
