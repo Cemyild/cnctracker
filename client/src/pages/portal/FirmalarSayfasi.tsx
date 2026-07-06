@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import type { OdemeSirketi } from "@shared/schema";
+import type { OdemeSirketiDetay } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,17 +11,19 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { firmaParaBirimleri } from "./portalUtils";
+import { firmaIbanOzet } from "./portalUtils";
 
-type FirmaFormu = { id?: string; ad: string; ibanTry: string; ibanUsd: string; banka: string; vergiNo: string; notlar: string };
-const BOS_FORM: FirmaFormu = { ad: "", ibanTry: "", ibanUsd: "", banka: "", vergiNo: "", notlar: "" };
+type IbanSatir = { paraBirimi: string; iban: string; etiket: string };
+type FirmaFormu = { id?: string; ad: string; vergiNo: string; notlar: string; ibanlar: IbanSatir[] };
+const BOS_FORM: FirmaFormu = { ad: "", vergiNo: "", notlar: "", ibanlar: [] };
 
 const KAYNAK_ETIKET: Record<string, string> = { muhasebe: "Muhasebe", temsilci: "Temsilci", depo: "Depo" };
 
 export default function FirmalarSayfasi() {
   const { toast } = useToast();
-  const { data: firmalar = [] } = useQuery<OdemeSirketi[]>({
+  const { data: firmalar = [] } = useQuery<OdemeSirketiDetay[]>({
     queryKey: ["/api/portal/odeme-sirketleri/tumu"],
   });
   const [arama, setArama] = useState("");
@@ -36,16 +38,17 @@ export default function FirmalarSayfasi() {
     return firmalar.filter(
       (f) =>
         f.ad.toLocaleLowerCase("tr").includes(q) ||
-        (f.ibanTry ?? "").toLocaleLowerCase("tr").includes(q) ||
-        (f.ibanUsd ?? "").toLocaleLowerCase("tr").includes(q) ||
-        (f.iban ?? "").toLocaleLowerCase("tr").includes(q) ||
-        (f.vergiNo ?? "").toLocaleLowerCase("tr").includes(q),
+        (f.vergiNo ?? "").toLocaleLowerCase("tr").includes(q) ||
+        (f.ibanlar ?? []).some((i) => i.iban.toLocaleLowerCase("tr").includes(q)),
     );
   }, [firmalar, arama]);
 
   const yeniAc = () => { setForm({ ...BOS_FORM }); setDialogAcik(true); };
-  const duzenleAc = (f: OdemeSirketi) => {
-    setForm({ id: f.id, ad: f.ad, ibanTry: f.ibanTry ?? f.iban ?? "", ibanUsd: f.ibanUsd ?? "", banka: f.banka ?? "", vergiNo: f.vergiNo ?? "", notlar: f.notlar ?? "" });
+  const duzenleAc = (f: OdemeSirketiDetay) => {
+    setForm({
+      id: f.id, ad: f.ad, vergiNo: f.vergiNo ?? "", notlar: f.notlar ?? "",
+      ibanlar: (f.ibanlar ?? []).map((i) => ({ paraBirimi: i.paraBirimi, iban: i.iban, etiket: i.etiket ?? "" })),
+    });
     setDialogAcik(true);
   };
 
@@ -53,11 +56,19 @@ export default function FirmalarSayfasi() {
 
   // Portal kalıbı: ham fetch + { error } gövdesinden temiz Türkçe mesaj
   // (apiRequest non-ok'ta kendi mesajıyla throw edip 409/404 gövdesini yutardı).
+  const ibanEkle = () => setForm((p) => ({ ...p, ibanlar: [...p.ibanlar, { paraBirimi: "USD", iban: "", etiket: "" }] }));
+  const ibanKaldir = (i: number) => setForm((p) => ({ ...p, ibanlar: p.ibanlar.filter((_, idx) => idx !== i) }));
+  const ibanDegistir = (i: number, alan: keyof IbanSatir, deger: string) =>
+    setForm((p) => ({ ...p, ibanlar: p.ibanlar.map((x, idx) => (idx === i ? { ...x, [alan]: deger } : x)) }));
+
   const kaydet = async () => {
     if (!form.ad.trim()) { toast({ title: "Firma adı zorunlu", variant: "destructive" }); return; }
     setKaydediliyor(true);
     try {
-      const govde = { ad: form.ad, ibanTry: form.ibanTry, ibanUsd: form.ibanUsd, banka: form.banka, vergiNo: form.vergiNo, notlar: form.notlar };
+      const govde = {
+        ad: form.ad, vergiNo: form.vergiNo, notlar: form.notlar,
+        ibanlar: form.ibanlar.filter((x) => x.iban.trim()).map((x) => ({ paraBirimi: x.paraBirimi, iban: x.iban.trim(), etiket: x.etiket.trim() || null })),
+      };
       const url = form.id ? `/api/portal/odeme-sirketleri/${form.id}` : "/api/portal/odeme-sirketleri";
       const res = await fetch(url, {
         method: form.id ? "PUT" : "POST",
@@ -76,7 +87,7 @@ export default function FirmalarSayfasi() {
     }
   };
 
-  const aktifToggle = async (f: OdemeSirketi) => {
+  const aktifToggle = async (f: OdemeSirketiDetay) => {
     try {
       const res = await fetch(`/api/portal/odeme-sirketleri/${f.id}`, {
         method: "PUT",
@@ -92,6 +103,7 @@ export default function FirmalarSayfasi() {
   };
 
   const excelSec = () => excelRef.current?.click();
+  const sablonIndir = () => { window.location.href = "/api/portal/odeme-sirketleri/sablon"; };
   const excelYukle = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const dosya = e.target.files?.[0];
     if (!dosya) return;
@@ -118,6 +130,7 @@ export default function FirmalarSayfasi() {
           <div className="flex gap-2">
             <input ref={excelRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={excelYukle} data-testid="input-firma-excel-file" />
             <Button variant="outline" onClick={excelSec} data-testid="button-firma-excel">Excel Yükle</Button>
+            <Button variant="outline" onClick={sablonIndir} data-testid="button-firma-sablon">Şablon İndir</Button>
             <Button onClick={yeniAc} data-testid="button-firma-ekle">Elle Ekle</Button>
           </div>
         </CardHeader>
@@ -134,7 +147,6 @@ export default function FirmalarSayfasi() {
                 <tr className="text-left">
                   <th className="p-2">Ad</th>
                   <th className="p-2">IBAN</th>
-                  <th className="p-2">Banka</th>
                   <th className="p-2">Vergi No</th>
                   <th className="p-2">Kaynak</th>
                   <th className="p-2">Kullanım</th>
@@ -147,15 +159,14 @@ export default function FirmalarSayfasi() {
                   <tr key={f.id} className={`border-b ${f.aktif ? "" : "opacity-50"}`} data-testid={`row-firma-${f.id}`}>
                     <td className="p-2 font-medium">{f.ad}</td>
                     <td className="p-2">
-                      {firmaParaBirimleri(f).length > 0 ? (
-                        firmaParaBirimleri(f).map((pb) => (
-                          <Badge key={pb} variant="secondary" className="mr-1">{pb}</Badge>
+                      {firmaIbanOzet(f).length > 0 ? (
+                        firmaIbanOzet(f).map((o) => (
+                          <Badge key={o.paraBirimi} variant="secondary" className="mr-1">{o.paraBirimi}{o.adet > 1 ? ` ×${o.adet}` : ""}</Badge>
                         ))
                       ) : (
                         <Badge variant="destructive" data-testid={`rozet-iban-yok-${f.id}`}>IBAN yok</Badge>
                       )}
                     </td>
-                    <td className="p-2 text-muted-foreground">{f.banka ?? "—"}</td>
                     <td className="p-2 text-muted-foreground">{f.vergiNo ?? "—"}</td>
                     <td className="p-2 text-muted-foreground">{KAYNAK_ETIKET[f.kaynak] ?? f.kaynak}</td>
                     <td className="p-2 text-muted-foreground">{f.kullanimSayisi}</td>
@@ -169,7 +180,7 @@ export default function FirmalarSayfasi() {
                   </tr>
                 ))}
                 {filtreli.length === 0 && (
-                  <tr><td colSpan={8} className="p-6 text-center text-muted-foreground">Kayıt yok.</td></tr>
+                  <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Kayıt yok.</td></tr>
                 )}
               </tbody>
             </table>
@@ -187,25 +198,33 @@ export default function FirmalarSayfasi() {
               <Label>Firma Adı</Label>
               <Input value={form.ad} onChange={(e) => setForm({ ...form, ad: e.target.value })} data-testid="input-firma-ad" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>IBAN (TRY)</Label>
-                <Input value={form.ibanTry} onChange={(e) => setForm({ ...form, ibanTry: e.target.value })} placeholder="TR.." data-testid="input-firma-iban-try" />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>IBAN'lar</Label>
+                <Button type="button" variant="outline" size="sm" onClick={ibanEkle} data-testid="button-iban-ekle">+ IBAN Ekle</Button>
               </div>
-              <div className="space-y-1">
-                <Label>IBAN (USD)</Label>
-                <Input value={form.ibanUsd} onChange={(e) => setForm({ ...form, ibanUsd: e.target.value })} placeholder="TR.." data-testid="input-firma-iban-usd" />
-              </div>
+              {form.ibanlar.length === 0 && <p className="text-xs text-muted-foreground">Henüz IBAN yok — "+ IBAN Ekle" ile satır ekleyin.</p>}
+              {form.ibanlar.map((satir, i) => (
+                <div key={i} className="flex flex-wrap items-end gap-2" data-testid={`iban-satir-${i}`}>
+                  <div className="w-24">
+                    <Select value={satir.paraBirimi} onValueChange={(v) => ibanDegistir(i, "paraBirimi", v)}>
+                      <SelectTrigger data-testid={`select-iban-pb-${i}`}><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="TRY">TRY</SelectItem>
+                        <SelectItem value="USD">USD</SelectItem>
+                        <SelectItem value="EUR">EUR</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input className="flex-1 min-w-[180px]" placeholder="TR.." value={satir.iban} onChange={(e) => ibanDegistir(i, "iban", e.target.value)} data-testid={`input-iban-no-${i}`} />
+                  <Input className="w-40" placeholder="Etiket (banka)" value={satir.etiket} onChange={(e) => ibanDegistir(i, "etiket", e.target.value)} data-testid={`input-iban-etiket-${i}`} />
+                  <Button type="button" variant="ghost" size="sm" onClick={() => ibanKaldir(i)} data-testid={`button-iban-kaldir-${i}`}>Kaldır</Button>
+                </div>
+              ))}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Banka</Label>
-                <Input value={form.banka} onChange={(e) => setForm({ ...form, banka: e.target.value })} data-testid="input-firma-banka" />
-              </div>
-              <div className="space-y-1">
-                <Label>Vergi/TC No</Label>
-                <Input value={form.vergiNo} onChange={(e) => setForm({ ...form, vergiNo: e.target.value })} data-testid="input-firma-vergino" />
-              </div>
+            <div className="space-y-1">
+              <Label>Vergi/TC No</Label>
+              <Input value={form.vergiNo} onChange={(e) => setForm({ ...form, vergiNo: e.target.value })} data-testid="input-firma-vergino" />
             </div>
             <div className="space-y-1">
               <Label>Not</Label>
