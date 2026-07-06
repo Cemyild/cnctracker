@@ -129,3 +129,25 @@ export function benzerFirmalar(
     .slice(0, adet)
     .map((x) => x.f);
 }
+
+// Döviz-bazlı firma IBAN'ı — talebin para birimine uyan hesabı verir.
+// TRY: yeni ibanTry, yoksa F1.9'un eski tekil iban'ı (geriye uyum). EUR: firma
+// EUR hesabı tutmuyor → null.
+export function firmaIban(
+  f: Pick<OdemeSirketi, "ibanTry" | "ibanUsd" | "iban">,
+  paraBirimi: string,
+): string | null {
+  if (paraBirimi === "USD") return f.ibanUsd || null;
+  if (paraBirimi === "EUR") return null;
+  return f.ibanTry || f.iban || null;
+}
+
+// Firmanın IBAN'ı olan döviz kodları (rozet/çip etiketi için).
+export function firmaParaBirimleri(
+  f: Pick<OdemeSirketi, "ibanTry" | "ibanUsd" | "iban">,
+): string[] {
+  const r: string[] = [];
+  if (f.ibanTry || f.iban) r.push("TRY");
+  if (f.ibanUsd) r.push("USD");
+  return r;
+}
