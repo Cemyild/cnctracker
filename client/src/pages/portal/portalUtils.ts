@@ -86,8 +86,13 @@ export function firmaBenzerlik(a: string, b: string): number {
   if (A.size === 0 || B.size === 0) return 0;
   let kesisim = 0;
   A.forEach((t) => { if (B.has(t)) kesisim++; });
-  const birlesim = A.size + B.size - kesisim;
-  return birlesim === 0 ? 0 : kesisim / birlesim; // Jaccard
+  if (kesisim === 0) return 0;
+  const jaccard = kesisim / (A.size + B.size - kesisim);
+  // İçerme (overlap): girilen ad kayıtlı adın alt kümesiyse (ör. "ASAV" ⊂
+  // "ASAV LOJİSTİK HİZMETLERİ") Jaccard uzunluk farkını cezalandırır; overlap
+  // bunu telafi eder — kullanıcı ayırt edici ilk kelimeyi yazınca öneri çıkar.
+  const overlap = kesisim / Math.min(A.size, B.size);
+  return Math.max(jaccard, 0.6 * overlap);
 }
 
 export function tamEslesme(girilen: string, firmalar: OdemeSirketi[]): OdemeSirketi | null {
