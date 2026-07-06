@@ -4725,9 +4725,14 @@ export async function registerRoutes(
   // Elle firma ekleme
   app.post("/api/portal/odeme-sirketleri", requireMuhasebe, async (req, res) => {
     try {
-      const { ad, vergiNo, notlar, ibanlar } = req.body || {};
+      // ibanlar: yeni F1.11 gövdesi. iban/ibanTry/ibanUsd/banka: eski F1.10 frontend'i —
+      // storage köprüsü (legacyIbanlar) bunları çocuk satıra çevirir (kısmi deploy'da IBAN düşmesin).
+      const { ad, iban, ibanTry, ibanUsd, banka, vergiNo, notlar, ibanlar } = req.body || {};
       if (!String(ad ?? "").trim()) return res.status(400).json({ error: "Firma adı zorunlu" });
-      const yeni = await storage.createOdemeSirketi({ ad: String(ad), vergiNo, notlar, ibanlar: Array.isArray(ibanlar) ? ibanlar : [] });
+      const yeni = await storage.createOdemeSirketi({
+        ad: String(ad), iban, ibanTry, ibanUsd, banka, vergiNo, notlar,
+        ibanlar: Array.isArray(ibanlar) ? ibanlar : undefined,
+      });
       if (!yeni) return res.status(409).json({ error: "Bu firma zaten kayıtlı" });
       res.json(yeni);
     } catch (e: any) {
@@ -4738,9 +4743,13 @@ export async function registerRoutes(
   // Firma güncelleme (IBAN tamamlama + aktif/pasif)
   app.put("/api/portal/odeme-sirketleri/:id", requireMuhasebe, async (req, res) => {
     try {
-      const { ad, vergiNo, notlar, aktif, ibanlar } = req.body || {};
+      const { ad, iban, ibanTry, ibanUsd, banka, vergiNo, notlar, aktif, ibanlar } = req.body || {};
       const data: any = {};
       if (ad !== undefined) data.ad = String(ad);
+      if (iban !== undefined) data.iban = iban;
+      if (ibanTry !== undefined) data.ibanTry = ibanTry;
+      if (ibanUsd !== undefined) data.ibanUsd = ibanUsd;
+      if (banka !== undefined) data.banka = banka;
       if (vergiNo !== undefined) data.vergiNo = vergiNo;
       if (notlar !== undefined) data.notlar = notlar;
       if (aktif !== undefined) data.aktif = aktif === true || aktif === "true";

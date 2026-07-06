@@ -3659,9 +3659,13 @@ export class DatabaseStorage implements IStorage {
     if (!firma) return null;
     // ibanlar verildiyse çocuk satırları DEĞİŞTİR; yoksa eski tekil alan geldiyse onu köprüle;
     // ikisi de yoksa (ör. yalnız aktif toggle) çocuk satırlara DOKUNMA.
-    const yeniIbanlar = data.ibanlar !== undefined
-      ? data.ibanlar
-      : (data.iban !== undefined || data.ibanTry !== undefined || data.ibanUsd !== undefined ? this.legacyIbanlar(data) : undefined);
+    let yeniIbanlar: { paraBirimi: string; iban: string; etiket?: string | null }[] | undefined;
+    if (data.ibanlar !== undefined) {
+      yeniIbanlar = data.ibanlar; // F1.11: açık liste (boş [] = tümünü temizle, kasıtlı)
+    } else if (data.iban !== undefined || data.ibanTry !== undefined || data.ibanUsd !== undefined) {
+      const lg = this.legacyIbanlar(data);
+      yeniIbanlar = lg.length > 0 ? lg : undefined; // boş eski-alan çocuk satırları SİLMESİN (bayat F1.10 sekmesi koruması)
+    }
     if (yeniIbanlar !== undefined) {
       await db.delete(firmaIbanlari).where(eq(firmaIbanlari.firmaId, id));
       await this.ibanlariYaz(id, yeniIbanlar);
