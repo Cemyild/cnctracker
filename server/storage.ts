@@ -1274,27 +1274,36 @@ export class DatabaseStorage implements IStorage {
 
     if (faturalar.length === 0) return [];
 
-    // Araçlara dağıtılan yakıt giderleri ay bazında toplanır (tarih YYYY-MM-DD)
+    // Araç yakıt giderleri GÜN bazında toplanır (tarih YYYY-MM-DD)
     const dagitim = await db
       .select({
-        ayKey: sql<string>`substr(${aracGiderler.tarih}, 1, 7)`,
+        gun: aracGiderler.tarih,
         toplam: sql<string>`coalesce(sum(${aracGiderler.tutar}), 0)`,
       })
       .from(aracGiderler)
       .where(eq(aracGiderler.kategori, "Yakıt"))
-      .groupBy(sql`substr(${aracGiderler.tarih}, 1, 7)`);
+      .groupBy(aracGiderler.tarih);
 
-    const AY_NO: Record<string, number> = {
-      ocak: 1, subat: 2, mart: 3, nisan: 4, mayis: 5, haziran: 6,
-      temmuz: 7, agustos: 8, eylul: 9, ekim: 10, kasim: 11, aralik: 12,
+    // Halis Petrol iki haftada bir fatura keser (ör. ayın 15'i ve sonu). AY bazlı eşleşme
+    // aynı aydaki İKİ faturaya aynı tutarı yazıyordu; onun yerine dönem bazlı eşleştir:
+    // her gideri, fatura tarihi >= gider tarihi olan EN ERKEN faturaya ata (fatura tarihi = dönem sonu).
+    const trToIso = (s: string | null): string => {
+      const m = String(s ?? "").match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/);
+      return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
     };
-    const dagitimMap = new Map(dagitim.map((d) => [d.ayKey, Number(d.toplam)]));
+    const siraliFaturalar = faturalar
+      .map((f) => ({ id: f.id, iso: trToIso(f.tarih) }))
+      .filter((x) => x.iso)
+      .sort((a, b) => (a.iso < b.iso ? -1 : 1)); // fatura tarihi ASC
 
-    return faturalar.map((f) => {
-      const ayNo = AY_NO[f.ay] ?? 0;
-      const key = `${f.yil}-${String(ayNo).padStart(2, "0")}`;
-      return { ...f, dagitilanTutar: dagitimMap.get(key) ?? 0 };
-    });
+    const dagitimById = new Map<string, number>();
+    for (const d of dagitim) {
+      const gun = String(d.gun ?? "");
+      const hedef = siraliFaturalar.find((x) => x.iso >= gun); // tarihi >= gider günü olan ilk fatura
+      if (hedef) dagitimById.set(hedef.id, (dagitimById.get(hedef.id) ?? 0) + Number(d.toplam));
+    }
+
+    return faturalar.map((f) => ({ ...f, dagitilanTutar: dagitimById.get(f.id) ?? 0 }));
   }
 
   async getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }> {

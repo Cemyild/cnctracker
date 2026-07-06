@@ -1274,7 +1274,7 @@ export default function Tools() {
                                         <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Tarih</TableHead>
                                         <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Fatura No</TableHead>
                                         <TableHead className="h-9 px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground">Fatura Tutarı</TableHead>
-                                        <TableHead className="h-9 px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground">O Ay Dağıtılan</TableHead>
+                                        <TableHead className="h-9 px-2.5 text-right text-[10.5px] font-semibold uppercase text-muted-foreground">Dağıtılan</TableHead>
                                         <TableHead className="h-9 px-2.5 text-[10.5px] font-semibold uppercase text-muted-foreground">Durum</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -1303,7 +1303,7 @@ export default function Tools() {
                             </Table>
                         </div>
                         <p className="border-t px-5 py-2 text-[11.5px] text-muted-foreground">
-                            "O Ay Dağıtılan" fatura ayındaki tüm araç yakıt giderlerinin toplamıdır — karşılaştırma ay bazında yapılır.
+                            "Dağıtılan" bu faturanın dönemine (bir önceki faturadan bu faturaya kadar) düşen araç yakıt giderlerinin toplamıdır — eşleştirme fatura tarihine göre yapılır.
                         </p>
                     </div>
                 )}
