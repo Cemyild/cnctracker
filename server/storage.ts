@@ -3612,7 +3612,7 @@ export class DatabaseStorage implements IStorage {
     const set: Record<string, unknown> = {};
     if (data.ad !== undefined) set.ad = data.ad.trim();
     if (data.ibanTry !== undefined) set.ibanTry = data.ibanTry?.trim() || null;
-    else if (data.iban !== undefined) set.ibanTry = data.iban?.trim() || null; // eski iban → TRY köprüsü
+    else if (data.iban?.trim()) set.ibanTry = data.iban.trim(); // eski iban → TRY köprüsü (yalnız DOLU; boş iban ibanTry'yi silmesin — bayat F1.9 sekmesi koruması)
     if (data.ibanUsd !== undefined) set.ibanUsd = data.ibanUsd?.trim() || null;
     if (data.banka !== undefined) set.banka = data.banka?.trim() || null;
     if (data.vergiNo !== undefined) set.vergiNo = data.vergiNo?.trim() || null;
