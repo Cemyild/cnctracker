@@ -267,8 +267,13 @@ export const aracGiderler = pgTable("arac_giderler", {
   aciklama: text("aciklama"),
   tutar: decimal("tutar", { precision: 15, scale: 2 }).notNull(),
   kilometre: integer("kilometre"),
+  // Excel (Halis Petrol) tekrar yüklemelerinde çift kaydı önler; manuel giderlerde null bırakılır.
+  // Postgres UNIQUE indeksi NULL'ları birbirinden farklı sayar → yalnızca hash'li kayıtlar tekilleşir.
+  rowHash: text("row_hash"),
   olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("arac_giderler_row_hash_idx").on(table.rowHash),
+]);
 
 export const insertAracGiderSchema = createInsertSchema(aracGiderler).omit({
   id: true,
@@ -1071,7 +1076,9 @@ export type OdemeBelge = typeof odemeBelgeleri.$inferSelect;
 export const odemeSirketleri = pgTable("odeme_sirketleri", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ad: text("ad").notNull().unique(),
-  iban: text("iban"),
+  iban: text("iban"),            // (F1.9) TRY için geriye-uyum yedeği; yeni yazımlar ibanTry'ye gider
+  ibanTry: text("iban_try"),
+  ibanUsd: text("iban_usd"),
   banka: text("banka"),
   vergiNo: text("vergi_no"),
   notlar: text("notlar"), // "not" SQL rezerve kelimesi — "notlar" kullanılır

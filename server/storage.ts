@@ -397,12 +397,12 @@ export interface IStorage {
   getOdemeTalep(id: string): Promise<OdemeTalep | undefined>;
   updateOdemeTalep(id: string, t: Partial<InsertOdemeTalep>): Promise<OdemeTalep | undefined>;
   createOdemeBelge(b: InsertOdemeBelge): Promise<OdemeBelge>;
-  upsertOdemeSirketi(ad: string, opts?: { iban?: string | null; kaynak?: string }): Promise<void>;
+  upsertOdemeSirketi(ad: string, opts?: { iban?: string | null; paraBirimi?: string; kaynak?: string }): Promise<void>;
   getOdemeSirketleri(): Promise<OdemeSirketi[]>;
   getOdemeSirketleriTumu(): Promise<OdemeSirketi[]>;
-  createOdemeSirketi(data: { ad: string; iban?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }): Promise<OdemeSirketi | null>;
-  updateOdemeSirketi(id: string, data: Partial<{ ad: string; iban: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean }>): Promise<OdemeSirketi | null>;
-  bulkUpsertOdemeSirketleri(rows: { ad: string; iban?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
+  createOdemeSirketi(data: { ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }): Promise<OdemeSirketi | null>;
+  updateOdemeSirketi(id: string, data: Partial<{ ad: string; iban: string | null; ibanTry: string | null; ibanUsd: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean }>): Promise<OdemeSirketi | null>;
+  bulkUpsertOdemeSirketleri(rows: { ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1039,10 +1039,12 @@ export class DatabaseStorage implements IStorage {
     
     for (let i = 0; i < giderler.length; i += BATCH_SIZE) {
       const batch = giderler.slice(i, i + BATCH_SIZE);
-      const inserted = await db.insert(aracGiderler).values(batch).returning();
+      // rowHash çakışması = daha önce yüklenmiş satır → atla (null rowHash'ler çakışmaz, hep eklenir).
+      // .returning() yalnızca gerçekten eklenen satırları döner; atlananlar sayımdan düşer.
+      const inserted = await db.insert(aracGiderler).values(batch).onConflictDoNothing({ target: aracGiderler.rowHash }).returning();
       results.push(...inserted);
     }
-    
+
     return results;
   }
 
@@ -3518,16 +3520,21 @@ export class DatabaseStorage implements IStorage {
 
   async upsertOdemeSirketi(
     ad: string,
-    opts?: { iban?: string | null; kaynak?: string },
+    opts?: { iban?: string | null; paraBirimi?: string; kaynak?: string },
   ): Promise<void> {
     const temiz = ad.trim();
     if (!temiz) return;
     const ibanTemiz = opts?.iban ? String(opts.iban).trim() : null;
-    // Insert'te iban+kaynak yazılır; ÇAKIŞMADA yalnız sayaç+sonKullanim artar
-    // (muhasebenin girdiği iban/banka/vergiNo/kaynak ASLA ezilmez).
+    const values: typeof odemeSirketleri.$inferInsert = { ad: temiz, kaynak: opts?.kaynak ?? "temsilci" };
+    if (ibanTemiz) {
+      // Talebin para birimine uyan kolona yaz; EUR firma hesabı tutulmuyor → yazma
+      if (opts?.paraBirimi === "USD") values.ibanUsd = ibanTemiz;
+      else if (!opts?.paraBirimi || opts.paraBirimi === "TRY") values.ibanTry = ibanTemiz;
+    }
+    // ÇAKIŞMADA yalnız sayaç+sonKullanim artar; IBAN kolonları ASLA ezilmez (F1.9 güvencesi).
     await db
       .insert(odemeSirketleri)
-      .values({ ad: temiz, iban: ibanTemiz, kaynak: opts?.kaynak ?? "temsilci" })
+      .values(values)
       .onConflictDoUpdate({
         target: odemeSirketleri.ad,
         set: {
@@ -3551,7 +3558,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createOdemeSirketi(data: {
-    ad: string; iban?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null;
+    ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null;
   }): Promise<OdemeSirketi | null> {
     const temiz = data.ad.trim();
     if (!temiz) return null;
@@ -3561,7 +3568,8 @@ export class DatabaseStorage implements IStorage {
       .insert(odemeSirketleri)
       .values({
         ad: temiz,
-        iban: data.iban?.trim() || null,
+        ibanTry: (data.ibanTry ?? data.iban)?.trim() || null, // eski iban → TRY (geriye uyum köprüsü)
+        ibanUsd: data.ibanUsd?.trim() || null,
         banka: data.banka?.trim() || null,
         vergiNo: data.vergiNo?.trim() || null,
         notlar: data.notlar?.trim() || null,
@@ -3573,11 +3581,13 @@ export class DatabaseStorage implements IStorage {
 
   async updateOdemeSirketi(
     id: string,
-    data: Partial<{ ad: string; iban: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean }>,
+    data: Partial<{ ad: string; iban: string | null; ibanTry: string | null; ibanUsd: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean }>,
   ): Promise<OdemeSirketi | null> {
     const set: Record<string, unknown> = {};
     if (data.ad !== undefined) set.ad = data.ad.trim();
-    if (data.iban !== undefined) set.iban = data.iban?.trim() || null;
+    if (data.ibanTry !== undefined) set.ibanTry = data.ibanTry?.trim() || null;
+    else if (data.iban !== undefined) set.ibanTry = data.iban?.trim() || null; // eski iban → TRY köprüsü
+    if (data.ibanUsd !== undefined) set.ibanUsd = data.ibanUsd?.trim() || null;
     if (data.banka !== undefined) set.banka = data.banka?.trim() || null;
     if (data.vergiNo !== undefined) set.vergiNo = data.vergiNo?.trim() || null;
     if (data.notlar !== undefined) set.notlar = data.notlar?.trim() || null;
@@ -3591,7 +3601,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async bulkUpsertOdemeSirketleri(
-    rows: { ad: string; iban?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[],
+    rows: { ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[],
   ): Promise<{ eklendi: number; guncellendi: number; atlandi: number }> {
     let eklendi = 0, guncellendi = 0, atlandi = 0;
     for (const row of rows) {
@@ -3600,14 +3610,16 @@ export class DatabaseStorage implements IStorage {
       const mevcut = await db.select().from(odemeSirketleri).where(eq(odemeSirketleri.ad, temiz)).limit(1);
       // Muhasebe Excel'i YETKİLİ: çakışmada dolu gelen alanları GÜNCELLER.
       const alanlar = {
-        iban: row.iban?.trim() || null,
+        ibanTry: (row.ibanTry ?? row.iban)?.trim() || null, // eski iban → TRY köprüsü
+        ibanUsd: row.ibanUsd?.trim() || null,
         banka: row.banka?.trim() || null,
         vergiNo: row.vergiNo?.trim() || null,
         notlar: row.notlar?.trim() || null,
       };
       if (mevcut.length > 0) {
         const set: Record<string, unknown> = {};
-        if (alanlar.iban) set.iban = alanlar.iban;
+        if (alanlar.ibanTry) set.ibanTry = alanlar.ibanTry;
+        if (alanlar.ibanUsd) set.ibanUsd = alanlar.ibanUsd;
         if (alanlar.banka) set.banka = alanlar.banka;
         if (alanlar.vergiNo) set.vergiNo = alanlar.vergiNo;
         if (alanlar.notlar) set.notlar = alanlar.notlar;

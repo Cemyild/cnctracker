@@ -789,12 +789,17 @@ export async function registerRoutes(
   app.post("/api/araclar/bulk-gider", async (req, res) => {
     try {
       const veriler = Array.isArray(req.body) ? req.body : [req.body];
-      
+
       const validVeriler = [];
       for (const item of veriler) {
         const parsed = insertAracGiderSchema.safeParse(item);
         if (parsed.success) {
-          validVeriler.push(parsed.data);
+          // Kaynak işlem no'su (Halis Petrol "Satış ID") varsa tekrar yüklemede çift kaydı
+          // önlemek için rowHash üret. Yoksa null → dedup uygulanmaz (manuel/tekil giderler gibi).
+          const kaynakId = item?.kaynakId ?? item?.dedupKey;
+          const data: any = { ...parsed.data };
+          if (kaynakId) data.rowHash = createRowHash([String(data.aracId), String(kaynakId)]);
+          validVeriler.push(data);
         } else {
           console.warn("Invalid vehicle expense item:", item, parsed.error);
         }
@@ -805,7 +810,7 @@ export async function registerRoutes(
       }
 
       const inserted = await storage.insertAracGiderler(validVeriler);
-      res.json({ success: true, count: inserted.length });
+      res.json({ success: true, count: inserted.length, skipped: validVeriler.length - inserted.length });
     } catch (err) {
       console.error("Toplu araç gideri eklenirken hata:", err);
       res.status(500).json({ error: "Giderler eklenirken hata oluştu" });

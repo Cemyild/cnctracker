@@ -1003,8 +1003,12 @@ export default function Tools() {
     const { toast } = useToast();
     const queryClient = useQueryClient();
 
+    // Halis Petrol "SatisListesi" Excel'i → araç bazlı yakıt giderleri.
+    // Tutar sütunu "Net Tutar" (iskontolu, KDV dahil): fatura tryTutar'ı da KDV dahil
+    // olduğundan "O Ay Dağıtılan" fatura tutarıyla aynı bazda karşılaştırılır.
     const handleFuelExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
+        const inputEl = e.target;              // async'te e pooled olabilir → referansı yakala
+        const file = inputEl.files?.[0];
         if (!file) return;
 
         const reader = new FileReader();
@@ -1012,51 +1016,95 @@ export default function Tools() {
             try {
                 const bstr = event.target?.result;
                 const workbook = XLSX.read(bstr, { type: "binary", cellDates: true });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                 const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-                // Expected format: Plaka, Tarih, Tutar, Açıklama, Kilometre
+                // Plaka eşleşmesi: boşluk/tire yok say, baştaki sıfırları at
+                // (Excel "016CNC43" ↔ DB "16 CNC 43"). Aynı normalizasyon iki tarafa da uygulanır.
+                const normPlate = (p: any) => String(p ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+                const plakaMap = new Map((araclar ?? []).map(a => [normPlate(a.plaka), a] as [string, AracRow]));
+
+                // Tarih → YYYY-MM-DD (YEREL bileşenler; toISOString'e girmeden — saat dilimi ay kaymasını önler)
+                const toYMD = (v: any): string => {
+                    if (v instanceof Date && !isNaN(v.getTime())) {
+                        return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+                    }
+                    if (typeof v === "number") { // Excel seri no (cellDates kapalıysa)
+                        const dt = new Date(Math.round((v - 25569) * 86400 * 1000));
+                        return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+                    }
+                    const s = String(v ?? "").trim();
+                    const dm = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/);   // dd.MM.yyyy
+                    if (dm) return `${dm[3]}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}`;
+                    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);              // yyyy-MM-dd / ISO
+                    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+                    return format(new Date(), "yyyy-MM-dd");
+                };
+
+                // Tutar: Halis Petrol "Net Tutar" (iskontolu) → yoksa "Tutar"/"Brüt Tutar". Sayı veya TR-metin.
+                const parseTutar = (v: any): number => {
+                    if (typeof v === "number") return v;
+                    const s = String(v ?? "").replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+                    const n = parseFloat(s);
+                    return isNaN(n) ? 0 : n;
+                };
+
+                let eslesmeyen = 0;
                 const validGiderler = jsonData.map(row => {
-                    const plaka = String(row.Plaka || row.plaka || "").trim().toUpperCase();
-                    const arac = araclar?.find(a => a.plaka.replace(/\s+/g, '').toUpperCase() === plaka.replace(/\s+/g, '').toUpperCase());
-
-                    if (!arac) return null;
-
-                    let rawTutar = row.Tutar || row.tutar || "0";
-                    if (typeof rawTutar === "string") {
-                        rawTutar = rawTutar.replace(/\./g, "").replace(",", ".");
+                    const arac = plakaMap.get(normPlate(row.Plaka ?? row.plaka));
+                    if (!arac) {
+                        if (String(row.Plaka ?? row.plaka ?? "").trim()) eslesmeyen++;
+                        return null;
                     }
 
+                    const tutar = parseTutar(row["Net Tutar"] ?? row.Tutar ?? row.tutar ?? row["Brüt Tutar"]);
+                    if (tutar <= 0) return null; // 0 TL / özet / boş satırları atla
+
+                    const kmRaw = Number(row.Kilometre ?? row.kilometre);
                     return {
                         aracId: arac.id,
-                        tarih: row.Tarih || row.tarih || format(new Date(), "yyyy-MM-dd"),
+                        tarih: toYMD(row.Tarih ?? row.tarih),
                         kategori: "Yakıt",
-                        aciklama: row.Açıklama || row.aciklama || "Excel'den yüklendi",
-                        tutar: String(rawTutar),
-                        kilometre: row.Kilometre || row.kilometre || null
+                        aciklama: String(row["Açıklama"] ?? row.aciklama ?? ([row.Tip, row["Fatura Numarası"]].filter(Boolean).join(" · ") || "Yakıt (Halis Petrol)")),
+                        tutar: tutar.toFixed(2),
+                        kilometre: Number.isFinite(kmRaw) && kmRaw > 0 ? Math.round(kmRaw) : null,
+                        // Tekrar yüklemede çift kaydı önlemek için kaynak işlem no'su (backend rowHash üretir)
+                        kaynakId: row["Satış ID"] ?? row["İşlem Numarası"] ?? undefined,
                     };
                 }).filter(Boolean);
 
                 if (validGiderler.length === 0) {
-                    toast({ title: "Hata", description: "Geçerli plaka ile eşleşen kayıt bulunamadı.", variant: "destructive" });
+                    toast({
+                        title: "Kayıt eklenmedi",
+                        description: eslesmeyen > 0
+                            ? `${eslesmeyen} satırın plakası araç listesiyle eşleşmedi.`
+                            : "Geçerli yakıt satırı bulunamadı (tutar sütunu okunamadı).",
+                        variant: "destructive",
+                    });
                     return;
                 }
 
                 const res = await fetch("/api/araclar/bulk-gider", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(validGiderler)
+                    body: JSON.stringify(validGiderler),
                 });
-
                 if (!res.ok) throw new Error(await res.text());
 
-                toast({ title: "Başarılı", description: `${validGiderler.length} yakıt gideri yüklendi.` });
+                const { count = 0, skipped = 0 } = await res.json().catch(() => ({}));
+                toast({
+                    title: count > 0 ? "Yakıt giderleri yüklendi" : "Yeni kayıt eklenmedi",
+                    description: (count > 0 ? `${count} yeni kayıt` : "Tüm satırlar zaten mevcuttu")
+                        + (skipped > 0 ? ` · ${skipped} tekrar atlandı` : "")
+                        + (eslesmeyen > 0 ? ` · ${eslesmeyen} eşleşmeyen plaka` : ""),
+                });
                 queryClient.invalidateQueries({ queryKey: ["/api/araclar"] });
                 queryClient.invalidateQueries({ queryKey: ["/api/giderler/yakit-faturalari"] });
             } catch (error) {
                 console.error("Excel upload error:", error);
                 toast({ title: "Hata", description: "Excel işlenirken hata oluştu.", variant: "destructive" });
+            } finally {
+                inputEl.value = ""; // aynı dosya arka arkaya seçilebilsin
             }
         };
         reader.readAsBinaryString(file);
