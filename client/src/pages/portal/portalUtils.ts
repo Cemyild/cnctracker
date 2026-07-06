@@ -62,21 +62,15 @@ export function belgeUrl(b: OdemeBelge): string {
 // tutmayabilir; normalize + benzerlik ile öneri sunulur. Saklama DEĞİŞMEZ.
 // NOT: \b kelime sınırı JS'te yalnızca ASCII \w karakterlerini tanır — "ş" gibi
 // Türkçe harfler \w SAYILMAZ, bu yüzden \b burada "a.ş." / "şti." gibi son ekleri
-// HİÇ YAKALAMAZ (sessizce eşleşmez). Unicode-uyumlu \p{L}\p{N} tabanlı lookaround
-// sınırları kullanılır — davranış aynı kalır, yalnızca sınır tanımı düzeltilir.
-// @ts-ignore TS1501: proje tsconfig'inde "target" tanımsız (varsayılan ES3);
-// 'u' bayrağı yalnızca derleyiciyi rahatsız ediyor, çalışma zamanını etkilemez.
+// HİÇ YAKALAMAZ. Unicode-uyumlu \p{L}\p{N} tabanlı lookaround sınırları (/u bayrağı)
+// kullanılır — Türkçe harfleri korur; tsconfig target: ES2020 bu bayrağı sağlar.
 const FIRMA_EKLERI = /(?<![\p{L}\p{N}])(a\.?\s*ş\.?|a\.?\s*s\.?|ltd\.?|şti\.?|sti\.?|ş\.?t\.?i\.?)(?![\p{L}\p{N}])/gu;
 
 export function firmaNormalize(s: string): string {
   return (s ?? "")
     .toLocaleLowerCase("tr")
     .replace(FIRMA_EKLERI, " ")
-    // @ts-ignore TS1501: proje tsconfig'inde "target" tanımsız (varsayılan ES3) ama
-    // lib: esnext derleniyor; 'u' bayrağı (Türkçe harfleri korumak için gerekli
-    // \p{L}\p{N} unicode sınıfları) yalnızca bu satırda derleyiciyi rahatsız ediyor.
-    // Çalışma zamanı davranışını etkilemez (noEmit); tsconfig kapsam dışı bırakıldı.
-    .replace(/[^\p{L}\p{N}\s]/gu, " ") // noktalama → boşluk
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // noktalama → boşluk (\p ile Türkçe harfleri korur)
     .replace(/\s+/g, " ")
     .trim();
 }
