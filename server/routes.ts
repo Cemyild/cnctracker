@@ -2025,6 +2025,18 @@ export async function registerRoutes(
     },
   );
 
+  // 2c. Otomatik yükleme log — görünürlük
+  app.get("/api/otomatik-yukleme/log", async (req, res) => {
+    try {
+      const tip = (req.query.tip as string) || null;
+      const limit = Math.min(Number(req.query.limit) || 10, 50);
+      const loglar = await storage.getOtomatikYuklemeLoglar(tip, limit);
+      res.json(loglar);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // 3. Mizan listesi
   app.get("/api/tahsilat/mizan", async (_req, res) => {
     try {

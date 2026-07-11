@@ -15,6 +15,7 @@ import { MusteriListesi } from "@/components/tahsilat/MusteriListesi";
 import { TahsilatTrend } from "@/components/tahsilat/TahsilatTrend";
 import { EslestirmeUI } from "@/components/tahsilat/EslestirmeUI";
 import { MizanArsivi } from "@/components/tahsilat/MizanArsivi";
+import { OtomatikYuklemeRozeti } from "@/components/OtomatikYuklemeRozeti";
 
 interface MizanRow {
   id: string;
@@ -98,7 +99,10 @@ export default function Tahsilat() {
           <TabsContent value="musteriler" className="mt-5"><MusteriListesi mizanId={aktifMizanId} /></TabsContent>
           <TabsContent value="trend" className="mt-5"><TahsilatTrend /></TabsContent>
           <TabsContent value="eslestirme" className="mt-5"><EslestirmeUI /></TabsContent>
-          <TabsContent value="arsiv" className="mt-5"><MizanArsivi /></TabsContent>
+          <TabsContent value="arsiv" className="mt-5 space-y-4">
+            <OtomatikYuklemeRozeti tip="mizan" />
+            <MizanArsivi />
+          </TabsContent>
         </Tabs>
 
         <MizanYukleModal open={yukleOpen} onClose={() => setYukleOpen(false)} />

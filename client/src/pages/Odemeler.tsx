@@ -23,6 +23,7 @@ import {
   type TalepDetay, formatTarih, formatPara,
   TIP_ETIKET, DURUM_ETIKET, IADE_ETIKET, BELGE_ETIKET, belgeUrl,
 } from "@/pages/portal/portalUtils";
+import { OtomatikYuklemeRozeti } from "@/components/OtomatikYuklemeRozeti";
 
 type Ozet = {
   talepler: TalepDetay[];
@@ -397,6 +398,7 @@ export default function Odemeler() {
         </TabsList>
 
         <TabsContent value="izleme" className="space-y-4">
+          <OtomatikYuklemeRozeti tip="beyanname" />
           <ExcelYukleme />
           {ozet && ozet.eslesmeyen.length > 0 && (
             <Card>
