@@ -33,9 +33,25 @@ export function parseBeyannameWorkbook(buffer: Buffer): { rows: InsertBeyanname[
   const grid: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
   if (!grid.length) throw new Error(`"${sheetName}" sayfası boş`);
 
+  // Başlık satırını DİNAMİK bul — bazı export'larda 1. satır bir bilgi/başlık
+  // satırıdır ve gerçek başlıklar 2. (veya sonraki) satıra kayar. İlk 15 satırda
+  // A sütunu "DOSYA NO" olan satırı ara; başlık 1. satırdaysa davranış değişmez.
+  const aCol = XLSX.utils.decode_col("A");
+  const taraSinir = Math.min(grid.length, 15);
+  let baslikIdx = -1;
+  for (let r = 0; r < taraSinir; r++) {
+    if (String(grid[r]?.[aCol] ?? "").trim() === "DOSYA NO") {
+      baslikIdx = r;
+      break;
+    }
+  }
+  if (baslikIdx === -1) {
+    throw new Error(`"${sheetName}" sayfasında başlık satırı (A="DOSYA NO") ilk 15 satırda bulunamadı`);
+  }
+
   // Başlık doğrulaması — uyuşmazlıkta yükleme REDDEDİLİR.
   // Sessiz sıfır-satır ithalatı yasak (gümrük fatura_tarihi dersinden).
-  const baslikSatiri = grid[0];
+  const baslikSatiri = grid[baslikIdx];
   const sorunlar: string[] = [];
   for (const [harf, beklenen] of Object.entries(BEKLENEN_BASLIKLAR)) {
     const idx = XLSX.utils.decode_col(harf);
@@ -51,7 +67,7 @@ export function parseBeyannameWorkbook(buffer: Buffer): { rows: InsertBeyanname[
   const col = (harf: string) => XLSX.utils.decode_col(harf);
   const metin = (v: unknown) => (v == null ? null : String(v).trim() || null);
   const rows: InsertBeyanname[] = [];
-  for (let r = 1; r < grid.length; r++) {
+  for (let r = baslikIdx + 1; r < grid.length; r++) {
     const satir = grid[r];
     if (!satir) continue;
     const dosyaNo = String(satir[col("A")] ?? "").trim();
