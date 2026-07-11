@@ -1174,3 +1174,18 @@ export const portalSessions = pgTable("portal_sessions", {
 }, (table) => [
   index("IDX_session_expire").on(table.expire),
 ]);
+
+// Otomatik Excel yükleme log'u (Power Automate → /api/ingest)
+export const otomatikYuklemeLog = pgTable("otomatik_yukleme_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tip: text("tip").notNull(),                       // "mizan" | "beyanname"
+  dosyaAdi: text("dosya_adi").notNull(),
+  durum: text("durum").notNull(),                   // "basarili" | "atlandi" | "hata"
+  kayitSayisi: integer("kayit_sayisi").notNull().default(0),
+  mesaj: text("mesaj"),
+  zaman: text("zaman").notNull(),                   // yerel "YYYY-MM-DD HH:mm:ss"
+});
+
+export const insertOtomatikYuklemeLogSchema = createInsertSchema(otomatikYuklemeLog).omit({ id: true });
+export type InsertOtomatikYuklemeLog = z.infer<typeof insertOtomatikYuklemeLogSchema>;
+export type OtomatikYuklemeLog = typeof otomatikYuklemeLog.$inferSelect;

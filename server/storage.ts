@@ -19,6 +19,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   resmiTatiller, type ResmiTatil, type InsertResmiTatil,
   musteriler, type Musteri, type InsertMusteri,
   mizanYuklemeleri, type MizanYukleme, type InsertMizanYukleme,
+  otomatikYuklemeLog, type OtomatikYuklemeLog, type InsertOtomatikYuklemeLog,
   mizanBakiye, type MizanBakiye, type InsertMizanBakiye,
   mizanEslestirmeLog, type EslestirmeLog, type InsertEslestirmeLog,
   mizanEslestirmeOnerileri, type EslestirmeOneri, type InsertEslestirmeOneri,
@@ -362,6 +363,8 @@ export interface IStorage {
   getMizanByMd5(md5: string): Promise<MizanYukleme | null>;
   insertMizanYukleme(data: InsertMizanYukleme): Promise<MizanYukleme>;
   deleteMizanYukleme(id: string): Promise<{ filename: string } | null>;
+  insertOtomatikYuklemeLog(data: InsertOtomatikYuklemeLog): Promise<OtomatikYuklemeLog>;
+  getOtomatikYuklemeLoglar(tip: string | null, limit: number): Promise<OtomatikYuklemeLog[]>;
 
   // Tahsilat — bakiye
   insertMizanBakiyeBatch(rows: InsertMizanBakiye[]): Promise<number>;
@@ -3197,6 +3200,21 @@ export class DatabaseStorage implements IStorage {
   async insertMizanYukleme(data: InsertMizanYukleme): Promise<MizanYukleme> {
     const [row] = await db.insert(mizanYuklemeleri).values(data).returning();
     return row;
+  }
+
+  async insertOtomatikYuklemeLog(data: InsertOtomatikYuklemeLog): Promise<OtomatikYuklemeLog> {
+    const [row] = await db.insert(otomatikYuklemeLog).values(data).returning();
+    return row;
+  }
+
+  async getOtomatikYuklemeLoglar(tip: string | null, limit: number): Promise<OtomatikYuklemeLog[]> {
+    if (tip) {
+      return await db.select().from(otomatikYuklemeLog)
+        .where(eq(otomatikYuklemeLog.tip, tip))
+        .orderBy(desc(otomatikYuklemeLog.zaman)).limit(limit);
+    }
+    return await db.select().from(otomatikYuklemeLog)
+      .orderBy(desc(otomatikYuklemeLog.zaman)).limit(limit);
   }
 
   async deleteMizanYukleme(id: string): Promise<{ filename: string } | null> {
