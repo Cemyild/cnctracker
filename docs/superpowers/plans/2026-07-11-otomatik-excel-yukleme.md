@@ -24,8 +24,9 @@
 - `shared/schema.ts` — MODIFY: `otomatikYuklemeLog` tablosu + insert şeması + tipler (dosya sonuna eklenir).
 - `server/storage.ts` — MODIFY: import + IStorage 2 imza + DatabaseStorage 2 impl.
 - `server/routes.ts` — MODIFY: crypto import; `Response`/`NextFunction` tip importu; `processMizanBuffer()` + hata sınıfları (top-level); `/api/tahsilat/mizan/save` refactor; `requireIngestToken` middleware; `POST /api/ingest/:tip`; `GET /api/otomatik-yukleme/log`.
-- `client/src/pages/Tahsilat.tsx` — MODIFY: mizan durum rozeti.
-- `client/src/pages/Odemeler.tsx` — MODIFY: beyanname durum rozeti.
+- `client/src/components/OtomatikYuklemeRozeti.tsx` — CREATE: paylaşılan durum rozeti bileşeni (tip prop'lu).
+- `client/src/pages/Tahsilat.tsx` — MODIFY: rozet bileşenini `tip="mizan"` ile kullan.
+- `client/src/pages/Odemeler.tsx` — MODIFY: rozet bileşenini `tip="beyanname"` ile kullan.
 - `.env.example` — MODIFY: `INGEST_TOKEN` satırı.
 - `docs/superpowers/plans/2026-07-11-otomatik-excel-yukleme-deploy.md` — CREATE (Task 6): deploy + Power Automate kurulum notu.
 
@@ -474,7 +475,7 @@ git commit -m "feat(otomasyon): token korumali POST /api/ingest/:tip (mizan + be
 
 **Interfaces:**
 - Consumes: `storage.getOtomatikYuklemeLoglar` (Task 1).
-- Produces: `GET /api/otomatik-yukleme/log?tip=&limit=`; UI'da `OtomatikYuklemeRozeti` (her sayfada inline).
+- Produces: `GET /api/otomatik-yukleme/log?tip=&limit=`; paylaşılan `<OtomatikYuklemeRozeti tip="mizan"|"beyanname" />` bileşeni (`client/src/components/OtomatikYuklemeRozeti.tsx`).
 
 - [ ] **Step 1: GET log endpoint'i ekle**
 
@@ -493,73 +494,90 @@ git commit -m "feat(otomasyon): token korumali POST /api/ingest/:tip (mizan + be
   });
 ```
 
-- [ ] **Step 2: Tahsilat.tsx'e mizan rozeti ekle**
+- [ ] **Step 2: Paylaşılan `OtomatikYuklemeRozeti` bileşenini oluştur (DRY — iki sayfada tek kaynak)**
 
-`client/src/pages/Tahsilat.tsx` içinde, mevcut `useQuery` importu ve `mizanList` sorgusunun yanına ekle:
+`client/src/components/OtomatikYuklemeRozeti.tsx` OLUŞTUR:
 
 ```tsx
-  const { data: otoLog } = useQuery<Array<{ id: string; durum: string; kayitSayisi: number; mesaj: string | null; zaman: string; dosyaAdi: string }>>({
-    queryKey: ["/api/otomatik-yukleme/log?tip=mizan&limit=5"],
+import { useQuery } from "@tanstack/react-query";
+
+type OtoLog = {
+  id: string;
+  durum: string;
+  kayitSayisi: number;
+  mesaj: string | null;
+  zaman: string;      // "YYYY-MM-DD HH:mm:ss"
+  dosyaAdi: string;
+};
+
+export function OtomatikYuklemeRozeti({ tip }: { tip: "mizan" | "beyanname" }) {
+  const { data: loglar } = useQuery<OtoLog[]>({
+    queryKey: [`/api/otomatik-yukleme/log?tip=${tip}&limit=5`],
   });
-```
 
-Mizan yükleme bölümünün üstüne, JSX içinde bir durum kartı ekle (mevcut shadcn Card/Badge kalıbıyla):
+  if (!loglar || loglar.length === 0) return null;
+  const son = loglar[0];
+  // Tarih dd/mm/yyyy HH:mm — string slice ile; new Date() YÖNLENDİRMESİ YOK (timezone güvenliği)
+  const tarih = `${son.zaman.slice(8, 10)}/${son.zaman.slice(5, 7)}/${son.zaman.slice(0, 4)} ${son.zaman.slice(11, 16)}`;
+  const renk =
+    son.durum === "hata" ? "text-red-600"
+    : son.durum === "atlandi" ? "text-muted-foreground"
+    : "text-green-600";
 
-```tsx
-  {otoLog && otoLog.length > 0 && (
-    <div className="rounded-md border p-3 text-sm space-y-1" data-testid="oto-yukleme-mizan">
+  return (
+    <div className="rounded-md border p-3 text-sm space-y-1" data-testid={`oto-yukleme-${tip}`}>
       <div className="font-medium">
-        Son otomatik yükleme:{" "}
-        {otoLog[0].zaman.slice(8, 10)}/{otoLog[0].zaman.slice(5, 7)}/{otoLog[0].zaman.slice(0, 4)}{" "}
-        {otoLog[0].zaman.slice(11, 16)}
-        {" — "}
-        <span className={
-          otoLog[0].durum === "hata" ? "text-red-600"
-          : otoLog[0].durum === "atlandi" ? "text-muted-foreground"
-          : "text-green-600"
-        }>
-          {otoLog[0].mesaj || otoLog[0].durum}
-        </span>
+        Son otomatik yükleme: {tarih} — <span className={renk}>{son.mesaj || son.durum}</span>
       </div>
-      <ul className="text-xs text-muted-foreground">
-        {otoLog.slice(1).map((l) => (
-          <li key={l.id}>
-            {l.zaman.slice(11, 16)} · {l.dosyaAdi} · {l.durum}
-          </li>
-        ))}
-      </ul>
+      {loglar.length > 1 && (
+        <ul className="text-xs text-muted-foreground">
+          {loglar.slice(1).map((l) => (
+            <li key={l.id}>{l.zaman.slice(11, 16)} · {l.dosyaAdi} · {l.durum}</li>
+          ))}
+        </ul>
+      )}
     </div>
-  )}
+  );
+}
 ```
 
-> Tarih `dd/mm/yyyy` string-slice ile üretilir — `new Date()` yönlendirmesi YOK (timezone güvenliği).
+- [ ] **Step 3: Tahsilat.tsx'te bileşeni kullan**
 
-- [ ] **Step 3: Odemeler.tsx'e beyanname rozeti ekle**
-
-`client/src/pages/Odemeler.tsx` içine aynı deseni ekle, yalnız `queryKey` `?tip=beyanname&limit=5` ve `data-testid="oto-yukleme-beyanname"`. (Task 4 Step 2'deki JSX'in birebir aynısı, sadece testid ve queryKey farklı — kopyala.)
-
+`client/src/pages/Tahsilat.tsx` importlarına ekle:
 ```tsx
-  const { data: otoLogBeyanname } = useQuery<Array<{ id: string; durum: string; kayitSayisi: number; mesaj: string | null; zaman: string; dosyaAdi: string }>>({
-    queryKey: ["/api/otomatik-yukleme/log?tip=beyanname&limit=5"],
-  });
+import { OtomatikYuklemeRozeti } from "@/components/OtomatikYuklemeRozeti";
 ```
-JSX bloğu: Step 2'deki kartın `otoLog` → `otoLogBeyanname`, `data-testid="oto-yukleme-beyanname"` değiştirilmiş hali; beyanname yükleme bölümünün üstüne yerleştir.
+Mizan yükleme bölümünün üstüne yerleştir:
+```tsx
+      <OtomatikYuklemeRozeti tip="mizan" />
+```
 
-- [ ] **Step 4: Tip kontrolü**
+- [ ] **Step 4: Odemeler.tsx'te bileşeni kullan**
+
+`client/src/pages/Odemeler.tsx` importlarına ekle:
+```tsx
+import { OtomatikYuklemeRozeti } from "@/components/OtomatikYuklemeRozeti";
+```
+Beyanname yükleme bölümünün üstüne yerleştir:
+```tsx
+      <OtomatikYuklemeRozeti tip="beyanname" />
+```
+
+- [ ] **Step 5: Tip kontrolü**
 
 Run: `npm run check`
 Expected: PASS.
 
-- [ ] **Step 5: UI doğrulaması (dev)**
+- [ ] **Step 6: UI doğrulaması (dev)**
 
 `npm run dev` çalışırken (Task 3'te log kayıtları oluşmuş olmalı) `/tahsilat` ve `/odemeler` sayfalarını aç.
 Expected: "Son otomatik yükleme: dd/mm/yyyy HH:mm — N kayıt" kartı görünür; atlandı gri, hata kırmızı, başarı yeşil.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add server/routes.ts client/src/pages/Tahsilat.tsx client/src/pages/Odemeler.tsx
-git commit -m "feat(otomasyon): otomatik yukleme log GET ucu + Tahsilat/Odemeler durum rozeti"
+git add server/routes.ts client/src/components/OtomatikYuklemeRozeti.tsx client/src/pages/Tahsilat.tsx client/src/pages/Odemeler.tsx
+git commit -m "feat(otomasyon): otomatik yukleme log GET ucu + paylasilan durum rozeti bileseni"
 ```
 
 ---
