@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -65,8 +66,8 @@ export default function OperasyonKasaSayfasi() {
     e.preventDefault();
     if (!belge) { toast({ title: "Belge (fiş/fatura) zorunlu", variant: "destructive" }); return; }
     if (!tutar.trim() || !alacakli.trim()) { toast({ title: "Tutar ve alacaklı zorunlu", variant: "destructive" }); return; }
-    if (!dosyaYok && !beyannameId) { toast({ title: "Beyanname seçin veya 'Dosya yok' işaretleyin", variant: "destructive" }); return; }
-    if (dosyaYok && !aciklama.trim()) { toast({ title: "Dosyasız kayıtta açıklama zorunlu", variant: "destructive" }); return; }
+    if (!dosyaYok && !beyannameId) { toast({ title: "Beyanname seçin veya 'Ofis Masrafı' işaretleyin", variant: "destructive" }); return; }
+    if (dosyaYok && !aciklama.trim()) { toast({ title: "Ofis masrafında açıklama zorunlu", variant: "destructive" }); return; }
     setGonderiliyor(true);
     try {
       const fd = new FormData();
@@ -134,8 +135,8 @@ export default function OperasyonKasaSayfasi() {
             <div className="space-y-2">
               <Label>Beyanname / Dosya</Label>
               <div className="flex items-center gap-2">
-                <Checkbox id="op-dosya-yok" checked={dosyaYok} onCheckedChange={(v) => { setDosyaYok(v === true); if (v === true) setBeyannameId(""); }} data-testid="checkbox-op-dosya-yok" />
-                <Label htmlFor="op-dosya-yok" className="font-normal text-muted-foreground">Dosya yok — açıklama zorunlu</Label>
+                <Checkbox id="op-ofis" checked={dosyaYok} onCheckedChange={(v) => { setDosyaYok(v === true); if (v === true) setBeyannameId(""); }} data-testid="checkbox-op-ofis" />
+                <Label htmlFor="op-ofis" className="font-normal text-muted-foreground">Ofis Masrafı — dosyaya bağlı değil, açıklama zorunlu</Label>
               </div>
               {!dosyaYok && (
                 <>
@@ -200,7 +201,7 @@ export default function OperasyonKasaSayfasi() {
           {(ozet?.masraflar ?? []).map((m) => (
             <div key={m.id} className="flex items-center justify-between rounded-md border p-2 text-sm" data-testid={`row-masraf-${m.id}`}>
               <div>
-                <span className="font-medium">{m.masrafTuru ?? "Masraf"}</span> · {m.alacakli} · {formatTarih(m.tarih)}
+                <span className="font-medium">{m.dosyaYok && <Badge variant="outline" className="mr-1">Ofis</Badge>}{m.masrafTuru ?? "Masraf"}</span> · {m.alacakli} · {formatTarih(m.tarih)}
                 {m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}
               </div>
               <div className="flex items-center gap-2">

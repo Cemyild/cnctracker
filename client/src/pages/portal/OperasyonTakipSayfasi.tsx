@@ -98,7 +98,7 @@ export default function OperasyonTakipSayfasi() {
                 <div key={a.id} className="flex justify-between text-sm py-0.5"><span className="text-green-600">Avans · {formatTarih(a.tarih)} · {a.aciklama ?? "—"}</span><span className="text-green-600">+{formatPara(a.tutar, "TL")}</span></div>
               ))}
               {detay.acik.masraflar.map((m) => (
-                <div key={m.id} className="flex justify-between text-sm py-0.5"><span>{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span><span className="text-destructive">−{formatPara(m.tutar, "TL")}</span></div>
+                <div key={m.id} className="flex justify-between text-sm py-0.5"><span>{m.dosyaYok && <Badge variant="outline" className="mr-1">Ofis</Badge>}{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span><span className="text-destructive">−{formatPara(m.tutar, "TL")}</span></div>
               ))}
             </div>
             <div className="border-t pt-3 space-y-3">
@@ -118,7 +118,7 @@ export default function OperasyonTakipSayfasi() {
                     <div className="border-t mt-1 pt-1 space-y-0.5">
                       {k.masraflar.map((m) => (
                         <div key={m.id} className="flex justify-between text-xs">
-                          <span>{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                          <span>{m.dosyaYok && <Badge variant="outline" className="mr-1">Ofis</Badge>}{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
                           <span className="text-destructive">−{formatPara(m.tutar, "TL")}</span>
                         </div>
                       ))}

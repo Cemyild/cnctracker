@@ -27,7 +27,7 @@ export default function OperasyonKapanislarSayfasi() {
             <div className="border-t pt-2 space-y-1">
               {k.masraflar.map((m) => (
                 <div key={m.id} className="flex justify-between">
-                  <span>{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                  <span>{m.dosyaYok && <Badge variant="outline" className="mr-1">Ofis</Badge>}{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
                   <span className="text-destructive">−{formatPara(m.tutar, "TL")}</span>
                 </div>
               ))}
