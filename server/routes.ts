@@ -156,7 +156,7 @@ function fixUploadFilename(name: string): string {
 }
 
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar } from "@shared/schema";
-import { createHash } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 import { z } from "zod";
 import {
   aylikHesapla,
@@ -187,7 +187,7 @@ import { extractPolicyFields } from "./lib/policeOcr";
 import { hashSifre, dogrulaSifre, requirePortal, requireMuhasebe, requireOperasyon } from "./portalAuth";
 import { konsimentoAnalizEt, analizYapilandirildiMi } from "./konsimentoAnaliz";
 import { insertPortalKullaniciSchema, type PortalKullanici, type InsertPortalKullanici, type Beyanname } from "@shared/schema";
-import type { Request } from "express";
+import type { Request, Response, NextFunction } from "express";
 
 
 // Row hash oluştur - satırı benzersiz tanımlamak için
@@ -369,6 +369,26 @@ async function processMizanBuffer(
     eklenenBakiye,
     kayitSayisi: parsed.satirlar.length,
   };
+}
+
+// Yerel "YYYY-MM-DD HH:mm:ss" (log zamanı) — new Date() display yönlendirmesi yok
+function zamanDamgasi(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// Otomatik alım token doğrulaması — fail-closed (env yoksa 503)
+function requireIngestToken(req: Request, res: Response, next: NextFunction) {
+  const expected = process.env.INGEST_TOKEN;
+  if (!expected) return res.status(503).json({ error: "Otomatik alım devre dışı" });
+  const got = req.header("x-ingest-token") || "";
+  const a = createHash("sha256").update(got).digest();
+  const b = createHash("sha256").update(expected).digest();
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: "Yetkisiz" });
+  }
+  next();
 }
 
 export async function registerRoutes(
@@ -1958,6 +1978,52 @@ export async function registerRoutes(
       res.status(500).json({ error: e.message });
     }
   });
+
+  // 2b. Otomatik alım (Power Automate) — token korumalı, ham binary gövde
+  app.post(
+    "/api/ingest/:tip",
+    requireIngestToken,
+    express.raw({ type: "application/octet-stream", limit: "25mb" }),
+    async (req, res) => {
+      const tip = req.params.tip;
+      const dosyaAdi = (req.header("x-dosya-adi") || (req.query.dosya as string) || `ingest-${Date.now()}.xlsx`).toString();
+      const buffer = req.body as Buffer;
+
+      if (tip !== "mizan" && tip !== "beyanname") {
+        return res.status(400).json({ error: "Geçersiz tip (mizan | beyanname)" });
+      }
+      if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res.status(400).json({ error: "Boş gövde — dosya gönderilmedi" });
+      }
+
+      try {
+        if (tip === "mizan") {
+          try {
+            const sonuc = await processMizanBuffer(buffer, dosyaAdi, { overrideDuplicate: false });
+            const mesaj = `${sonuc.kayitSayisi} kayıt, ${sonuc.eklenenMusteri} yeni müşteri`;
+            await storage.insertOtomatikYuklemeLog({ tip, dosyaAdi, durum: "basarili", kayitSayisi: sonuc.kayitSayisi, mesaj, zaman: zamanDamgasi() });
+            return res.json({ durum: "basarili", tip, kayitSayisi: sonuc.kayitSayisi, mesaj });
+          } catch (e: any) {
+            if (e instanceof MizanMukerrerHata) {
+              await storage.insertOtomatikYuklemeLog({ tip, dosyaAdi, durum: "atlandi", kayitSayisi: 0, mesaj: "Aynı dosya daha önce yüklendi", zaman: zamanDamgasi() });
+              return res.json({ durum: "atlandi", mesaj: "Aynı dosya daha önce yüklendi" });
+            }
+            throw e;
+          }
+        } else {
+          const { rows } = parseBeyannameWorkbook(buffer);
+          if (!rows.length) throw new Error("Excel'de veri satırı bulunamadı");
+          const sonuc = await storage.upsertBeyannameler(rows);
+          const mesaj = `${rows.length} satır (${sonuc.eklenen} yeni, ${sonuc.guncellenen} güncellendi)`;
+          await storage.insertOtomatikYuklemeLog({ tip, dosyaAdi, durum: "basarili", kayitSayisi: rows.length, mesaj, zaman: zamanDamgasi() });
+          return res.json({ durum: "basarili", tip, kayitSayisi: rows.length, mesaj });
+        }
+      } catch (e: any) {
+        await storage.insertOtomatikYuklemeLog({ tip, dosyaAdi, durum: "hata", kayitSayisi: 0, mesaj: (e.message || "Bilinmeyen hata").slice(0, 500), zaman: zamanDamgasi() });
+        return res.status(400).json({ durum: "hata", error: e.message || "İşlenemedi" });
+      }
+    },
+  );
 
   // 3. Mizan listesi
   app.get("/api/tahsilat/mizan", async (_req, res) => {
