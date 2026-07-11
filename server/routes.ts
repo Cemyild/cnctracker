@@ -4717,6 +4717,22 @@ export async function registerRoutes(
     }
   });
 
+  // Portal kullanıcısı yeni masraf türü ekleyebilir (paylaşılan liste); çift kayıt açmaz.
+  app.post("/api/portal/masraf-turleri", requirePortal, async (req, res) => {
+    try {
+      const ad = String(req.body?.ad ?? "").trim();
+      if (!ad) return res.status(400).json({ error: "Tür adı zorunlu" });
+      const norm = (s: string) => s.trim().toLocaleLowerCase("tr");
+      const mevcutlar = await storage.getMasrafTurleri();
+      const mevcut = mevcutlar.find((t) => norm(t.ad) === norm(ad));
+      if (mevcut) return res.json(mevcut); // aynı ad → yeni kayıt AÇMA, mevcudu döndür
+      const yeni = await storage.createMasrafTuru({ ad, sira: 0, aktif: true });
+      res.json(yeni);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   // Kayıtlı ödeme şirketleri — alacaklı alanı öneri listesi (depo onaylarından birikir)
   app.get("/api/portal/odeme-sirketleri", requirePortal, async (_req, res) => {
     try {
