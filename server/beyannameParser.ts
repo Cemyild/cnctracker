@@ -72,6 +72,9 @@ export function parseBeyannameWorkbook(buffer: Buffer): { rows: InsertBeyanname[
     if (!satir) continue;
     const dosyaNo = String(satir[col("A")] ?? "").trim();
     if (!dosyaNo) continue; // boş satır — atla
+    // Footer/özet satırlarını atla: gerçek dosya no "YY-NNNNN" biçimindedir
+    // (ör. 26-10694). "TOPLAM KAYIT : 1982" gibi toplam satırları bu desene uymaz.
+    if (!/^\d+-\d/.test(dosyaNo)) continue;
     rows.push({
       dosyaNo,
       alici: metin(satir[col("B")]),
