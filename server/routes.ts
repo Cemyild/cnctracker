@@ -237,6 +237,140 @@ const uploadParamsSchema = z.object({
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+class MizanMukerrerHata extends Error {
+  constructor(public duplicateId: string) {
+    super("Aynı dosya daha önce yüklenmiş");
+  }
+}
+class MizanBosHata extends Error {}
+
+async function processMizanBuffer(
+  buffer: Buffer,
+  filename: string,
+  opts: { mizanTarihi?: string | null; not?: string | null; overrideDuplicate?: boolean } = {},
+): Promise<{ mizanId: string; eklenenMusteri: number; guncellenenMusteri: number; eklenenBakiye: number; kayitSayisi: number }> {
+  const md5 = createHash("md5").update(buffer).digest("hex");
+  if (!opts.overrideDuplicate) {
+    const dup = await storage.getMizanByMd5(md5);
+    if (dup) throw new MizanMukerrerHata(dup.id);
+  }
+
+  const parsed = parseMizanXlsx(buffer, filename);
+  if (parsed.satirlar.length === 0) {
+    throw new MizanBosHata("Mizan'da 120- ile başlayan satır bulunamadı");
+  }
+
+  const mizanTarihi = opts.mizanTarihi || parsed.mizanTarihi || new Date().toISOString().slice(0, 10);
+  const not = opts.not ?? null;
+
+  // Filesystem arşivi
+  const yil = mizanTarihi.slice(0, 4);
+  const ay = mizanTarihi.slice(5, 7);
+  const safeName = filename.replace(/[\\/:*?"<>|]/g, "_");
+  const archiveDir = path.join(process.cwd(), "uploads", "mizan", yil, ay);
+  if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+  const filepath = path.join(archiveDir, `${md5}-${safeName}`);
+  await fs.promises.writeFile(filepath, buffer);
+
+  const toplamNetBakiye = parsed.satirlar.reduce(
+    (acc, r) => acc + netBakiye({ sonBakiye: r.sonBakiye, sonBakiyeBA: r.sonBakiyeBA }),
+    0,
+  );
+
+  const mizan = await storage.insertMizanYukleme({
+    mizanTarihi,
+    filename,
+    filepath,
+    sizeBytes: buffer.length,
+    md5Hash: md5,
+    kayitSayisi: parsed.satirlar.length,
+    toplamNetBakiye: String(toplamNetBakiye),
+    not,
+  });
+
+  let eklenenMusteri = 0;
+  let guncellenenMusteri = 0;
+  const bakiyeBatch: InsertMizanBakiye[] = [];
+  const gumrukUnvanlar = await storage.getDistinctGumrukUnvanlar();
+
+  for (const r of parsed.satirlar) {
+    let musteri = await storage.getMusteriByHesapKodu(r.hesapKodu);
+    if (!musteri) {
+      let gumrukEslesen: string | null = null;
+      let gumrukEslesenSkor = 0;
+      const oneriler: { unvan: string; skor: number }[] = [];
+      for (const u of gumrukUnvanlar) {
+        const s = benzerlikSkoru(r.hesapAdi, u);
+        if (s >= ESLESME_AUTO_ESIK && !gumrukEslesen) {
+          gumrukEslesen = u;
+          gumrukEslesenSkor = s;
+        } else if (s >= ESLESME_ONERI_ESIK && s < ESLESME_AUTO_ESIK) {
+          oneriler.push({ unvan: u, skor: s });
+        }
+      }
+      musteri = await storage.insertMusteri({
+        hesapKodu: r.hesapKodu,
+        ad: r.hesapAdi,
+        sektor: r.sektor,
+        firmaGrubu: r.firmaGrubu,
+        limitTutar: r.limitTutar != null ? String(r.limitTutar) : null,
+        problemli: r.problemli,
+        gumrukFirmaUnvanlari: gumrukEslesen ? [gumrukEslesen] : [],
+        sonGoruldugu: new Date(),
+      } as any);
+      if (gumrukEslesen) {
+        await storage.insertEslestirmeLog({
+          musteriId: musteri.id,
+          gumrukUnvan: gumrukEslesen,
+          eklemeTipi: "auto-fuzzy",
+          benzerlikSkoru: gumrukEslesenSkor.toFixed(3),
+        });
+      }
+      for (const o of oneriler.slice(0, 5)) {
+        await storage.insertEslestirmeOneri({
+          musteriId: musteri.id,
+          gumrukUnvan: o.unvan,
+          benzerlikSkoru: String(o.skor.toFixed(3)),
+        });
+      }
+      eklenenMusteri++;
+    } else {
+      await storage.updateMusteri(musteri.id, {
+        ad: r.hesapAdi,
+        sektor: r.sektor,
+        firmaGrubu: r.firmaGrubu,
+        limitTutar: r.limitTutar != null ? String(r.limitTutar) : null,
+        problemli: r.problemli,
+        sonGoruldugu: new Date(),
+      } as any);
+      guncellenenMusteri++;
+    }
+
+    bakiyeBatch.push({
+      mizanId: mizan.id,
+      musteriId: musteri.id,
+      borc: String(r.borc),
+      alacak: String(r.alacak),
+      bakiyeBorc: String(r.bakiyeBorc),
+      bakiyeAlacak: String(r.bakiyeAlacak),
+      sonBakiye: String(r.sonBakiye),
+      sonBakiyeBA: r.sonBakiyeBA,
+      sonBorcTarihi: r.sonBorcTarihi,
+      sonAlacakTarihi: r.sonAlacakTarihi,
+    });
+  }
+
+  const eklenenBakiye = await storage.insertMizanBakiyeBatch(bakiyeBatch);
+
+  return {
+    mizanId: mizan.id,
+    eklenenMusteri,
+    guncellenenMusteri,
+    eklenenBakiye,
+    kayitSayisi: parsed.satirlar.length,
+  };
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -1806,136 +1940,20 @@ export async function registerRoutes(
     try {
       if (!req.file) return res.status(400).json({ error: "Dosya gönderilmedi" });
       const filename = Buffer.from(req.file.originalname, "latin1").toString("utf8");
-      const md5 = createHash("md5").update(req.file.buffer).digest("hex");
       const overrideDuplicate = req.body.overrideDuplicate === "true";
-      if (!overrideDuplicate) {
-        const dup = await storage.getMizanByMd5(md5);
-        if (dup) return res.status(409).json({ error: "Aynı dosya daha önce yüklenmiş", duplicateId: dup.id });
-      }
-
-      const mizanTarihi = (req.body.mizanTarihi as string) || new Date().toISOString().slice(0, 10);
-      const not = (req.body.not as string) || null;
-
-      const parsed = parseMizanXlsx(req.file.buffer, filename);
-      if (parsed.satirlar.length === 0) {
-        return res.status(400).json({ error: "Mizan'da 120- ile başlayan satır bulunamadı" });
-      }
-
-      // Filesystem arşivi
-      const yil = mizanTarihi.slice(0, 4);
-      const ay = mizanTarihi.slice(5, 7);
-      const safeName = filename.replace(/[\\/:*?"<>|]/g, "_");
-      const archiveDir = path.join(process.cwd(), "uploads", "mizan", yil, ay);
-      if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
-      const filepath = path.join(archiveDir, `${md5}-${safeName}`);
-      await fs.promises.writeFile(filepath, req.file.buffer);
-
-      // Net bakiye toplamı (signed)
-      const toplamNetBakiye = parsed.satirlar.reduce(
-        (acc, r) => acc + netBakiye({ sonBakiye: r.sonBakiye, sonBakiyeBA: r.sonBakiyeBA }),
-        0,
-      );
-
-      // 1. mizanYuklemeleri'ne ekle
-      const mizan = await storage.insertMizanYukleme({
-        mizanTarihi,
-        filename,
-        filepath,
-        sizeBytes: req.file.size,
-        md5Hash: md5,
-        kayitSayisi: parsed.satirlar.length,
-        toplamNetBakiye: String(toplamNetBakiye),
-        not,
+      const sonuc = await processMizanBuffer(req.file.buffer, filename, {
+        mizanTarihi: (req.body.mizanTarihi as string) || null,
+        not: (req.body.not as string) || null,
+        overrideDuplicate,
       });
-
-      // 2. Müşterileri upsert + bakiyeleri ekle + eşleştirme önerileri tetikle
-      let eklenenMusteri = 0;
-      let guncellenenMusteri = 0;
-      const bakiyeBatch: InsertMizanBakiye[] = [];
-
-      // Gümrük firma unvanlarını cache'le (eşleştirme önerisi için).
-      // DB-side DISTINCT — tüm tablo yerine sadece unique unvan listesi.
-      const gumrukUnvanlar = await storage.getDistinctGumrukUnvanlar();
-
-      for (const r of parsed.satirlar) {
-        let musteri = await storage.getMusteriByHesapKodu(r.hesapKodu);
-        if (!musteri) {
-          // Otomatik eşleştirme dene
-          let gumrukEslesen: string | null = null;
-          let gumrukEslesenSkor: number = 0;
-          let oneriler: { unvan: string; skor: number }[] = [];
-          for (const u of gumrukUnvanlar) {
-            const s = benzerlikSkoru(r.hesapAdi, u);
-            if (s >= ESLESME_AUTO_ESIK && !gumrukEslesen) {
-              gumrukEslesen = u;
-              gumrukEslesenSkor = s;
-            } else if (s >= ESLESME_ONERI_ESIK && s < ESLESME_AUTO_ESIK) {
-              oneriler.push({ unvan: u, skor: s });
-            }
-          }
-          musteri = await storage.insertMusteri({
-            hesapKodu: r.hesapKodu,
-            ad: r.hesapAdi,
-            sektor: r.sektor,
-            firmaGrubu: r.firmaGrubu,
-            limitTutar: r.limitTutar != null ? String(r.limitTutar) : null,
-            problemli: r.problemli,
-            gumrukFirmaUnvanlari: gumrukEslesen ? [gumrukEslesen] : [],
-            sonGoruldugu: new Date(),
-          } as any);
-          if (gumrukEslesen) {
-            await storage.insertEslestirmeLog({
-              musteriId: musteri.id,
-              gumrukUnvan: gumrukEslesen,
-              eklemeTipi: "auto-fuzzy",
-              benzerlikSkoru: gumrukEslesenSkor.toFixed(3),
-            });
-          }
-          for (const o of oneriler.slice(0, 5)) { // max 5 öneri / müşteri
-            await storage.insertEslestirmeOneri({
-              musteriId: musteri.id,
-              gumrukUnvan: o.unvan,
-              benzerlikSkoru: String(o.skor.toFixed(3)),
-            });
-          }
-          eklenenMusteri++;
-        } else {
-          // Latest-wins update
-          await storage.updateMusteri(musteri.id, {
-            ad: r.hesapAdi,
-            sektor: r.sektor,
-            firmaGrubu: r.firmaGrubu,
-            limitTutar: r.limitTutar != null ? String(r.limitTutar) : null,
-            problemli: r.problemli,
-            sonGoruldugu: new Date(),
-          } as any);
-          guncellenenMusteri++;
-        }
-
-        bakiyeBatch.push({
-          mizanId: mizan.id,
-          musteriId: musteri.id,
-          borc: String(r.borc),
-          alacak: String(r.alacak),
-          bakiyeBorc: String(r.bakiyeBorc),
-          bakiyeAlacak: String(r.bakiyeAlacak),
-          sonBakiye: String(r.sonBakiye),
-          sonBakiyeBA: r.sonBakiyeBA,
-          sonBorcTarihi: r.sonBorcTarihi,
-          sonAlacakTarihi: r.sonAlacakTarihi,
-        });
-      }
-
-      const eklenenBakiye = await storage.insertMizanBakiyeBatch(bakiyeBatch);
-
-      res.json({
-        success: true,
-        mizanId: mizan.id,
-        eklenenMusteri,
-        guncellenenMusteri,
-        eklenenBakiye,
-      });
+      res.json({ success: true, ...sonuc });
     } catch (e: any) {
+      if (e instanceof MizanMukerrerHata) {
+        return res.status(409).json({ error: e.message, duplicateId: e.duplicateId });
+      }
+      if (e instanceof MizanBosHata) {
+        return res.status(400).json({ error: e.message });
+      }
       console.error("Mizan save hatası:", e);
       res.status(500).json({ error: e.message });
     }
