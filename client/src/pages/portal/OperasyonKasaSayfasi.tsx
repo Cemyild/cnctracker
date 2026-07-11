@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { formatTarih, formatPara } from "./portalUtils";
+import MasrafTuruSecici from "./MasrafTuruSecici";
 
 type Ozet = { bakiye: number; avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] };
 
@@ -153,10 +154,7 @@ export default function OperasyonKasaSayfasi() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>Masraf Türü</Label>
-                <Select value={masrafTuru} onValueChange={setMasrafTuru}>
-                  <SelectTrigger data-testid="select-op-masraf-turu"><SelectValue placeholder="Seçin" /></SelectTrigger>
-                  <SelectContent>{masrafTurleri.map((t) => (<SelectItem key={t.id} value={t.ad}>{t.ad}</SelectItem>))}</SelectContent>
-                </Select>
+                <MasrafTuruSecici value={masrafTuru} onChange={setMasrafTuru} testId="op-masraf-turu" />
               </div>
               <div className="space-y-2">
                 <Label>Tutar (TL)</Label>

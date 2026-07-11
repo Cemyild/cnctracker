@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { type PortalMe } from "./PortalApp";
 import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIbanlariByPB, firmaIbanOzet } from "./portalUtils";
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
+import MasrafTuruSecici from "./MasrafTuruSecici";
 
 type KalemDurum = "bekliyor" | "gonderiliyor" | "gonderildi" | "hata";
 
@@ -399,16 +400,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
               {odemeTipi === "masraf" && (
                 <div className="space-y-2">
                   <Label>Masraf Türü</Label>
-                  <Select value={masrafTuru} onValueChange={setMasrafTuru}>
-                    <SelectTrigger data-testid="select-masraf-turu">
-                      <SelectValue placeholder="Seçin" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {masrafTurleri.map((t) => (
-                        <SelectItem key={t.id} value={t.ad}>{t.ad}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <MasrafTuruSecici value={masrafTuru} onChange={setMasrafTuru} testId="masraf-turu" />
                 </div>
               )}
               <div className="space-y-2">

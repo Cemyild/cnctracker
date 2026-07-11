@@ -14,6 +14,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIbanlariByPB, firmaIbanOzet } from "./portalUtils";
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
+import MasrafTuruSecici from "./MasrafTuruSecici";
 
 // Muhasebenin talepsiz ödeme girişi — tek adımda "Ödendi" kaydı oluşur (dekont zorunlu).
 export default function DogrudanOdemeSayfasi() {
@@ -270,16 +271,7 @@ export default function DogrudanOdemeSayfasi() {
             {odemeTipi === "masraf" && (
               <div className="space-y-2">
                 <Label>Masraf Türü</Label>
-                <Select value={masrafTuru} onValueChange={setMasrafTuru}>
-                  <SelectTrigger data-testid="select-dogrudan-masraf-turu">
-                    <SelectValue placeholder="Seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {masrafTurleri.map((t) => (
-                      <SelectItem key={t.id} value={t.ad}>{t.ad}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <MasrafTuruSecici value={masrafTuru} onChange={setMasrafTuru} testId="dogrudan-masraf-turu" />
               </div>
             )}
             <div className="space-y-2">
