@@ -1986,13 +1986,16 @@ export async function registerRoutes(
     express.raw({ type: "application/octet-stream", limit: "25mb" }),
     async (req, res) => {
       const tip = req.params.tip;
-      const dosyaAdi = (req.header("x-dosya-adi") || (req.query.dosya as string) || `ingest-${Date.now()}.xlsx`).toString();
+      const headerDosyaAdi = req.header("x-dosya-adi");
+      const dosyaAdi = (headerDosyaAdi ? fixUploadFilename(headerDosyaAdi) : (req.query.dosya as string) || `ingest-${Date.now()}.xlsx`).toString();
       const buffer = req.body as Buffer;
 
       if (tip !== "mizan" && tip !== "beyanname") {
+        await storage.insertOtomatikYuklemeLog({ tip: req.params.tip, dosyaAdi, durum: "hata", kayitSayisi: 0, mesaj: "Geçersiz tip (mizan | beyanname)", zaman: zamanDamgasi() });
         return res.status(400).json({ error: "Geçersiz tip (mizan | beyanname)" });
       }
       if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+        await storage.insertOtomatikYuklemeLog({ tip, dosyaAdi, durum: "hata", kayitSayisi: 0, mesaj: "Boş gövde — dosya gönderilmedi", zaman: zamanDamgasi() });
         return res.status(400).json({ error: "Boş gövde — dosya gönderilmedi" });
       }
 
@@ -2029,7 +2032,7 @@ export async function registerRoutes(
   app.get("/api/otomatik-yukleme/log", async (req, res) => {
     try {
       const tip = (req.query.tip as string) || null;
-      const limit = Math.min(Number(req.query.limit) || 10, 50);
+      const limit = Math.max(1, Math.min(Number(req.query.limit) || 10, 50));
       const loglar = await storage.getOtomatikYuklemeLoglar(tip, limit);
       res.json(loglar);
     } catch (e: any) {

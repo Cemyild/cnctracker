@@ -12,6 +12,8 @@ type OtoLog = {
 export function OtomatikYuklemeRozeti({ tip }: { tip: "mizan" | "beyanname" }) {
   const { data: loglar } = useQuery<OtoLog[]>({
     queryKey: [`/api/otomatik-yukleme/log?tip=${tip}&limit=5`],
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
   });
 
   if (!loglar || loglar.length === 0) return null;

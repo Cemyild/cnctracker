@@ -93,16 +93,16 @@ export default function Tahsilat() {
             </div>
           </div>
 
-          <TabsContent value="ozet" className="mt-5"><TahsilatOzet mizanId={aktifMizanId} /></TabsContent>
+          <TabsContent value="ozet" className="mt-5 space-y-4">
+            <OtomatikYuklemeRozeti tip="mizan" />
+            <TahsilatOzet mizanId={aktifMizanId} />
+          </TabsContent>
           <TabsContent value="rapor" className="mt-5"><HaftalikRapor mizanId={aktifMizanId} /></TabsContent>
           <TabsContent value="borc-ciro" className="mt-5"><BorcCiroOrani mizanId={aktifMizanId} /></TabsContent>
           <TabsContent value="musteriler" className="mt-5"><MusteriListesi mizanId={aktifMizanId} /></TabsContent>
           <TabsContent value="trend" className="mt-5"><TahsilatTrend /></TabsContent>
           <TabsContent value="eslestirme" className="mt-5"><EslestirmeUI /></TabsContent>
-          <TabsContent value="arsiv" className="mt-5 space-y-4">
-            <OtomatikYuklemeRozeti tip="mizan" />
-            <MizanArsivi />
-          </TabsContent>
+          <TabsContent value="arsiv" className="mt-5"><MizanArsivi /></TabsContent>
         </Tabs>
 
         <MizanYukleModal open={yukleOpen} onClose={() => setYukleOpen(false)} />
