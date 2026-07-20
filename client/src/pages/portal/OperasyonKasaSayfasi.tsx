@@ -194,7 +194,7 @@ export default function OperasyonKasaSayfasi() {
         <CardContent className="space-y-2">
           {(ozet?.avanslar ?? []).map((a) => (
             <div key={a.id} className="flex items-center justify-between rounded-md border p-2 text-sm" data-testid={`row-avans-${a.id}`}>
-              <div><span className="font-medium text-green-600">Avans</span> · {formatTarih(a.tarih)} · {a.aciklama ?? "—"}</div>
+              <div><span className="font-medium text-green-600">Avans</span> · {formatTarih(a.tarih)} · {a.aciklama ?? "—"}{a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}</div>
               <div className="font-semibold text-green-600">+{formatPara(a.tutar, "TL")}</div>
             </div>
           ))}

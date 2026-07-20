@@ -45,6 +45,8 @@ export default function OperasyonTakipSayfasi() {
   const [avansDialog, setAvansDialog] = useState(false);
   const [avansTutar, setAvansTutar] = useState("");
   const [avansAciklama, setAvansAciklama] = useState("");
+  const [avansDekont, setAvansDekont] = useState<File | null>(null);
+  const [dekontSayac, setDekontSayac] = useState(0); // file input'u sıfırlamak için key
   const [gonderiliyor, setGonderiliyor] = useState(false);
 
   const { data: detay } = useQuery<Detay>({
@@ -64,13 +66,18 @@ export default function OperasyonTakipSayfasi() {
     if (!avansTutar.trim()) { toast({ title: "Tutar girin", variant: "destructive" }); return; }
     setGonderiliyor(true);
     try {
+      const fd = new FormData();
+      fd.set("tutar", avansTutar);
+      fd.set("aciklama", avansAciklama);
+      if (avansDekont) fd.set("dekont", avansDekont); // OPSİYONEL
       const res = await fetch(`/api/portal/operasyon-takip/${secili.id}/avans`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tutar: avansTutar, aciklama: avansAciklama }), credentials: "include",
+        method: "POST", body: fd, credentials: "include",
       });
       if (!res.ok) throw new Error((await res.json()).error || "Gönderilemedi");
       toast({ title: "Avans yüklendi", description: `${secili.adSoyad} bakiyesine geçti.` });
-      setAvansDialog(false); setAvansTutar(""); setAvansAciklama(""); tazele();
+      setAvansDialog(false); setAvansTutar(""); setAvansAciklama("");
+      setAvansDekont(null); setDekontSayac((s) => s + 1);
+      tazele();
     } catch (err: any) { toast({ title: "Hata", description: err.message, variant: "destructive" }); }
     finally { setGonderiliyor(false); }
   };
@@ -124,7 +131,7 @@ export default function OperasyonTakipSayfasi() {
                 <p className="text-xs text-muted-foreground">Açık hareket yok.</p>
               )}
               {detay.acik.avanslar.map((a) => (
-                <div key={a.id} className="flex justify-between text-sm py-0.5"><span className="text-green-600">Avans · {formatTarih(a.tarih)} · {a.aciklama ?? "—"}</span><span className="text-green-600">+{formatPara(a.tutar, "TL")}</span></div>
+                <div key={a.id} className="flex justify-between text-sm py-0.5"><span className="text-green-600">Avans · {formatTarih(a.tarih)} · {a.aciklama ?? "—"}{a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}</span><span className="text-green-600">+{formatPara(a.tutar, "TL")}</span></div>
               ))}
               {detay.acik.masraflar.map((m) => (
                 <div key={m.id} className="flex justify-between text-sm py-0.5"><span>{m.dosyaYok && <Badge variant="outline" className="mr-1">Ofis</Badge>}{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span><span className="text-destructive">−{formatPara(m.tutar, "TL")}</span></div>
@@ -166,6 +173,7 @@ export default function OperasyonTakipSayfasi() {
           <div className="space-y-3">
             <div className="space-y-1"><Label>Tutar (TL)</Label><Input placeholder="0,00" value={avansTutar} onChange={(e) => setAvansTutar(e.target.value)} data-testid="input-avans-tutar" /></div>
             <div className="space-y-1"><Label>Açıklama</Label><Input value={avansAciklama} onChange={(e) => setAvansAciklama(e.target.value)} data-testid="input-avans-aciklama" /></div>
+            <div className="space-y-1"><Label>Dekont (opsiyonel)</Label><Input key={dekontSayac} type="file" onChange={(e) => setAvansDekont(e.target.files?.[0] ?? null)} data-testid="input-avans-dekont" /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAvansDialog(false)}>Vazgeç</Button>
