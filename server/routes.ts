@@ -5489,20 +5489,23 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/portal/operasyon-takip/:operasyonId/avans", requireMuhasebe, async (req, res) => {
+  app.post("/api/portal/operasyon-takip/:operasyonId/avans", requireMuhasebe, uploadOperasyonBelge.single("dekont"), async (req, res) => {
+    const dekont = req.file; // OPSİYONEL — elden nakit avansta dekont olmayabilir
+    const sil = () => { if (dekont) fs.promises.unlink(dekont.path).catch(() => {}); };
     try {
       const ben = await portalKullanici(req);
-      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      if (!ben) { sil(); return res.status(401).json({ error: "Giriş gerekli" }); }
       const { tutar, aciklama } = req.body || {};
       const tutarNum = parseTutar(tutar);
-      if (tutarNum === null || tutarNum <= 0) return res.status(400).json({ error: "Geçerli tutar girin" });
+      if (tutarNum === null || tutarNum <= 0) { sil(); return res.status(400).json({ error: "Geçerli tutar girin" }); }
       const avans = await storage.avansYukle({
         operasyonId: req.params.operasyonId, tutar: tutarNum,
         aciklama: aciklama ? String(aciklama) : null, tarih: bugunYmd(), gonderenId: ben.id,
-        belgeDosya: null, belgeAdi: null, // T2'de req.file (dekont) değerinden gelecek
+        belgeDosya: dekont ? dekont.path.replace(/\\/g, "/") : null,
+        belgeAdi: dekont ? fixUploadFilename(dekont.originalname) : null,
       });
       res.json(avans);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) { sil(); res.status(500).json({ error: e.message }); }
   });
 
   app.post("/api/portal/operasyon-takip/kapanis/:kapanisId/geri-ac", requireMuhasebe, async (req, res) => {
