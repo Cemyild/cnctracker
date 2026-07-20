@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import type { OperasyonAvans, OperasyonGunKapanis, OperasyonMasraf } from "@shared/schema";
+import { subeler } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useToast } from "@/hooks/use-toast";
 import { formatTarih, formatPara } from "./portalUtils";
 
-type Satir = { id: string; adSoyad: string; kullaniciAdi: string; bakiye: number; bugunHarcanan: number };
+type Satir = { id: string; adSoyad: string; kullaniciAdi: string; sube: string | null; bakiye: number; bugunHarcanan: number };
 type Kapanis = OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] };
 type Detay = { bakiye: number; acik: { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }; kapanislar: Kapanis[] };
 
@@ -20,6 +21,26 @@ export default function OperasyonTakipSayfasi() {
   const { data: liste = [] } = useQuery<Satir[]>({
     queryKey: ["/api/portal/operasyon-takip"], refetchInterval: 10000, refetchIntervalInBackground: true,
   });
+  // Şube başlıkları MEVCUT KULLANICILARDAN türetilir — sabit listeden değil (boş şube bloğu gösterilmez).
+  const gruplar = useMemo(() => {
+    const harita = new Map<string, Satir[]>();
+    for (const s of liste) {
+      const ad = s.sube ?? "Şube atanmamış";
+      const g = harita.get(ad);
+      if (g) g.push(s); else harita.set(ad, [s]);
+    }
+    const sira = (ad: string) => {
+      const i = (subeler as readonly string[]).indexOf(ad);
+      return i === -1 ? subeler.length : i;
+    };
+    return Array.from(harita.entries())
+      .map(([sube, satirlar]) => ({
+        sube,
+        satirlar,
+        toplam: Math.round(satirlar.reduce((t, s) => t + s.bakiye, 0) * 100) / 100,
+      }))
+      .sort((a, b) => sira(a.sube) - sira(b.sube) || a.sube.localeCompare(b.sube, "tr"));
+  }, [liste]);
   const [secili, setSecili] = useState<Satir | null>(null);
   const [avansDialog, setAvansDialog] = useState(false);
   const [avansTutar, setAvansTutar] = useState("");
@@ -68,18 +89,26 @@ export default function OperasyonTakipSayfasi() {
       <Card>
         <CardHeader><CardTitle>Şube Bakiyeleri</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-          {liste.length === 0 && <p className="text-sm text-muted-foreground">Operasyon kullanıcısı yok.</p>}
-          {liste.map((s) => (
-            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3" data-testid={`sube-${s.id}`}>
-              <div>
-                <div className="font-medium">{s.adSoyad}</div>
-                <div className="text-xs text-muted-foreground">Bugün harcanan: {formatPara(s.bugunHarcanan, "TL")}</div>
+          {gruplar.length === 0 && <p className="text-sm text-muted-foreground">Operasyon kullanıcısı yok.</p>}
+          {gruplar.map((g) => (
+            <div key={g.sube} className="space-y-2" data-testid={`grup-sube-${g.sube}`}>
+              <div className="flex items-center justify-between border-b pb-1">
+                <span className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{g.sube}</span>
+                <span className="text-sm font-bold" data-testid={`grup-sube-toplam-${g.sube}`}>{formatPara(g.toplam, "TL")}</span>
               </div>
-              <div className="flex items-center gap-3">
-                <div className={`text-lg font-bold ${s.bakiye < 0 ? "text-destructive" : ""}`} data-testid={`sube-bakiye-${s.id}`}>{formatPara(s.bakiye, "TL")}</div>
-                <Button size="sm" onClick={() => { setSecili(s); setAvansDialog(true); }} data-testid={`button-avans-${s.id}`}>Avans Yükle</Button>
-                <Button size="sm" variant="outline" onClick={() => setSecili(s)} data-testid={`button-detay-${s.id}`}>Detay</Button>
-              </div>
+              {g.satirlar.map((s) => (
+                <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3" data-testid={`sube-${s.id}`}>
+                  <div>
+                    <div className="font-medium">{s.adSoyad}</div>
+                    <div className="text-xs text-muted-foreground">Bugün harcanan: {formatPara(s.bugunHarcanan, "TL")}</div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className={`text-lg font-bold ${s.bakiye < 0 ? "text-destructive" : ""}`} data-testid={`sube-bakiye-${s.id}`}>{formatPara(s.bakiye, "TL")}</div>
+                    <Button size="sm" onClick={() => { setSecili(s); setAvansDialog(true); }} data-testid={`button-avans-${s.id}`}>Avans Yükle</Button>
+                    <Button size="sm" variant="outline" onClick={() => setSecili(s)} data-testid={`button-detay-${s.id}`}>Detay</Button>
+                  </div>
+                </div>
+              ))}
             </div>
           ))}
         </CardContent>
