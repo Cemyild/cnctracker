@@ -49,8 +49,14 @@ export default function OperasyonKasaSayfasi() {
     if (!q) return beyannameler;
     return beyannameler.filter((b) =>
       b.dosyaNo.toLocaleLowerCase("tr").includes(q) ||
-      (b.alici ?? "").toLocaleLowerCase("tr").includes(q));
+      (b.alici ?? "").toLocaleLowerCase("tr").includes(q) ||
+      (b.beyanNo ?? "").toLocaleLowerCase("tr").includes(q));
   }, [beyannameler, arama]);
+
+  // Belge zorunluluğu seçili masraf türünden gelir. Tür seçilmemişse GÜVENLİ varsayılan: zorunlu.
+  // (Sunucu da aynı kuralı bağımsız uygular — bu yalnız kullanıcıya erken geri bildirim.)
+  const seciliTur = useMemo(() => masrafTurleri.find((t) => t.ad === masrafTuru), [masrafTurleri, masrafTuru]);
+  const belgeZorunlu = seciliTur ? seciliTur.belgeZorunlu : true;
 
   const acikMasrafToplam = (ozet?.masraflar ?? []).reduce((s, m) => s + parseFloat(m.tutar), 0);
   const acikAvansToplam = (ozet?.avanslar ?? []).reduce((s, a) => s + parseFloat(a.tutar), 0);
@@ -64,7 +70,7 @@ export default function OperasyonKasaSayfasi() {
 
   const kaydet = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!belge) { toast({ title: "Belge (fiş/fatura) zorunlu", variant: "destructive" }); return; }
+    if (belgeZorunlu && !belge) { toast({ title: "Belge (fiş/fatura) zorunlu", variant: "destructive" }); return; }
     if (!tutar.trim() || !alacakli.trim()) { toast({ title: "Tutar ve alacaklı zorunlu", variant: "destructive" }); return; }
     if (!dosyaYok && !beyannameId) { toast({ title: "Beyanname seçin veya 'Ofis Masrafı' işaretleyin", variant: "destructive" }); return; }
     if (dosyaYok && !aciklama.trim()) { toast({ title: "Ofis masrafında açıklama zorunlu", variant: "destructive" }); return; }
@@ -78,7 +84,7 @@ export default function OperasyonKasaSayfasi() {
       fd.set("alacakli", alacakli);
       fd.set("iban", iban);
       fd.set("aciklama", aciklama);
-      fd.set("belge", belge);
+      if (belge) fd.set("belge", belge);
       const res = await fetch("/api/portal/operasyon/masraf", { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) throw new Error((await res.json()).error || "Kaydedilemedi");
       toast({ title: "Masraf kaydedildi", description: "Bakiyeden düşüldü." });
@@ -140,12 +146,12 @@ export default function OperasyonKasaSayfasi() {
               </div>
               {!dosyaYok && (
                 <>
-                  <Input placeholder="Dosya no veya müşteri ara…" value={arama} onChange={(e) => setArama(e.target.value)} data-testid="input-op-arama" />
+                  <Input placeholder="Dosya no, beyan no veya müşteri ara…" value={arama} onChange={(e) => setArama(e.target.value)} data-testid="input-op-arama" />
                   <Select value={beyannameId} onValueChange={setBeyannameId}>
                     <SelectTrigger data-testid="select-op-beyanname"><SelectValue placeholder="Beyanname seçin" /></SelectTrigger>
                     <SelectContent>
                       {filtreliBeyannameler.slice(0, 100).map((b) => (
-                        <SelectItem key={b.id} value={b.id}>{b.dosyaNo} — {b.alici ?? "?"}</SelectItem>
+                        <SelectItem key={b.id} value={b.id}>{b.dosyaNo} — {b.alici ?? "?"}{b.beyanNo ? ` · ${b.beyanNo}` : ""}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -173,7 +179,7 @@ export default function OperasyonKasaSayfasi() {
                 <Input placeholder="TR.." value={iban} onChange={(e) => setIban(e.target.value)} data-testid="input-op-iban" />
               </div>
               <div className="space-y-2">
-                <Label>Belge (fiş/fatura — ZORUNLU)</Label>
+                <Label>{belgeZorunlu ? "Belge (fiş/fatura — ZORUNLU)" : "Belge (fiş/fatura — opsiyonel)"}</Label>
                 <Input key={formSayac} type="file" onChange={(e) => setBelge(e.target.files?.[0] ?? null)} data-testid="input-op-belge" />
               </div>
             </div>
