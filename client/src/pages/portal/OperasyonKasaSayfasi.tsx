@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import type { OperasyonAvans, OperasyonMasraf } from "@shared/schema";
+import type { Beyanname, OperasyonAvans, OperasyonMasraf } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useToast } from "@/hooks/use-toast";
 import { formatTarih, formatPara } from "./portalUtils";
 import YeniOdemeModal from "./YeniOdemeModal";
+import { ChevronRight, ChevronDown } from "lucide-react";
 
 type Ozet = { bakiye: number; avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] };
 
@@ -19,6 +20,7 @@ export default function OperasyonKasaSayfasi() {
     refetchInterval: 10000,
     refetchIntervalInBackground: true,
   });
+  const { data: beyannameler = [] } = useQuery<Beyanname[]>({ queryKey: ["/api/portal/beyannameler"] });
 
   const [yeniOdeme, setYeniOdeme] = useState(false);
   const [kapatDialog, setKapatDialog] = useState(false);
@@ -26,6 +28,29 @@ export default function OperasyonKasaSayfasi() {
 
   const acikMasrafToplam = (ozet?.masraflar ?? []).reduce((s, m) => s + parseFloat(m.tutar), 0);
   const acikAvansToplam = (ozet?.avanslar ?? []).reduce((s, a) => s + parseFloat(a.tutar), 0);
+
+  const [acikGruplar, setAcikGruplar] = useState<Set<string>>(new Set());
+  const grupAcKapa = (k: string) => setAcikGruplar((prev) => {
+    const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n;
+  });
+
+  const beyannameMap = useMemo(() => new Map(beyannameler.map((b) => [b.id, b])), [beyannameler]);
+
+  // Masraflar beyannameId'ye göre gruplanır; dosyaYok (ofis) ayrı grupta.
+  const { gruplar, ofisMasraflar, ofisToplam } = useMemo(() => {
+    const harita = new Map<string, OperasyonMasraf[]>();
+    const ofis: OperasyonMasraf[] = [];
+    for (const m of ozet?.masraflar ?? []) {
+      if (m.dosyaYok || !m.beyannameId) { ofis.push(m); continue; }
+      const g = harita.get(m.beyannameId);
+      if (g) g.push(m); else harita.set(m.beyannameId, [m]);
+    }
+    const topla = (list: OperasyonMasraf[]) => Math.round(list.reduce((s, m) => s + parseFloat(m.tutar), 0) * 100) / 100;
+    const gruplar = Array.from(harita.entries()).map(([beyannameId, masraflar]) => ({
+      beyannameId, beyanname: beyannameMap.get(beyannameId), masraflar, toplam: topla(masraflar),
+    }));
+    return { gruplar, ofisMasraflar: ofis, ofisToplam: topla(ofis) };
+  }, [ozet?.masraflar, beyannameMap]);
 
   const tazele = () => queryClient.invalidateQueries({ queryKey: ["/api/portal/operasyon/ozet"] });
 
@@ -83,18 +108,60 @@ export default function OperasyonKasaSayfasi() {
               <div className="font-semibold text-green-600">+{formatPara(a.tutar, "TL")}</div>
             </div>
           ))}
-          {(ozet?.masraflar ?? []).map((m) => (
-            <div key={m.id} className="flex items-center justify-between rounded-md border p-2 text-sm" data-testid={`row-masraf-${m.id}`}>
-              <div>
-                <span className="font-medium">{m.dosyaYok && <Badge variant="outline" className="mr-1">Ofis</Badge>}{m.masrafTuru ?? "Masraf"}</span> · {m.alacakli} · {formatTarih(m.tarih)}
-                {m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}
+          {gruplar.map((g) => {
+            const acik = acikGruplar.has(g.beyannameId);
+            const b = g.beyanname;
+            return (
+              <div key={g.beyannameId} className="rounded-md border" data-testid={`group-beyanname-${g.beyannameId}`}>
+                <button type="button" onClick={() => grupAcKapa(g.beyannameId)} className="flex w-full items-center justify-between gap-2 p-2 text-left text-sm hover:bg-muted/50" data-testid={`button-group-toggle-${g.beyannameId}`}>
+                  <span className="flex items-center gap-2">
+                    {acik ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                    <span className="font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
+                    <span className="text-muted-foreground">{b?.dosyaNo ?? "?"}{b?.beyanNo ? ` · ${b.beyanNo}` : ""} · {b?.alici ?? "?"}</span>
+                  </span>
+                  <Badge variant="secondary">{g.masraflar.length}</Badge>
+                </button>
+                {acik && (
+                  <div className="border-t px-2 py-1 space-y-1">
+                    {g.masraflar.map((m) => (
+                      <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
+                        <span>{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
+                          <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
-                <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
-              </div>
+            );
+          })}
+          {ofisMasraflar.length > 0 && (
+            <div className="rounded-md border" data-testid="group-ofis">
+              <button type="button" onClick={() => grupAcKapa("__ofis__")} className="flex w-full items-center justify-between gap-2 p-2 text-left text-sm hover:bg-muted/50" data-testid="button-group-toggle-ofis">
+                <span className="flex items-center gap-2">
+                  {acikGruplar.has("__ofis__") ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                  <span className="font-semibold text-destructive">−{formatPara(ofisToplam, "TL")}</span>
+                  <span className="text-muted-foreground">Ofis Masrafları</span>
+                </span>
+                <Badge variant="secondary">{ofisMasraflar.length}</Badge>
+              </button>
+              {acikGruplar.has("__ofis__") && (
+                <div className="border-t px-2 py-1 space-y-1">
+                  {ofisMasraflar.map((m) => (
+                    <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
+                      <span><Badge variant="outline" className="mr-1">Ofis</Badge>{m.masrafTuru ?? "Masraf"} · {m.aciklama ?? "—"}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                      <span className="flex items-center gap-2">
+                        <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
+                        <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ))}
+          )}
           {hareketSayisi === 0 && (
             <p className="text-sm text-muted-foreground text-center py-4">Açık hareket yok.</p>
           )}
