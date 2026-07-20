@@ -4751,11 +4751,15 @@ export async function registerRoutes(
       if (!["temsilci", "muhasebe", "operasyon"].includes(parsed.rol)) {
         return res.status(400).json({ error: "Geçersiz rol" });
       }
+      if (parsed.rol === "operasyon" && !String(parsed.sube ?? "").trim()) {
+        return res.status(400).json({ error: "Operasyon kullanıcısı için şube zorunlu" });
+      }
       const mevcut = await storage.getPortalKullaniciByKullaniciAdi(parsed.kullaniciAdi);
       if (mevcut) return res.status(400).json({ error: "Bu kullanıcı adı zaten var" });
       const k = await storage.createPortalKullanici({
         ...parsed,
         avAdi: parsed.avAdi ? parsed.avAdi.trim() : null,
+        sube: parsed.rol === "operasyon" ? String(parsed.sube).trim() : null,
         sifreHash: await hashSifre(String(sifre)),
       });
       res.json(sanitizePortalKullanici(k));
@@ -4776,6 +4780,16 @@ export async function registerRoutes(
         izinli.avAdi = req.body.avAdi ? String(req.body.avAdi).trim() : null;
       }
       if (typeof req.body?.aktif === "boolean") izinli.aktif = req.body.aktif;
+      // Şube — beyaz listeye AÇIKÇA eklenmezse sessizce düşer.
+      if (req.body?.sube !== undefined) {
+        izinli.sube = req.body.sube ? String(req.body.sube).trim() : null;
+      }
+      // Rol operasyon dışına çevrildiyse şube temizlenir.
+      if (izinli.rol && izinli.rol !== "operasyon") izinli.sube = null;
+      // Operasyona çevriliyorsa şube zorunlu (istemci her zaman birlikte gönderir).
+      if (izinli.rol === "operasyon" && !String(izinli.sube ?? "").trim()) {
+        return res.status(400).json({ error: "Operasyon kullanıcısı için şube zorunlu" });
+      }
       if (req.body?.sifre) {
         if (String(req.body.sifre).length < 4) {
           return res.status(400).json({ error: "Şifre en az 4 karakter olmalı" });
