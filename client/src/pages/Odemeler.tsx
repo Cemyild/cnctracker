@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import type { MasrafTuru, PortalKullanici } from "@shared/schema";
+import { subeler, type MasrafTuru, type PortalKullanici } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -127,10 +127,15 @@ function KullaniciFormDialog({
   const [adSoyad, setAdSoyad] = useState(k?.adSoyad ?? "");
   const [rol, setRol] = useState(k?.rol ?? "temsilci");
   const [avAdi, setAvAdi] = useState(k?.avAdi ?? "");
+  const [sube, setSube] = useState(k?.sube ?? "");
   const [sifre, setSifre] = useState("");
   const [gonderiliyor, setGonderiliyor] = useState(false);
 
   const kaydet = async () => {
+    if (rol === "operasyon" && !sube.trim()) {
+      toast({ title: "Operasyon kullanıcısı için şube seçin", variant: "destructive" });
+      return;
+    }
     setGonderiliyor(true);
     try {
       if (yeniMi) {
@@ -142,6 +147,7 @@ function KullaniciFormDialog({
             adSoyad: adSoyad.trim(),
             rol,
             avAdi: avAdi.trim() || null,
+            sube: rol === "operasyon" ? sube : null,
             sifre,
           }),
           credentials: "include",
@@ -155,6 +161,7 @@ function KullaniciFormDialog({
             adSoyad: adSoyad.trim(),
             rol,
             avAdi: avAdi.trim() || null,
+            sube: rol === "operasyon" ? sube : null,
             ...(sifre ? { sifre } : {}),
           }),
           credentials: "include",
@@ -213,6 +220,19 @@ function KullaniciFormDialog({
               />
             </div>
           </div>
+          {rol === "operasyon" && (
+            <div className="space-y-2">
+              <Label>Şube</Label>
+              <Select value={sube} onValueChange={setSube}>
+                <SelectTrigger data-testid="select-kullanici-sube"><SelectValue placeholder="Şube seçin" /></SelectTrigger>
+                <SelectContent>
+                  {subeler.map((s) => (
+                    <SelectItem key={s} value={s} data-testid={`select-item-sube-${s}`}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>{yeniMi ? "Şifre" : "Yeni Şifre (boşsa değişmez)"}</Label>
             <Input type="password" value={sifre} onChange={(e) => setSifre(e.target.value)} />
@@ -267,6 +287,7 @@ function Kullanicilar() {
               <TableHead>Ad Soyad</TableHead>
               <TableHead>Rol</TableHead>
               <TableHead>AV Adı</TableHead>
+              <TableHead>Şube</TableHead>
               <TableHead>Aktif</TableHead>
               <TableHead></TableHead>
             </TableRow>
@@ -278,6 +299,7 @@ function Kullanicilar() {
                 <TableCell>{k.adSoyad}</TableCell>
                 <TableCell>{k.rol === "muhasebe" ? "Muhasebe" : k.rol === "operasyon" ? "Operasyon" : "Temsilci"}</TableCell>
                 <TableCell>{k.avAdi ?? "—"}</TableCell>
+                <TableCell>{k.sube ?? "—"}</TableCell>
                 <TableCell>
                   <Switch
                     checked={k.aktif}
