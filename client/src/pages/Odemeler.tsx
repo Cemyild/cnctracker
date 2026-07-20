@@ -365,6 +365,21 @@ function MasrafTurleri() {
     }
   };
 
+  const belgeZorunluDegistir = async (t: MasrafTuru, belgeZorunlu: boolean) => {
+    try {
+      const res = await fetch(`/api/odemeler/masraf-turleri/${t.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ belgeZorunlu }),
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Güncellenemedi");
+      queryClient.invalidateQueries({ queryKey: ["/api/odemeler/masraf-turleri"] });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -385,14 +400,18 @@ function MasrafTurleri() {
             <TableRow>
               <TableHead>Ad</TableHead>
               <TableHead>Aktif (kapalıysa formda görünmez)</TableHead>
+              <TableHead>Belge zorunlu (kapalıysa fiş istenmez)</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {turler.map((t) => (
-              <TableRow key={t.id}>
+              <TableRow key={t.id} data-testid={`row-masraf-turu-${t.id}`}>
                 <TableCell>{t.ad}</TableCell>
                 <TableCell>
-                  <Switch checked={t.aktif} onCheckedChange={(a) => aktifDegistir(t, a)} />
+                  <Switch checked={t.aktif} onCheckedChange={(a) => aktifDegistir(t, a)} data-testid={`switch-aktif-tur-${t.id}`} />
+                </TableCell>
+                <TableCell>
+                  <Switch checked={t.belgeZorunlu} onCheckedChange={(b) => belgeZorunluDegistir(t, b)} data-testid={`switch-belge-zorunlu-${t.id}`} />
                 </TableCell>
               </TableRow>
             ))}

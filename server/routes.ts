@@ -5382,7 +5382,12 @@ export async function registerRoutes(
       const { beyannameId, dosyaYok, masrafTuru, tutar, alacakli, iban, aciklama } = req.body || {};
       const dosyaYokB = dosyaYok === "true" || dosyaYok === true;
       const tutarNum = parseTutar(tutar);
-      if (!belge) return res.status(400).json({ error: "Belge (fiş/fatura) zorunlu" });
+      // Belge zorunluluğu masraf TÜRÜNE bağlı. Bayrağı SUNUCU okur — istemciye güvenilmez.
+      // Tür boş veya bulunamadıysa GÜVENLİ varsayılan: belge zorunlu.
+      const turAdi = String(masrafTuru ?? "").trim();
+      const tur = turAdi ? await storage.getMasrafTuruByAd(turAdi) : undefined;
+      const belgeZorunlu = tur ? tur.belgeZorunlu : true;
+      if (belgeZorunlu && !belge) return res.status(400).json({ error: "Belge (fiş/fatura) zorunlu" });
       if (tutarNum === null || tutarNum <= 0) { sil(); return res.status(400).json({ error: "Geçerli tutar girin" }); }
       if (!String(alacakli ?? "").trim()) { sil(); return res.status(400).json({ error: "Alacaklı zorunlu" }); }
       if (dosyaYokB && !String(aciklama ?? "").trim()) { sil(); return res.status(400).json({ error: "Dosyasız kayıtta açıklama zorunlu" }); }
@@ -5398,8 +5403,8 @@ export async function registerRoutes(
         iban: iban ? String(iban).trim() : null,
         aciklama: aciklama ? String(aciklama) : null,
         tarih: bugunYmd(),
-        belgeDosya: belge.path.replace(/\\/g, "/"),
-        belgeAdi: fixUploadFilename(belge.originalname),
+        belgeDosya: belge ? belge.path.replace(/\\/g, "/") : null,
+        belgeAdi: belge ? fixUploadFilename(belge.originalname) : null,
       });
       // Alacaklıyı firma listesine kaydet (best-effort — F1.x kalıbı)
       storage.upsertOdemeSirketi(String(alacakli).trim(), { iban: iban ? String(iban).trim() : null, kaynak: "operasyon" }).catch(() => {});
@@ -5542,10 +5547,12 @@ export async function registerRoutes(
 
   app.put("/api/odemeler/masraf-turleri/:id", async (req, res) => {
     try {
-      const izinli: { ad?: string; aktif?: boolean; sira?: number } = {};
+      const izinli: { ad?: string; aktif?: boolean; sira?: number; belgeZorunlu?: boolean } = {};
       if (typeof req.body?.ad === "string" && req.body.ad.trim()) izinli.ad = req.body.ad.trim();
       if (typeof req.body?.aktif === "boolean") izinli.aktif = req.body.aktif;
       if (Number.isFinite(Number(req.body?.sira))) izinli.sira = Number(req.body.sira);
+      // Beyaz listeye AÇIKÇA eklenmezse sessizce düşer.
+      if (typeof req.body?.belgeZorunlu === "boolean") izinli.belgeZorunlu = req.body.belgeZorunlu;
       const guncel = await storage.updateMasrafTuru(req.params.id, izinli);
       if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
       res.json(guncel);
