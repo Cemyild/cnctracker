@@ -37,6 +37,7 @@ const SAYFA_BASLIKLARI: Record<string, string> = {
   "/portal/kasam": "Kasam",
   "/portal/kapanislarim": "Kapanışlarım",
   "/portal/sube-masraf": "Şube Masraf",
+  "/portal/sube-raporu": "Şube Raporu",
 };
 
 const ROTA_SAYFASI: Record<string, SayfaAnahtari> = {
