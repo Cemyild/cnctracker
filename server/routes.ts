@@ -5499,6 +5499,7 @@ export async function registerRoutes(
       const avans = await storage.avansYukle({
         operasyonId: req.params.operasyonId, tutar: tutarNum,
         aciklama: aciklama ? String(aciklama) : null, tarih: bugunYmd(), gonderenId: ben.id,
+        belgeDosya: null, belgeAdi: null, // T2'de req.file (dekont) değerinden gelecek
       });
       res.json(avans);
     } catch (e: any) { res.status(500).json({ error: e.message }); }

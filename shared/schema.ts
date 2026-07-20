@@ -1011,6 +1011,7 @@ export const masrafTurleri = pgTable("masraf_turleri", {
   ad: text("ad").notNull().unique(),
   aktif: boolean("aktif").notNull().default(true),
   sira: integer("sira").notNull().default(0),
+  belgeZorunlu: boolean("belge_zorunlu").notNull().default(true), // false: DOSYA gibi ayrı fişi olmayan yüksek hacimli türler
 });
 
 export const insertMasrafTuruSchema = createInsertSchema(masrafTurleri).omit({ id: true });
@@ -1121,6 +1122,8 @@ export const operasyonAvanslar = pgTable("operasyon_avanslar", {
   aciklama: text("aciklama"),
   tarih: text("tarih").notNull(),
   gonderenId: varchar("gonderen_id").notNull(),
+  belgeDosya: text("belge_dosya"), // Dekont — OPSİYONEL (elden nakit avansta olmayabilir)
+  belgeAdi: text("belge_adi"),
   kapanisId: varchar("kapanis_id"),
   olusturma: timestamp("olusturma").defaultNow(),
 }, (t) => [index("IDX_op_avans_operasyon").on(t.operasyonId)]);
@@ -1138,8 +1141,8 @@ export const operasyonMasraflar = pgTable("operasyon_masraflar", {
   iban: text("iban"),
   aciklama: text("aciklama"),
   tarih: text("tarih").notNull(),
-  belgeDosya: text("belge_dosya").notNull(),
-  belgeAdi: text("belge_adi").notNull(),
+  belgeDosya: text("belge_dosya"), // belgeZorunlu=false türlerde null olabilir
+  belgeAdi: text("belge_adi"),
   kapanisId: varchar("kapanis_id"),
   olusturma: timestamp("olusturma").defaultNow(),
 }, (t) => [index("IDX_op_masraf_operasyon").on(t.operasyonId)]);

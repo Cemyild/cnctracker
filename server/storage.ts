@@ -399,6 +399,7 @@ export interface IStorage {
   getMasrafTurleri(sadeceAktif?: boolean): Promise<MasrafTuru[]>;
   createMasrafTuru(t: InsertMasrafTuru): Promise<MasrafTuru>;
   updateMasrafTuru(id: string, t: Partial<InsertMasrafTuru>): Promise<MasrafTuru | undefined>;
+  getMasrafTuruByAd(ad: string): Promise<MasrafTuru | undefined>;
   seedMasrafTurleri(): Promise<void>;
   createOdemeTalep(t: InsertOdemeTalep): Promise<OdemeTalep>;
   getOdemeTalepleri(filtre?: { talepEdenId?: string; odemeTipi?: string }): Promise<OdemeTalepDetay[]>;
@@ -417,8 +418,8 @@ export interface IStorage {
   // Operasyon Kasası (Şube Masraf)
   getOperasyonKullanicilar(): Promise<PortalKullanici[]>;
   getOperasyonBakiye(operasyonId: string): Promise<number>;
-  avansYukle(d: { operasyonId: string; tutar: number; aciklama: string | null; tarih: string; gonderenId: string }): Promise<OperasyonAvans>;
-  masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; sube: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string; belgeAdi: string }): Promise<OperasyonMasraf>;
+  avansYukle(d: { operasyonId: string; tutar: number; aciklama: string | null; tarih: string; gonderenId: string; belgeDosya: string | null; belgeAdi: string | null }): Promise<OperasyonAvans>;
+  masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; sube: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string | null; belgeAdi: string | null }): Promise<OperasyonMasraf>;
   getOperasyonMasraf(id: string): Promise<OperasyonMasraf | undefined>;
   masrafSil(id: string): Promise<void>;
   getAcikHareketler(operasyonId: string): Promise<{ avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>;
@@ -3516,6 +3517,15 @@ export class DatabaseStorage implements IStorage {
     return guncel;
   }
 
+  // Tür adından bayrak okumak için. tr-locale küçültme: "I/İ" tuzağı nedeniyle toLowerCase() DEĞİL.
+  // Kayıt sayısı ~40 olduğundan bellekte eşleştirmek yeterli (POST /api/portal/masraf-turleri dedup kalıbıyla aynı).
+  async getMasrafTuruByAd(ad: string): Promise<MasrafTuru | undefined> {
+    const norm = (s: string) => s.trim().toLocaleLowerCase("tr");
+    const hedef = norm(ad);
+    const hepsi = await this.getMasrafTurleri();
+    return hepsi.find((t) => norm(t.ad) === hedef);
+  }
+
   async seedMasrafTurleri(): Promise<void> {
     const varsayilan = ["Ardiye", "Liman Masrafı", "Demuraj", "Tahmil-Tahliye", "Ordino", "Diğer"];
     await db.insert(masrafTurleri)
@@ -3812,15 +3822,16 @@ export class DatabaseStorage implements IStorage {
     return Math.round((parseFloat(av.t) - parseFloat(ma.t)) * 100) / 100;
   }
 
-  async avansYukle(d: { operasyonId: string; tutar: number; aciklama: string | null; tarih: string; gonderenId: string }): Promise<OperasyonAvans> {
+  async avansYukle(d: { operasyonId: string; tutar: number; aciklama: string | null; tarih: string; gonderenId: string; belgeDosya: string | null; belgeAdi: string | null }): Promise<OperasyonAvans> {
     const [yeni] = await db.insert(operasyonAvanslar).values({
       operasyonId: d.operasyonId, tutar: d.tutar.toFixed(2), aciklama: d.aciklama,
       tarih: d.tarih, gonderenId: d.gonderenId,
+      belgeDosya: d.belgeDosya, belgeAdi: d.belgeAdi,
     }).returning();
     return yeni;
   }
 
-  async masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; sube: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string; belgeAdi: string }): Promise<OperasyonMasraf> {
+  async masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; sube: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string | null; belgeAdi: string | null }): Promise<OperasyonMasraf> {
     const [yeni] = await db.insert(operasyonMasraflar).values({
       operasyonId: d.operasyonId, beyannameId: d.beyannameId, dosyaYok: d.dosyaYok,
       masrafTuru: d.masrafTuru, sube: d.sube, tutar: d.tutar.toFixed(2), alacakli: d.alacakli, iban: d.iban,
