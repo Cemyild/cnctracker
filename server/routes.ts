@@ -4784,11 +4784,18 @@ export async function registerRoutes(
       if (req.body?.sube !== undefined) {
         izinli.sube = req.body.sube ? String(req.body.sube).trim() : null;
       }
-      // Rol operasyon dışına çevrildiyse şube temizlenir.
-      if (izinli.rol && izinli.rol !== "operasyon") izinli.sube = null;
-      // Operasyona çevriliyorsa şube zorunlu (istemci her zaman birlikte gönderir).
-      if (izinli.rol === "operasyon" && !String(izinli.sube ?? "").trim()) {
-        return res.status(400).json({ error: "Operasyon kullanıcısı için şube zorunlu" });
+      // ETKİN rol/şube MEVCUT kayıttan tamamlanır: kısmi PUT (yalnız rol veya yalnız sube)
+      // gönderildiğinde de invariant korunur — şube YALNIZ rol='operasyon' iken tutulur.
+      if (izinli.rol !== undefined || izinli.sube !== undefined) {
+        const mevcut = await storage.getPortalKullanici(req.params.id);
+        if (!mevcut) return res.status(404).json({ error: "Bulunamadı" });
+        const etkinRol = izinli.rol ?? mevcut.rol;
+        const etkinSube = izinli.sube !== undefined ? izinli.sube : mevcut.sube;
+        if (etkinRol !== "operasyon") {
+          izinli.sube = null;
+        } else if (!String(etkinSube ?? "").trim()) {
+          return res.status(400).json({ error: "Operasyon kullanıcısı için şube zorunlu" });
+        }
       }
       if (req.body?.sifre) {
         if (String(req.body.sifre).length < 4) {
