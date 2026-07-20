@@ -32,12 +32,13 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   odemeSirketleri, type OdemeSirketi, type InsertOdemeSirketi,
   firmaIbanlari, type FirmaIban, type OdemeSirketiDetay,
   operasyonAvanslar, operasyonMasraflar, operasyonGunKapanis, type OperasyonAvans, type OperasyonMasraf, type OperasyonGunKapanis,
+  type SubeGiderRaporu, type SubeGiderBloku,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as XLSX from "xlsx";
 import { db } from "./db";
-import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count, notInArray } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count, notInArray, gte, lte } from "drizzle-orm";
 import { buildDedupKey } from "./dedup";
 
 // Ödemeler Portalı: talep + ilişkili beyanname/kullanıcı/belgeler tek yanıtta
@@ -417,7 +418,7 @@ export interface IStorage {
   getOperasyonKullanicilar(): Promise<PortalKullanici[]>;
   getOperasyonBakiye(operasyonId: string): Promise<number>;
   avansYukle(d: { operasyonId: string; tutar: number; aciklama: string | null; tarih: string; gonderenId: string }): Promise<OperasyonAvans>;
-  masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string; belgeAdi: string }): Promise<OperasyonMasraf>;
+  masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; sube: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string; belgeAdi: string }): Promise<OperasyonMasraf>;
   getOperasyonMasraf(id: string): Promise<OperasyonMasraf | undefined>;
   masrafSil(id: string): Promise<void>;
   getAcikHareketler(operasyonId: string): Promise<{ avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>;
@@ -425,6 +426,8 @@ export interface IStorage {
   getKapanislar(operasyonId: string): Promise<Array<OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>>;
   getKapanis(id: string): Promise<OperasyonGunKapanis | undefined>;
   geriAc(kapanisId: string, geriAcanId: string): Promise<OperasyonGunKapanis | null>;
+  getSubeGiderRaporu(baslangic: string, bitis: string): Promise<SubeGiderRaporu>;
+  subeGiderRaporuExcel(baslangic: string, bitis: string): Promise<Buffer>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -3817,13 +3820,58 @@ export class DatabaseStorage implements IStorage {
     return yeni;
   }
 
-  async masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string; belgeAdi: string }): Promise<OperasyonMasraf> {
+  async masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; sube: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string; belgeAdi: string }): Promise<OperasyonMasraf> {
     const [yeni] = await db.insert(operasyonMasraflar).values({
       operasyonId: d.operasyonId, beyannameId: d.beyannameId, dosyaYok: d.dosyaYok,
-      masrafTuru: d.masrafTuru, tutar: d.tutar.toFixed(2), alacakli: d.alacakli, iban: d.iban,
+      masrafTuru: d.masrafTuru, sube: d.sube, tutar: d.tutar.toFixed(2), alacakli: d.alacakli, iban: d.iban,
       aciklama: d.aciklama, tarih: d.tarih, belgeDosya: d.belgeDosya, belgeAdi: d.belgeAdi,
     }).returning();
     return yeni;
+  }
+
+  // Şube × masraf türü kırılımı. Tek GROUP BY sorgusu — N+1 yok.
+  // Tarih filtresi text YYYY-MM-DD üzerinde string karşılaştırmasıdır (new Date PARSE YOK).
+  async getSubeGiderRaporu(baslangic: string, bitis: string): Promise<SubeGiderRaporu> {
+    const satirlar = await db
+      .select({
+        sube: operasyonMasraflar.sube,
+        masrafTuru: operasyonMasraflar.masrafTuru,
+        adet: sql<string>`COUNT(*)`,
+        tutar: sql<string>`COALESCE(SUM(${operasyonMasraflar.tutar}),0)`,
+      })
+      .from(operasyonMasraflar)
+      .where(and(gte(operasyonMasraflar.tarih, baslangic), lte(operasyonMasraflar.tarih, bitis)))
+      .groupBy(operasyonMasraflar.sube, operasyonMasraflar.masrafTuru);
+
+    const harita = new Map<string, SubeGiderBloku>();
+    for (const s of satirlar) {
+      const subeAd = s.sube ?? "Şube atanmamış";
+      const turAd = s.masrafTuru ?? "Belirtilmemiş";
+      const tutar = Math.round(parseFloat(s.tutar) * 100) / 100;
+      let blok = harita.get(subeAd);
+      if (!blok) { blok = { sube: subeAd, toplam: 0, turler: [] }; harita.set(subeAd, blok); }
+      blok.turler.push({ masrafTuru: turAd, adet: Number(s.adet), tutar });
+      blok.toplam = Math.round((blok.toplam + tutar) * 100) / 100;
+    }
+    const bloklar = Array.from(harita.values());
+    for (const b of bloklar) b.turler.sort((x, y) => y.tutar - x.tutar);
+    bloklar.sort((a, b) => b.toplam - a.toplam);
+    const genelToplam = Math.round(bloklar.reduce((t, b) => t + b.toplam, 0) * 100) / 100;
+    return { subeler: bloklar, genelToplam };
+  }
+
+  async subeGiderRaporuExcel(baslangic: string, bitis: string): Promise<Buffer> {
+    const rapor = await this.getSubeGiderRaporu(baslangic, bitis);
+    const aoa: (string | number)[][] = [["Şube", "Masraf Türü", "Adet", "Tutar (TL)"]];
+    for (const b of rapor.subeler) {
+      for (const t of b.turler) aoa.push([b.sube, t.masrafTuru, t.adet, t.tutar]);
+      aoa.push([b.sube, "ŞUBE TOPLAMI", "", b.toplam]);
+    }
+    aoa.push(["", "GENEL TOPLAM", "", rapor.genelToplam]);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Şube Gider");
+    return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
   }
 
   async getOperasyonMasraf(id: string): Promise<OperasyonMasraf | undefined> {

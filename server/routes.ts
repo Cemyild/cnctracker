@@ -5371,6 +5371,7 @@ export async function registerRoutes(
         beyannameId: dosyaYokB ? null : String(beyannameId),
         dosyaYok: dosyaYokB,
         masrafTuru: masrafTuru ? String(masrafTuru) : null,
+        sube: null, // T4'te ben.sube ?? null olacak
         tutar: tutarNum,
         alacakli: String(alacakli).trim(),
         iban: iban ? String(iban).trim() : null,

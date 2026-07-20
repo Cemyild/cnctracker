@@ -967,6 +967,7 @@ export const portalKullanicilar = pgTable("portal_kullanicilar", {
   adSoyad: text("ad_soyad").notNull(),
   rol: text("rol").notNull(), // 'temsilci' | 'muhasebe' | 'operasyon'
   avAdi: text("av_adi"), // Beyanname Excel AV sütunu eşleşmesi (örn. "SÜLEYMAN")
+  sube: text("sube"), // Şube (yalnız rol='operasyon' için anlamlı; `subeler` listesinden). Nullable — operasyon dışı roller ve eski satırlar için.
   aktif: boolean("aktif").notNull().default(true),
   olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
 });
@@ -1131,6 +1132,7 @@ export const operasyonMasraflar = pgTable("operasyon_masraflar", {
   beyannameId: varchar("beyanname_id"),
   dosyaYok: boolean("dosya_yok").notNull().default(false),
   masrafTuru: text("masraf_turu"),
+  sube: text("sube"), // Kayıt anındaki şube SNAPSHOT'ı — kullanıcının güncel şubesinden TÜRETİLMEZ (geçmiş sabit kalır)
   tutar: decimal("tutar", { precision: 14, scale: 2 }).notNull(),
   alacakli: text("alacakli").notNull(),
   iban: text("iban"),
@@ -1162,6 +1164,11 @@ export const insertOperasyonGunKapanisSchema = createInsertSchema(operasyonGunKa
 export type OperasyonAvans = typeof operasyonAvanslar.$inferSelect;
 export type OperasyonMasraf = typeof operasyonMasraflar.$inferSelect;
 export type OperasyonGunKapanis = typeof operasyonGunKapanis.$inferSelect;
+
+// Şube gider raporu — türetilmiş tipler (tablo DEĞİL, /api/portal/operasyon-takip/rapor/sube dönüşü)
+export type SubeGiderSatiri = { masrafTuru: string; adet: number; tutar: number };
+export type SubeGiderBloku = { sube: string; toplam: number; turler: SubeGiderSatiri[] };
+export type SubeGiderRaporu = { subeler: SubeGiderBloku[]; genelToplam: number };
 
 // connect-pg-simple'ın çalışma anında oluşturduğu oturum tablosu.
 // Şemada tanımlı olmazsa drizzle-kit push bu tabloyu SİLMEYE çalışır ve
