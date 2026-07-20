@@ -55,7 +55,13 @@ export default function OperasyonKasaSayfasi() {
 
   // Belge zorunluluğu seçili masraf türünden gelir. Tür seçilmemişse GÜVENLİ varsayılan: zorunlu.
   // (Sunucu da aynı kuralı bağımsız uygular — bu yalnız kullanıcıya erken geri bildirim.)
-  const seciliTur = useMemo(() => masrafTurleri.find((t) => t.ad === masrafTuru), [masrafTurleri, masrafTuru]);
+  // Sunucudaki getMasrafTuruByAd ile AYNI normalizasyon (trim + tr-locale küçültme).
+  // Asimetri olursa istemci "opsiyonel" gösterip sunucu 400 dönebilir.
+  const seciliTur = useMemo(() => {
+    const norm = (s: string) => s.trim().toLocaleLowerCase("tr");
+    const hedef = norm(masrafTuru);
+    return hedef ? masrafTurleri.find((t) => norm(t.ad) === hedef) : undefined;
+  }, [masrafTurleri, masrafTuru]);
   const belgeZorunlu = seciliTur ? seciliTur.belgeZorunlu : true;
 
   const acikMasrafToplam = (ozet?.masraflar ?? []).reduce((s, m) => s + parseFloat(m.tutar), 0);
