@@ -3518,12 +3518,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Tür adından bayrak okumak için. tr-locale küçültme: "I/İ" tuzağı nedeniyle toLowerCase() DEĞİL.
-  // Kayıt sayısı ~40 olduğundan bellekte eşleştirmek yeterli (POST /api/portal/masraf-turleri dedup kalıbıyla aynı).
+  // FAIL-SAFE: ad case-SENSITIVE unique olduğundan "Ardiye"/"ardiye" gibi çift kayıt mümkün.
+  // Böyle bir durumda EN KISITLAYICI kaydı döndürürüz (belgeZorunlu=true olan) — aksi hâlde
+  // pasif bir adaş, aktif türün belge zorunluluğunu sessizce kaldırabilirdi.
   async getMasrafTuruByAd(ad: string): Promise<MasrafTuru | undefined> {
     const norm = (s: string) => s.trim().toLocaleLowerCase("tr");
     const hedef = norm(ad);
+    if (!hedef) return undefined;
     const hepsi = await this.getMasrafTurleri();
-    return hepsi.find((t) => norm(t.ad) === hedef);
+    const eslesenler = hepsi.filter((t) => norm(t.ad) === hedef);
+    if (eslesenler.length === 0) return undefined;
+    return eslesenler.find((t) => t.belgeZorunlu) ?? eslesenler[0];
   }
 
   async seedMasrafTurleri(): Promise<void> {

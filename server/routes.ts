@@ -5538,6 +5538,13 @@ export async function registerRoutes(
       const ad = String(req.body?.ad ?? "").trim();
       if (!ad) return res.status(400).json({ error: "Ad zorunlu" });
       const sira = Number.isFinite(Number(req.body?.sira)) ? Number(req.body.sira) : 0;
+      // Case-insensitive dedup (POST /api/portal/masraf-turleri ile aynı kalıp) — "Ardiye" varken
+      // "ardiye" açılırsa case-sensitive unique kısıtı bunu durdurmaz, çift kayıt belge zorunluluğunu
+      // sessizce kaldırabilir (bkz. getMasrafTuruByAd fail-safe notu).
+      const norm = (s: string) => s.trim().toLocaleLowerCase("tr");
+      const mevcutlar = await storage.getMasrafTurleri();
+      const mevcut = mevcutlar.find((t) => norm(t.ad) === norm(ad));
+      if (mevcut) return res.json(mevcut); // aynı ad → yeni kayıt AÇMA, mevcudu döndür
       const yeni = await storage.createMasrafTuru({ ad, sira, aktif: true });
       res.json(yeni);
     } catch (e: any) {
