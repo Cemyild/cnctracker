@@ -5392,7 +5392,7 @@ export async function registerRoutes(
         beyannameId: dosyaYokB ? null : String(beyannameId),
         dosyaYok: dosyaYokB,
         masrafTuru: masrafTuru ? String(masrafTuru) : null,
-        sube: null, // T4'te ben.sube ?? null olacak
+        sube: ben.sube ?? null, // SNAPSHOT — istemciden GELMEZ, oturum sahibinden okunur
         tutar: tutarNum,
         alacakli: String(alacakli).trim(),
         iban: iban ? String(iban).trim() : null,
@@ -5446,7 +5446,7 @@ export async function registerRoutes(
         const bakiye = await storage.getOperasyonBakiye(k.id);
         const { masraflar } = await storage.getAcikHareketler(k.id);
         const bugunHarcanan = masraflar.filter((m) => m.tarih === bugun).reduce((s, m) => s + parseFloat(m.tutar), 0);
-        return { id: k.id, adSoyad: k.adSoyad, kullaniciAdi: k.kullaniciAdi, bakiye, bugunHarcanan: Math.round(bugunHarcanan * 100) / 100 };
+        return { id: k.id, adSoyad: k.adSoyad, kullaniciAdi: k.kullaniciAdi, sube: k.sube ?? null, bakiye, bugunHarcanan: Math.round(bugunHarcanan * 100) / 100 };
       }));
       res.json(sonuc);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
