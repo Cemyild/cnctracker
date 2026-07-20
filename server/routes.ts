@@ -5452,6 +5452,34 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // Şube gider raporu — İKİ SEGMENTLİ yol (rapor/sube): tek segmentlik /:operasyonId ile çakışmaz.
+  const raporAraligi = (req: any): { baslangic: string; bitis: string } | null => {
+    const baslangic = String(req.query?.baslangic ?? "");
+    const bitis = String(req.query?.bitis ?? "");
+    const ymd = /^\d{4}-\d{2}-\d{2}$/;
+    if (!ymd.test(baslangic) || !ymd.test(bitis)) return null;
+    return { baslangic, bitis };
+  };
+
+  app.get("/api/portal/operasyon-takip/rapor/sube", requireMuhasebe, async (req, res) => {
+    try {
+      const aralik = raporAraligi(req);
+      if (!aralik) return res.status(400).json({ error: "baslangic ve bitis YYYY-MM-DD olmalı" });
+      res.json(await storage.getSubeGiderRaporu(aralik.baslangic, aralik.bitis));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/portal/operasyon-takip/rapor/sube/excel", requireMuhasebe, async (req, res) => {
+    try {
+      const aralik = raporAraligi(req);
+      if (!aralik) return res.status(400).json({ error: "baslangic ve bitis YYYY-MM-DD olmalı" });
+      const buf = await storage.subeGiderRaporuExcel(aralik.baslangic, aralik.bitis);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="sube-gider-${aralik.baslangic}_${aralik.bitis}.xlsx"`);
+      res.end(buf);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.get("/api/portal/operasyon-takip/:operasyonId", requireMuhasebe, async (req, res) => {
     try {
       const bakiye = await storage.getOperasyonBakiye(req.params.operasyonId);

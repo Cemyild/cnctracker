@@ -5,7 +5,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut, Wallet, CalendarCheck, Building } from "lucide-react";
+import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut, Wallet, CalendarCheck, Building, BarChart3 } from "lucide-react";
 import { type PortalMe } from "./PortalApp";
 import { type Rozetler, type SayfaAnahtari } from "./useTalepBildirimleri";
 
@@ -27,6 +27,7 @@ const MUHASEBE_MENU: MenuOgesi[] = [
   { title: "Doğrudan Ödeme", href: "/portal/dogrudan-odeme", icon: Banknote },
   { title: "Ödeme Firmaları", href: "/portal/firmalar", icon: Building2 },
   { title: "Şube Masraf", href: "/portal/sube-masraf", icon: Building },
+  { title: "Şube Raporu", href: "/portal/sube-raporu", icon: BarChart3 },
 ];
 
 const OPERASYON_MENU: MenuOgesi[] = [
