@@ -21,8 +21,10 @@ export default function SubeRaporuSayfasi() {
   const [baslangic, setBaslangic] = useState(ayBasi());
   const [bitis, setBitis] = useState(ymd(new Date()));
 
-  const { data, isLoading } = useQuery<SubeGiderRaporu>({
+  const { data, isLoading, isError, error } = useQuery<SubeGiderRaporu>({
     queryKey: [`/api/portal/operasyon-takip/rapor/sube?baslangic=${baslangic}&bitis=${bitis}`],
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   const excelIndir = () => {
@@ -47,7 +49,12 @@ export default function SubeRaporuSayfasi() {
           </div>
 
           {isLoading && <p className="text-sm text-muted-foreground">Yükleniyor…</p>}
-          {!isLoading && (data?.subeler.length ?? 0) === 0 && (
+          {isError && (
+            <p className="text-sm text-destructive" data-testid="text-rapor-hata">
+              Rapor yüklenemedi: {(error as Error)?.message ?? "Bilinmeyen hata"}
+            </p>
+          )}
+          {!isLoading && !isError && (data?.subeler.length ?? 0) === 0 && (
             <p className="text-sm text-muted-foreground" data-testid="text-rapor-bos">Seçilen aralıkta masraf yok.</p>
           )}
 
@@ -58,8 +65,8 @@ export default function SubeRaporuSayfasi() {
                 <span className="font-bold" data-testid={`rapor-sube-toplam-${b.sube}`}>{formatPara(b.toplam, "TL")}</span>
               </div>
               <div className="border-t pt-1 space-y-0.5">
-                {b.turler.map((t) => (
-                  <div key={t.masrafTuru} className="flex justify-between text-sm">
+                {b.turler.map((t, i) => (
+                  <div key={`${t.masrafTuru}-${i}`} className="flex justify-between text-sm">
                     <span className="text-muted-foreground">{t.masrafTuru} · {t.adet} adet</span>
                     <span>{formatPara(t.tutar, "TL")}</span>
                   </div>

@@ -3862,12 +3862,12 @@ export class DatabaseStorage implements IStorage {
 
   async subeGiderRaporuExcel(baslangic: string, bitis: string): Promise<Buffer> {
     const rapor = await this.getSubeGiderRaporu(baslangic, bitis);
+    // DÜZ tablo (spec §8): yalnız detay satırları. Ara/genel toplam satırı EKLENMEZ —
+    // aksi hâlde kolonu seçip toplam alan kullanıcı toplamları da toplayıp katlanmış rakam görür.
     const aoa: (string | number)[][] = [["Şube", "Masraf Türü", "Adet", "Tutar (TL)"]];
     for (const b of rapor.subeler) {
       for (const t of b.turler) aoa.push([b.sube, t.masrafTuru, t.adet, t.tutar]);
-      aoa.push([b.sube, "ŞUBE TOPLAMI", "", b.toplam]);
     }
-    aoa.push(["", "GENEL TOPLAM", "", rapor.genelToplam]);
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Şube Gider");
