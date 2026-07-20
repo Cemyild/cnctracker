@@ -61,6 +61,16 @@ export default function OperasyonTakipSayfasi() {
     if (secili) queryClient.invalidateQueries({ queryKey: [`/api/portal/operasyon-takip/${secili.id}`] });
   };
 
+  // Avans formu state'i dialog dışında yaşadığı için HER kapanış/açılışta sıfırlanmalı.
+  // Aksi hâlde seçili dosya bir sonraki şubenin kaydına sessizce eklenir (Radix dialog
+  // unmount olduğundan alan BOŞ görünür ama state doludur).
+  const avansFormSifirla = () => {
+    setAvansTutar(""); setAvansAciklama("");
+    setAvansDekont(null); setDekontSayac((s) => s + 1);
+  };
+  const avansDialogAc = (s: Satir) => { setSecili(s); avansFormSifirla(); setAvansDialog(true); };
+  const avansDialogKapat = () => { setAvansDialog(false); avansFormSifirla(); };
+
   const avansGonder = async () => {
     if (!secili) return;
     if (!avansTutar.trim()) { toast({ title: "Tutar girin", variant: "destructive" }); return; }
@@ -75,8 +85,7 @@ export default function OperasyonTakipSayfasi() {
       });
       if (!res.ok) throw new Error((await res.json()).error || "Gönderilemedi");
       toast({ title: "Avans yüklendi", description: `${secili.adSoyad} bakiyesine geçti.` });
-      setAvansDialog(false); setAvansTutar(""); setAvansAciklama("");
-      setAvansDekont(null); setDekontSayac((s) => s + 1);
+      avansDialogKapat();
       tazele();
     } catch (err: any) { toast({ title: "Hata", description: err.message, variant: "destructive" }); }
     finally { setGonderiliyor(false); }
@@ -111,7 +120,7 @@ export default function OperasyonTakipSayfasi() {
                   </div>
                   <div className="flex items-center gap-3">
                     <div className={`text-lg font-bold ${s.bakiye < 0 ? "text-destructive" : ""}`} data-testid={`sube-bakiye-${s.id}`}>{formatPara(s.bakiye, "TL")}</div>
-                    <Button size="sm" onClick={() => { setSecili(s); setAvansDialog(true); }} data-testid={`button-avans-${s.id}`}>Avans Yükle</Button>
+                    <Button size="sm" onClick={() => avansDialogAc(s)} data-testid={`button-avans-${s.id}`}>Avans Yükle</Button>
                     <Button size="sm" variant="outline" onClick={() => setSecili(s)} data-testid={`button-detay-${s.id}`}>Detay</Button>
                   </div>
                 </div>
@@ -167,7 +176,7 @@ export default function OperasyonTakipSayfasi() {
         </Card>
       )}
 
-      <Dialog open={avansDialog} onOpenChange={setAvansDialog}>
+      <Dialog open={avansDialog} onOpenChange={(a) => { if (!a) avansDialogKapat(); else setAvansDialog(true); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Avans Yükle — {secili?.adSoyad}</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -176,7 +185,7 @@ export default function OperasyonTakipSayfasi() {
             <div className="space-y-1"><Label>Dekont (opsiyonel)</Label><Input key={dekontSayac} type="file" onChange={(e) => setAvansDekont(e.target.files?.[0] ?? null)} data-testid="input-avans-dekont" /></div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAvansDialog(false)}>Vazgeç</Button>
+            <Button variant="outline" onClick={avansDialogKapat}>Vazgeç</Button>
             <Button onClick={avansGonder} disabled={gonderiliyor} data-testid="button-avans-gonder">{gonderiliyor ? "Gönderiliyor…" : "Yükle"}</Button>
           </DialogFooter>
         </DialogContent>
