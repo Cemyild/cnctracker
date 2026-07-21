@@ -3,12 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import type { Beyanname } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -17,6 +13,7 @@ import {
   type TalepDetay, formatTarih, formatPara,
   TIP_ETIKET, DURUM_ETIKET, IADE_ETIKET, BELGE_ETIKET, belgeUrl,
 } from "./portalUtils";
+import BeyannameSecici from "./BeyannameSecici";
 
 // Ödenmiş ama beyannamesiz talepler — temsilciden eşleştirme istenir
 function EslesmeBekleyenler({
@@ -24,7 +21,6 @@ function EslesmeBekleyenler({
 }: { talepler: TalepDetay[]; beyannameler: Beyanname[] }) {
   const { toast } = useToast();
   const [secimler, setSecimler] = useState<Record<string, string>>({});
-  const [aramalar, setAramalar] = useState<Record<string, string>>({});
   const [gonderilen, setGonderilen] = useState<string | null>(null);
 
   const bekleyenler = talepler.filter((t) => !t.beyannameId && t.durum === "odendi");
@@ -67,14 +63,6 @@ function EslesmeBekleyenler({
           eşleştirin.
         </p>
         {bekleyenler.map((t) => {
-          const q = (aramalar[t.id] ?? "").trim().toLocaleLowerCase("tr");
-          const filtreli = q
-            ? beyannameler.filter(
-                (b) =>
-                  b.dosyaNo.toLocaleLowerCase("tr").includes(q) ||
-                  (b.alici ?? "").toLocaleLowerCase("tr").includes(q),
-              )
-            : beyannameler;
           return (
             <div
               key={t.id}
@@ -86,27 +74,13 @@ function EslesmeBekleyenler({
                 {t.aciklama && <span className="text-muted-foreground"> — {t.aciklama}</span>}
               </div>
               <div className="flex flex-col md:flex-row gap-2">
-                <Input
-                  placeholder="Beyanname ara…"
-                  value={aramalar[t.id] ?? ""}
-                  onChange={(e) => setAramalar((s) => ({ ...s, [t.id]: e.target.value }))}
-                  className="md:max-w-56"
-                />
-                <Select
+                <BeyannameSecici
+                  beyannameler={beyannameler}
                   value={secimler[t.id] ?? ""}
-                  onValueChange={(v) => setSecimler((s) => ({ ...s, [t.id]: v }))}
-                >
-                  <SelectTrigger className="md:max-w-md">
-                    <SelectValue placeholder="Beyanname seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filtreli.slice(0, 100).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.dosyaNo} — {b.alici ?? "?"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  onChange={(v) => setSecimler((s) => ({ ...s, [t.id]: v }))}
+                  testId={`select-eslestir-${t.id}`}
+                  className="md:max-w-md"
+                />
                 <Button
                   size="sm"
                   onClick={() => eslestir(t.id)}

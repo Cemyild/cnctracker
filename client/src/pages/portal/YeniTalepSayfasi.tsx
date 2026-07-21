@@ -16,6 +16,7 @@ import { type PortalMe } from "./PortalApp";
 import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIbanlariByPB, firmaIbanOzet } from "./portalUtils";
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 import MasrafTuruSecici from "./MasrafTuruSecici";
+import BeyannameSecici from "./BeyannameSecici";
 
 type KalemDurum = "bekliyor" | "gonderiliyor" | "gonderildi" | "hata";
 
@@ -55,7 +56,6 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   });
 
   // Dosya bloğu (kalem listesi doluyken kilitli)
-  const [arama, setArama] = useState("");
   const [beyannameId, setBeyannameId] = useState("");
   const [dosyaYok, setDosyaYok] = useState(false); // beyanname henüz açılmadı/yüklenmedi
 
@@ -78,17 +78,6 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   const listeDolu = kalemler.length > 0;
   const bekleyenSayisi = kalemler.filter((k) => k.durum !== "gonderildi").length;
   const hataVar = kalemler.some((k) => k.durum === "hata");
-
-  const filtreliBeyannameler = useMemo(() => {
-    const q = arama.trim().toLocaleLowerCase("tr");
-    if (!q) return beyannameler;
-    return beyannameler.filter(
-      (b) =>
-        b.dosyaNo.toLocaleLowerCase("tr").includes(q) ||
-        (b.alici ?? "").toLocaleLowerCase("tr").includes(q) ||
-        (b.beyanNo ?? "").toLocaleLowerCase("tr").includes(q),
-    );
-  }, [beyannameler, arama]);
 
   const secili = beyannameler.find((b) => b.id === beyannameId);
 
@@ -336,27 +325,13 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                 </p>
               )}
               {!dosyaYok && (
-                <>
-                  <Input
-                    placeholder="Dosya no, müşteri veya beyan no ara…"
-                    value={arama}
-                    onChange={(e) => setArama(e.target.value)}
-                    disabled={listeDolu || gonderimAktif}
-                    data-testid="input-beyanname-arama"
-                  />
-                  <Select value={beyannameId} onValueChange={setBeyannameId} disabled={listeDolu || gonderimAktif}>
-                    <SelectTrigger data-testid="select-beyanname">
-                      <SelectValue placeholder="Beyanname seçin" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filtreliBeyannameler.slice(0, 100).map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.dosyaNo} — {b.alici ?? "?"}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </>
+                <BeyannameSecici
+                  beyannameler={beyannameler}
+                  value={beyannameId}
+                  onChange={setBeyannameId}
+                  disabled={listeDolu || gonderimAktif}
+                  testId="select-beyanname"
+                />
               )}
               {!dosyaYok && secili && (
                 <div className="text-xs text-muted-foreground rounded-md border p-2 space-y-0.5">

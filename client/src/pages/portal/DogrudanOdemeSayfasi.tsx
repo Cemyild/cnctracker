@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIbanlariByPB, firmaIbanOzet } from "./portalUtils";
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 import MasrafTuruSecici from "./MasrafTuruSecici";
+import BeyannameSecici from "./BeyannameSecici";
 
 // Muhasebenin talepsiz ödeme girişi — tek adımda "Ödendi" kaydı oluşur (dekont zorunlu).
 export default function DogrudanOdemeSayfasi() {
@@ -29,7 +30,6 @@ export default function DogrudanOdemeSayfasi() {
     queryKey: ["/api/portal/odeme-sirketleri"],
   });
 
-  const [arama, setArama] = useState("");
   const [beyannameId, setBeyannameId] = useState("");
   const [dosyaYok, setDosyaYok] = useState(false);
   const [odemeTipi, setOdemeTipi] = useState<"masraf" | "depo_teminat">("masraf");
@@ -43,17 +43,6 @@ export default function DogrudanOdemeSayfasi() {
   const [konsimento, setKonsimento] = useState<KonsimentoBilgisi>({ ...BOS_KONSIMENTO });
   const [formSayac, setFormSayac] = useState(0);
   const [gonderiliyor, setGonderiliyor] = useState(false);
-
-  const filtreliBeyannameler = useMemo(() => {
-    const q = arama.trim().toLocaleLowerCase("tr");
-    if (!q) return beyannameler;
-    return beyannameler.filter(
-      (b) =>
-        b.dosyaNo.toLocaleLowerCase("tr").includes(q) ||
-        (b.alici ?? "").toLocaleLowerCase("tr").includes(q) ||
-        (b.beyanNo ?? "").toLocaleLowerCase("tr").includes(q),
-    );
-  }, [beyannameler, arama]);
 
   const secili = beyannameler.find((b) => b.id === beyannameId);
 
@@ -209,26 +198,13 @@ export default function DogrudanOdemeSayfasi() {
               </Label>
             </div>
             {!dosyaYok && (
-              <>
-                <Input
-                  placeholder="Dosya no, müşteri veya beyan no ara…"
-                  value={arama}
-                  onChange={(e) => setArama(e.target.value)}
-                  data-testid="input-dogrudan-arama"
-                />
-                <Select value={beyannameId} onValueChange={setBeyannameId}>
-                  <SelectTrigger data-testid="select-dogrudan-beyanname">
-                    <SelectValue placeholder="Beyanname seçin (tüm liste)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filtreliBeyannameler.slice(0, 100).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.dosyaNo} — {b.alici ?? "?"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </>
+              <BeyannameSecici
+                beyannameler={beyannameler}
+                value={beyannameId}
+                onChange={setBeyannameId}
+                testId="select-dogrudan-beyanname"
+                placeholder="Aramak için Ref, Alıcı yada Beyanname No yazın, yada açılır listeden seçin (tüm liste)"
+              />
             )}
             {!dosyaYok && secili && (
               <div className="text-xs text-muted-foreground rounded-md border p-2 space-y-0.5">
