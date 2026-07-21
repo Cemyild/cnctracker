@@ -101,67 +101,89 @@ export default function OperasyonKasaSayfasi() {
 
       <Card>
         <CardHeader><CardTitle>Açık Hareketler</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          {(ozet?.avanslar ?? []).map((a) => (
-            <div key={a.id} className="flex items-center justify-between rounded-md border p-2 text-sm" data-testid={`row-avans-${a.id}`}>
-              <div><span className="font-medium text-green-600">Avans</span> · {formatTarih(a.tarih)} · {a.aciklama ?? "—"}{a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}</div>
-              <div className="font-semibold text-green-600">+{formatPara(a.tutar, "TL")}</div>
-            </div>
-          ))}
-          {gruplar.map((g) => {
-            const acik = acikGruplar.has(g.beyannameId);
-            const b = g.beyanname;
-            return (
-              <div key={g.beyannameId} className="rounded-md border" data-testid={`group-beyanname-${g.beyannameId}`}>
-                <button type="button" onClick={() => grupAcKapa(g.beyannameId)} className="flex w-full items-center justify-between gap-2 p-2 text-left text-sm hover:bg-muted/50" data-testid={`button-group-toggle-${g.beyannameId}`}>
-                  <span className="flex items-center gap-2">
-                    {acik ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-                    <span className="font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
-                    <span className="text-muted-foreground">{b?.dosyaNo ?? "?"}{b?.beyanNo ? ` · ${b.beyanNo}` : ""} · {b?.alici ?? "?"}</span>
-                  </span>
-                  <Badge variant="secondary">{g.masraflar.length}</Badge>
-                </button>
-                {acik && (
-                  <div className="border-t px-2 py-1 space-y-1">
-                    {g.masraflar.map((m) => (
-                      <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                        <span>{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
-                        <span className="flex items-center gap-2">
-                          <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
-                          <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
-                        </span>
-                      </div>
-                    ))}
+        <CardContent className="space-y-4">
+          {/* Blok 1 — Avanslar (yeşil, sade) */}
+          {(ozet?.avanslar.length ?? 0) > 0 && (
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-muted-foreground">Avanslar</div>
+              {(ozet?.avanslar ?? []).map((a) => (
+                <div key={a.id} className="flex items-center justify-between rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-900 dark:bg-green-950/40" data-testid={`row-avans-${a.id}`}>
+                  <div className="text-green-700 dark:text-green-400">
+                    <span className="font-medium">Avans</span> · {formatTarih(a.tarih)}{a.aciklama ? ` · ${a.aciklama}` : ""}
+                    {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
                   </div>
-                )}
+                  <div className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Blok 2 — Masraflar (sütun başlıklı grid tablo) */}
+          {(gruplar.length > 0 || ofisMasraflar.length > 0) && (
+            <div className="rounded-md border">
+              {/* Sütun başlıkları — yalnız en üstte bir kez */}
+              <div className="grid grid-cols-[minmax(80px,auto)_minmax(0,1fr)_minmax(0,1.4fr)_auto_20px] gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                <span>Dosya No</span>
+                <span>Beyanname No</span>
+                <span>Firma</span>
+                <span className="text-right">Tutar</span>
+                <span />
               </div>
-            );
-          })}
-          {ofisMasraflar.length > 0 && (
-            <div className="rounded-md border" data-testid="group-ofis">
-              <button type="button" onClick={() => grupAcKapa("__ofis__")} className="flex w-full items-center justify-between gap-2 p-2 text-left text-sm hover:bg-muted/50" data-testid="button-group-toggle-ofis">
-                <span className="flex items-center gap-2">
-                  {acikGruplar.has("__ofis__") ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-                  <span className="font-semibold text-destructive">−{formatPara(ofisToplam, "TL")}</span>
-                  <span className="text-muted-foreground">Ofis Masrafları</span>
-                </span>
-                <Badge variant="secondary">{ofisMasraflar.length}</Badge>
-              </button>
-              {acikGruplar.has("__ofis__") && (
-                <div className="border-t px-2 py-1 space-y-1">
-                  {ofisMasraflar.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                      <span><Badge variant="outline" className="mr-1">Ofis</Badge>{m.masrafTuru ?? "Masraf"} · {m.aciklama ?? "—"}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
-                      <span className="flex items-center gap-2">
-                        <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
-                        <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
-                      </span>
+
+              {gruplar.map((g) => {
+                const acik = acikGruplar.has(g.beyannameId);
+                const b = g.beyanname;
+                return (
+                  <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-beyanname-${g.beyannameId}`}>
+                    <button type="button" onClick={() => grupAcKapa(g.beyannameId)} className="grid w-full grid-cols-[minmax(80px,auto)_minmax(0,1fr)_minmax(0,1.4fr)_auto_20px] items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50" data-testid={`button-group-toggle-${g.beyannameId}`}>
+                      <span className="font-semibold">{b?.dosyaNo ?? "?"}</span>
+                      <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
+                      <span className="truncate">{b?.alici ?? "?"}</span>
+                      <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
+                      {acik ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}
+                    </button>
+                    {acik && (
+                      <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
+                        {g.masraflar.map((m) => (
+                          <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
+                            <span className="min-w-0 truncate">{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
+                              <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {ofisMasraflar.length > 0 && (
+                <div data-testid="group-ofis">
+                  <button type="button" onClick={() => grupAcKapa("__ofis__")} className="grid w-full grid-cols-[minmax(80px,auto)_minmax(0,1fr)_minmax(0,1.4fr)_auto_20px] items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50" data-testid="button-group-toggle-ofis">
+                    <span className="col-span-3 font-semibold">Ofis Masrafları</span>
+                    <span className="text-right font-semibold text-destructive">−{formatPara(ofisToplam, "TL")}</span>
+                    {acikGruplar.has("__ofis__") ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}
+                  </button>
+                  {acikGruplar.has("__ofis__") && (
+                    <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
+                      {ofisMasraflar.map((m) => (
+                        <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
+                          <span className="min-w-0 truncate"><Badge variant="outline" className="mr-1">Ofis</Badge>{m.masrafTuru ?? "Masraf"} · {m.aciklama ?? "—"}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
+                            <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>
           )}
+
           {hareketSayisi === 0 && (
             <p className="text-sm text-muted-foreground text-center py-4">Açık hareket yok.</p>
           )}
