@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useToast } from "@/hooks/use-toast";
 import { formatTarih, formatPara } from "./portalUtils";
 import YeniOdemeModal from "./YeniOdemeModal";
+import { masraflariGrupla } from "./masrafGruplama";
 import { ChevronRight, ChevronDown } from "lucide-react";
 
 type Ozet = { bakiye: number; avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] };
@@ -36,21 +37,11 @@ export default function OperasyonKasaSayfasi() {
 
   const beyannameMap = useMemo(() => new Map(beyannameler.map((b) => [b.id, b])), [beyannameler]);
 
-  // Masraflar beyannameId'ye göre gruplanır; dosyaYok (ofis) ayrı grupta.
-  const { gruplar, ofisMasraflar, ofisToplam } = useMemo(() => {
-    const harita = new Map<string, OperasyonMasraf[]>();
-    const ofis: OperasyonMasraf[] = [];
-    for (const m of ozet?.masraflar ?? []) {
-      if (m.dosyaYok || !m.beyannameId) { ofis.push(m); continue; }
-      const g = harita.get(m.beyannameId);
-      if (g) g.push(m); else harita.set(m.beyannameId, [m]);
-    }
-    const topla = (list: OperasyonMasraf[]) => Math.round(list.reduce((s, m) => s + parseFloat(m.tutar), 0) * 100) / 100;
-    const gruplar = Array.from(harita.entries()).map(([beyannameId, masraflar]) => ({
-      beyannameId, beyanname: beyannameMap.get(beyannameId), masraflar, toplam: topla(masraflar),
-    }));
-    return { gruplar, ofisMasraflar: ofis, ofisToplam: topla(ofis) };
-  }, [ozet?.masraflar, beyannameMap]);
+  // Gruplama ortak yardımcıda (Kapanışlarım da aynısını kullanır).
+  const { gruplar, ofisMasraflar, ofisToplam } = useMemo(
+    () => masraflariGrupla(ozet?.masraflar ?? [], beyannameMap),
+    [ozet?.masraflar, beyannameMap],
+  );
 
   const tazele = () => queryClient.invalidateQueries({ queryKey: ["/api/portal/operasyon/ozet"] });
 
