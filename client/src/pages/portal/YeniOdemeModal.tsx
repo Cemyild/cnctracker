@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { formatPara } from "./portalUtils";
 import MasrafTuruSecici from "./MasrafTuruSecici";
+import BeyannameSecici from "./BeyannameSecici";
 
 // Anlık kayıt olduğundan, eklenen masraf sunucudan dönen OperasyonMasraf'ın alt kümesidir.
 type Eklenen = { id: string; masrafTuru: string | null; alacakli: string; tutar: string };
@@ -23,7 +23,6 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
   const { data: odemeSirketleri = [] } = useQuery<OdemeSirketi[]>({ queryKey: ["/api/portal/odeme-sirketleri"] });
 
   // Beyanname bloğu — sabitlenince kilitlenir
-  const [arama, setArama] = useState("");
   const [beyannameId, setBeyannameId] = useState("");
   const [dosyaYok, setDosyaYok] = useState(false);
   const sabitlendi = dosyaYok || !!beyannameId;
@@ -41,15 +40,6 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
 
   // Bu modal oturumunda eklenenler (kolaylık listesi; gerçek kayıt landing açık hareketlerdedir)
   const [eklenenler, setEklenenler] = useState<Eklenen[]>([]);
-
-  const filtreliBeyannameler = useMemo(() => {
-    const q = arama.trim().toLocaleLowerCase("tr");
-    if (!q) return beyannameler;
-    return beyannameler.filter((b) =>
-      b.dosyaNo.toLocaleLowerCase("tr").includes(q) ||
-      (b.alici ?? "").toLocaleLowerCase("tr").includes(q) ||
-      (b.beyanNo ?? "").toLocaleLowerCase("tr").includes(q));
-  }, [beyannameler, arama]);
 
   // Sunucudaki getMasrafTuruByAd ile AYNI normalizasyon (asimetri olursa istemci "opsiyonel" der, sunucu 400).
   const seciliTur = useMemo(() => {
@@ -69,7 +59,7 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
     setMasrafTuru(""); setTutar(""); setAlacakli(""); setIban(""); setAciklama("");
     setBelge(null); setBelgeSayac((s) => s + 1);
   };
-  const beyannameDegistir = () => { setBeyannameId(""); setDosyaYok(false); setArama(""); };
+  const beyannameDegistir = () => { setBeyannameId(""); setDosyaYok(false); };
   const kapat = () => {
     beyannameDegistir(); masrafFormuSifirla(); setEklenenler([]);
     onClose();
@@ -125,17 +115,12 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
                 <Label htmlFor="op-ofis" className="font-normal text-muted-foreground">Ofis Masrafı — dosyaya bağlı değil, açıklama zorunlu</Label>
               </div>
               {!dosyaYok && (
-                <>
-                  <Input placeholder="Dosya no, beyan no veya müşteri ara…" value={arama} onChange={(e) => setArama(e.target.value)} data-testid="input-op-arama" />
-                  <Select value={beyannameId} onValueChange={setBeyannameId}>
-                    <SelectTrigger data-testid="select-op-beyanname"><SelectValue placeholder="Beyanname seçin" /></SelectTrigger>
-                    <SelectContent>
-                      {filtreliBeyannameler.slice(0, 100).map((b) => (
-                        <SelectItem key={b.id} value={b.id}>{b.dosyaNo} — {b.alici ?? "?"}{b.beyanNo ? ` · ${b.beyanNo}` : ""}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </>
+                <BeyannameSecici
+                  beyannameler={beyannameler}
+                  value={beyannameId}
+                  onChange={setBeyannameId}
+                  testId="select-op-beyanname"
+                />
               )}
             </div>
           ) : (
