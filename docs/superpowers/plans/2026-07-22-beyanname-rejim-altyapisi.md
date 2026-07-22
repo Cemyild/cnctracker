@@ -395,7 +395,16 @@ Expected: beş `false`; `toLowerCase(` sayımı `BeyannameSecici.tsx` için `1` 
 
 - [ ] **Step 14: IM içe aktarma regresyonu — rejim kodu geliyor mu?**
 
-Dev sunucuyu başlat (`npm run dev`, arka planda). Depodaki `BEYANNAME LİSTESİ.xlsx` dosyasını mevcut ingest ucundan yükle. Token'ı `.env`'den oku (`grep -i token .env`).
+**ÖNCE TOKEN:** dev `.env`'de `INGEST_TOKEN` **YOKTUR** — bu hâliyle uç `503 "Otomatik alım devre dışı"` döner ([routes.ts:384](../../../server/routes.ts#L384)). Test için geçici olarak ekle:
+
+```bash
+cp .env .env.ingest-yedek
+printf '\nINGEST_TOKEN=e2e-test-token\n' >> .env
+grep -c "^INGEST_TOKEN=" .env    # 1 olmalı
+```
+Bu adım `.env`'e yazdığı için **dev Neon'a bağlı olduğunu Step 1'de doğruladığından emin ol.** Görev sonunda (Step 15'ten ÖNCE) `cp .env.ingest-yedek .env` ile geri al ve `grep -c "^INGEST_TOKEN=" .env` → `0` olduğunu doğrula. **`.env` ve `.env.ingest-yedek` ASLA commit edilmez.**
+
+Dev sunucuyu **token eklendikten SONRA** başlat (`npm run dev`, arka planda) — `INGEST_TOKEN` süreç başlangıcında okunur. Sonra depodaki `BEYANNAME LİSTESİ.xlsx` dosyasını yükle:
 
 ```bash
 node -e "
@@ -406,7 +415,7 @@ fetch('http://localhost:5000/api/ingest/beyanname',{method:'POST',headers:{'Cont
  .then(r=>r.json()).then(j=>{console.log(JSON.stringify(j));process.exit(0)});
 "
 ```
-Token başlığının adı farklıysa `server/routes.ts` içindeki `requireIngestToken` fonksiyonunu oku ve doğru başlığı kullan.
+Token başlığı `x-ingest-token`, env değişkeni `INGEST_TOKEN` ([routes.ts:382-390](../../../server/routes.ts#L382-L390)).
 
 Expected: `durum: "basarili"`, ~275 satır, **`eklenen: 0`** (hepsi zaten var, güncellendi). Sonra:
 
