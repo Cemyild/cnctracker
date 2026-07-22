@@ -87,7 +87,7 @@ export const beyannameler = pgTable("beyannameler", {
   doviz: text("doviz"),
   kullanici: text("kullanici"), // AV sütunu — temsilci filtre alanı
   // KANAL: hangi rapordan/uctan geldi. Gumruk rejim kodu DEGIL.
-  // DEFAULT yalniz mevcut satirlari doldurmak icin; icе aktarma her zaman acikca yazar.
+  // DEFAULT yalniz mevcut satirlari doldurmak icin; ice aktarma her zaman acikca yazar.
   rejim: text("rejim").notNull().default("IM"), // 'IM' | 'EX' | 'TR'
   // Ham gumruk rejim kodu (Excel AU sutunu): 4000, 7100, 5171 ...
   rejimKodu: text("rejim_kodu"),
