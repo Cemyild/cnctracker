@@ -105,9 +105,11 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
 
   return (
     <Dialog open={open} onOpenChange={(a) => { if (!a) kapat(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Yeni Ödeme Kaydet</DialogTitle></DialogHeader>
-        <div className="space-y-4">
+        {/* min-w-0: DialogContent bir grid; grid ogesinin varsayilan min-width:auto'su
+            icerideki truncate'in min-content genisligini emip sutunu modalin disina tasirir. */}
+        <div className="min-w-0 space-y-4">
           {!sabitlendi ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -124,13 +126,13 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
               )}
             </div>
           ) : (
-            <div className="flex items-center justify-between rounded-md border bg-muted/40 p-3">
-              <div className="text-sm">
+            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 p-3">
+              <div className="min-w-0 truncate text-sm">
                 {dosyaYok ? <span className="font-medium">Ofis Masrafı</span> : (
                   <><span className="font-medium">{seciliBeyanname?.dosyaNo ?? "?"}</span> · {seciliBeyanname?.alici ?? "?"}{seciliBeyanname?.beyanNo ? ` · ${seciliBeyanname.beyanNo}` : ""}</>
                 )}
               </div>
-              <Button variant="ghost" size="sm" onClick={beyannameDegistir} data-testid="button-op-beyanname-degistir">Değiştir</Button>
+              <Button variant="ghost" size="sm" className="shrink-0" onClick={beyannameDegistir} data-testid="button-op-beyanname-degistir">Değiştir</Button>
             </div>
           )}
 
@@ -138,7 +140,7 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
             <>
               <div className="space-y-3">
                 <div className="space-y-2"><Label>Masraf Türü</Label><MasrafTuruSecici value={masrafTuru} onChange={setMasrafTuru} testId="op-masraf-turu" /></div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2"><Label>Tutar (TL)</Label><Input placeholder="0,00" value={tutar} onChange={(e) => setTutar(e.target.value)} data-testid="input-op-tutar" /></div>
                   <div className="space-y-2">
                     <Label>Kime Ödendi</Label>
@@ -146,7 +148,7 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
                     <datalist id="op-alacakli-onerileri">{odemeSirketleri.map((s) => (<option key={s.id} value={s.ad} />))}</datalist>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2"><Label>IBAN (varsa)</Label><Input placeholder="TR.." value={iban} onChange={(e) => setIban(e.target.value)} data-testid="input-op-iban" /></div>
                   <div className="space-y-2"><Label>{belgeZorunlu ? "Belge (fiş/fatura — ZORUNLU)" : "Belge (fiş/fatura — opsiyonel)"}</Label><Input key={belgeSayac} type="file" onChange={(e) => setBelge(e.target.files?.[0] ?? null)} data-testid="input-op-belge" /></div>
                 </div>
@@ -160,9 +162,9 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
             <div className="border-t pt-3 space-y-1">
               <div className="text-xs font-medium text-muted-foreground">Bu oturumda eklenenler ({eklenenler.length})</div>
               {eklenenler.map((e) => (
-                <div key={e.id} className="flex items-center justify-between text-sm" data-testid={`eklenen-${e.id}`}>
-                  <span>{e.masrafTuru ?? "Masraf"} · {e.alacakli}</span>
-                  <span className="flex items-center gap-2">
+                <div key={e.id} className="flex items-center justify-between gap-2 text-sm" data-testid={`eklenen-${e.id}`}>
+                  <span className="min-w-0 truncate">{e.masrafTuru ?? "Masraf"} · {e.alacakli}</span>
+                  <span className="flex shrink-0 items-center gap-2">
                     <span className="text-destructive">−{formatPara(e.tutar, "TL")}</span>
                     <Button variant="ghost" size="sm" onClick={() => eklenenKaldir(e.id)} data-testid={`button-eklenen-kaldir-${e.id}`}>Kaldır</Button>
                   </span>
