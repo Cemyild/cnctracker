@@ -28,6 +28,8 @@ export default function BeyannameSecici({
   const [arama, setArama] = useState("");
 
   const secili = beyannameler.find((b) => b.id === value);
+  // dosyaNo transitte null olabilir -> beyanNo'ya duser.
+  const kimlik = (b: Beyanname) => b.dosyaNo ?? b.beyanNo ?? "?";
 
   // cmdk'nin dahili filtresi toLowerCase() tabanlidir ve Turkce I/I'yi bozar
   // ("ISTANBUL" -> noktali i, "istanbul" ile eslesmez). Bu yuzden Command'da
@@ -37,7 +39,7 @@ export default function BeyannameSecici({
     if (!q) return beyannameler;
     return beyannameler.filter(
       (b) =>
-        b.dosyaNo.toLocaleLowerCase("tr").includes(q) ||
+        (b.dosyaNo ?? "").toLocaleLowerCase("tr").includes(q) ||
         (b.alici ?? "").toLocaleLowerCase("tr").includes(q) ||
         (b.beyanNo ?? "").toLocaleLowerCase("tr").includes(q),
     );
@@ -62,7 +64,7 @@ export default function BeyannameSecici({
           data-testid={testId}
         >
           <span className="truncate">
-            {secili ? `${secili.dosyaNo} — ${secili.alici ?? "?"}` : placeholder}
+            {secili ? `${kimlik(secili)} — ${secili.alici ?? "?"}` : placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -91,9 +93,9 @@ export default function BeyannameSecici({
                 >
                   <Check className={cn("mr-2 h-4 w-4 shrink-0", b.id === value ? "opacity-100" : "opacity-0")} />
                   <div className="min-w-0">
-                    <div className="font-semibold">{b.dosyaNo}</div>
+                    <div className="font-semibold">{kimlik(b)}</div>
                     <div className="truncate text-xs text-muted-foreground">{b.alici ?? "?"}</div>
-                    {b.beyanNo && <div className="truncate text-xs text-muted-foreground">{b.beyanNo}</div>}
+                    {b.dosyaNo && b.beyanNo && <div className="truncate text-xs text-muted-foreground">{b.beyanNo}</div>}
                   </div>
                 </CommandItem>
               ))

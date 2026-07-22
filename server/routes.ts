@@ -2014,7 +2014,8 @@ export async function registerRoutes(
             throw e;
           }
         } else {
-          const { rows } = parseBeyannameWorkbook(buffer);
+          // Bu uc YALNIZ ithalat raporunu alir. EX icin ayri uc gelecek (Faz 1b).
+          const { rows } = parseBeyannameWorkbook(buffer, "IM");
           if (!rows.length) throw new Error("Excel'de veri satırı bulunamadı");
           const sonuc = await storage.upsertBeyannameler(rows);
           const mesaj = `${rows.length} satır (${sonuc.eklenen} yeni, ${sonuc.guncellenen} güncellendi)`;
@@ -4643,7 +4644,8 @@ export async function registerRoutes(
   app.post("/api/odemeler/beyanname-excel", uploadBeyannameMemory.single("dosya"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "Dosya gerekli" });
-      const { rows } = parseBeyannameWorkbook(req.file.buffer);
+      // Bu uc da YALNIZ ithalat raporunu alir (yonetim panelinden elle yukleme).
+      const { rows } = parseBeyannameWorkbook(req.file.buffer, "IM");
       if (!rows.length) return res.status(400).json({ error: "Excel'de veri satırı bulunamadı" });
       const sonuc = await storage.upsertBeyannameler(rows);
       const eslesmeyen = await storage.getEslesmeyenBeyannameKullanicilari();

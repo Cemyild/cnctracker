@@ -982,7 +982,8 @@ export type PortalKullanici = typeof portalKullanicilar.$inferSelect;
 // Beyanname referans listesi — Excel'den beslenir, DOSYA NO ile upsert
 export const beyannameler = pgTable("beyannameler", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  dosyaNo: text("dosya_no").notNull(),
+  // Transitte dosya no YOKTUR -> nullable. IM/EX icin parser her zaman doldurur.
+  dosyaNo: text("dosya_no"),
   alici: text("alici"),
   gonderen: text("gonderen"),
   koli: integer("koli"),
@@ -992,9 +993,19 @@ export const beyannameler = pgTable("beyannameler", {
   fatBedeli: decimal("fat_bedeli", { precision: 18, scale: 2 }),
   doviz: text("doviz"),
   kullanici: text("kullanici"), // AV sütunu — temsilci filtre alanı
+  // KANAL: hangi rapordan/uctan geldi. Gumruk rejim kodu DEGIL.
+  // DEFAULT yalniz mevcut satirlari doldurmak icin; ice aktarma her zaman acikca yazar.
+  rejim: text("rejim").notNull().default("IM"), // 'IM' | 'EX' | 'TR'
+  // Ham gumruk rejim kodu (Excel AU sutunu): 4000, 7100, 5171 ...
+  rejimKodu: text("rejim_kodu"),
+  kaynak: text("kaynak").notNull().default("excel"), // 'excel' | 'manuel'
   sonGuncelleme: timestamp("son_guncelleme").defaultNow(),
 }, (table) => [
-  uniqueIndex("beyannameler_dosya_no_idx").on(table.dosyaNo),
+  // IM ve EX ayni dosya no'yu kullanabilir -> kimlik CIFTTIR.
+  // Tek kolonlu eski indeks, EX yuklemesinin IM kaydini sessizce ezmesine yol aciyordu.
+  uniqueIndex("beyannameler_dosya_rejim_idx").on(table.dosyaNo, table.rejim),
+  // Transitin kimligi beyan no'dur (dosya no'su yok). Kismi indeks: yalniz rejim='TR'.
+  uniqueIndex("beyannameler_tr_beyan_no_idx").on(table.beyanNo).where(sql`${table.rejim} = 'TR'`),
   index("beyannameler_kullanici_idx").on(table.kullanici),
 ]);
 

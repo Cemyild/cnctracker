@@ -3440,20 +3440,28 @@ export class DatabaseStorage implements IStorage {
 
   async upsertBeyannameler(rows: InsertBeyanname[]): Promise<{ eklenen: number; guncellenen: number }> {
     if (!rows.length) return { eklenen: 0, guncellenen: 0 };
-    // Aynı batch içinde tekrarlı dosyaNo "ON CONFLICT ... cannot affect row a second time"
-    // hatası verir — son satır kazanacak şekilde tekilleştir.
+    // Kimlik artik (dosyaNo, rejim) CIFTI. Tek kolonla tekillestirmek ayni numarali
+    // IM ve EX satirlarini birbirine ezerdi — bu fazin onledigi asil hasar budur.
+    const anahtar = (r: { dosyaNo?: string | null; rejim?: string | null }) =>
+      `${r.dosyaNo ?? ""}|${r.rejim ?? "IM"}`;
     const tekil = new Map<string, InsertBeyanname>();
-    for (const r of rows) tekil.set(r.dosyaNo, r);
+    for (const r of rows) tekil.set(anahtar(r), r);
     const kayitlar = Array.from(tekil.values());
 
-    const mevcutlar = await db.select({ dosyaNo: beyannameler.dosyaNo }).from(beyannameler)
-      .where(inArray(beyannameler.dosyaNo, kayitlar.map((r) => r.dosyaNo)));
-    const mevcutSet = new Set(mevcutlar.map((m) => m.dosyaNo));
+    // dosyaNo artik nullable; null olanlar (transit) Excel akisindan GELMEZ ama
+    // inArray'e null gecirmemek icin suzuluyor.
+    const dosyaNolar = kayitlar.map((r) => r.dosyaNo).filter((d): d is string => !!d);
+    const mevcutlar = dosyaNolar.length
+      ? await db.select({ dosyaNo: beyannameler.dosyaNo, rejim: beyannameler.rejim })
+          .from(beyannameler)
+          .where(inArray(beyannameler.dosyaNo, dosyaNolar))
+      : [];
+    const mevcutSet = new Set(mevcutlar.map((m) => anahtar(m)));
 
     for (let i = 0; i < kayitlar.length; i += 500) {
       const parca = kayitlar.slice(i, i + 500);
       await db.insert(beyannameler).values(parca).onConflictDoUpdate({
-        target: beyannameler.dosyaNo,
+        target: [beyannameler.dosyaNo, beyannameler.rejim],
         set: {
           alici: sql`excluded.alici`,
           gonderen: sql`excluded.gonderen`,
@@ -3464,11 +3472,12 @@ export class DatabaseStorage implements IStorage {
           fatBedeli: sql`excluded.fat_bedeli`,
           doviz: sql`excluded.doviz`,
           kullanici: sql`excluded.kullanici`,
+          rejimKodu: sql`excluded.rejim_kodu`,
           sonGuncelleme: sql`now()`,
         },
       });
     }
-    const eklenen = kayitlar.filter((r) => !mevcutSet.has(r.dosyaNo)).length;
+    const eklenen = kayitlar.filter((r) => !mevcutSet.has(anahtar(r))).length;
     return { eklenen, guncellenen: kayitlar.length - eklenen };
   }
 

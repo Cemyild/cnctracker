@@ -15,6 +15,12 @@ const BEKLENEN_BASLIKLAR: Record<string, string> = {
   AV: "KULLANICI",
 };
 
+// Ham gümrük rejim kodu sütunu (4000, 7100, 5171 ...). KATI DOĞRULAMAYA DAHİL DEĞİL:
+// tamamlayıcı bir alan, eksikliği çalışan içe aktarmayı durdurmamalı. Başlık tam
+// eşleşmiyorsa hiç okunmaz (yanlış sütundan değer yazmaktansa null bırakılır).
+const REJIM_KODU_SUTUNU = "AU";
+const REJIM_KODU_BASLIGI = "REJİM";
+
 // "DD.MM.YYYY" → "YYYY-MM-DD"; "." veya boş → null.
 // new Date() KULLANILMAZ — timezone off-by-one tuzağı (commit c897dff).
 export function parseBeyanTarihi(deger: unknown): string | null {
@@ -24,7 +30,10 @@ export function parseBeyanTarihi(deger: unknown): string | null {
   return `${m[3]}-${m[2]}-${m[1]}`;
 }
 
-export function parseBeyannameWorkbook(buffer: Buffer): { rows: InsertBeyanname[] } {
+export function parseBeyannameWorkbook(
+  buffer: Buffer,
+  rejim: "IM" | "EX",
+): { rows: InsertBeyanname[] } {
   const wb = XLSX.read(buffer, { type: "buffer" });
   const sheetName = wb.SheetNames.includes("İthalat Raporu")
     ? "İthalat Raporu"
@@ -64,6 +73,11 @@ export function parseBeyannameWorkbook(buffer: Buffer): { rows: InsertBeyanname[
     throw new Error(`Excel başlıkları uyuşmuyor: ${sorunlar.join("; ")}`);
   }
 
+  // Rejim kodu sütunu KOŞULLU: başlık tam eşleşirse oku, yoksa hepsine null.
+  const rejimKoduIdx = XLSX.utils.decode_col(REJIM_KODU_SUTUNU);
+  const rejimKoduVar =
+    String(baslikSatiri[rejimKoduIdx] ?? "").trim() === REJIM_KODU_BASLIGI;
+
   const col = (harf: string) => XLSX.utils.decode_col(harf);
   const metin = (v: unknown) => (v == null ? null : String(v).trim() || null);
   const rows: InsertBeyanname[] = [];
@@ -86,6 +100,9 @@ export function parseBeyannameWorkbook(buffer: Buffer): { rows: InsertBeyanname[
       fatBedeli: typeof satir[col("M")] === "number" ? String(satir[col("M")]) : null,
       doviz: metin(satir[col("N")]),
       kullanici: metin(satir[col("AV")]),
+      rejim,
+      rejimKodu: rejimKoduVar ? metin(satir[rejimKoduIdx]) : null,
+      kaynak: "excel",
     });
   }
   return { rows };
