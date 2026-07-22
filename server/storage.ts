@@ -3472,7 +3472,8 @@ export class DatabaseStorage implements IStorage {
           fatBedeli: sql`excluded.fat_bedeli`,
           doviz: sql`excluded.doviz`,
           kullanici: sql`excluded.kullanici`,
-          rejimKodu: sql`excluded.rejim_kodu`,
+          // Basligi bozuk bir dosya, mevcut DOLU rejim kodlarini NULL'a EZMESIN.
+          rejimKodu: sql`coalesce(excluded.rejim_kodu, ${beyannameler.rejimKodu})`,
           sonGuncelleme: sql`now()`,
         },
       });

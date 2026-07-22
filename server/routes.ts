@@ -168,7 +168,7 @@ import { parseUcretPusulasiPdf, ayNumaraToKey } from "./bordroParser";
 import { isGunuSayisi, bakiyeHesapla } from "@shared/izinHesaplari";
 import { type InsertAcilisBakiye, type InsertCalisanIzin } from "@shared/schema";
 import { parseMizanXlsx } from "./mizanParser";
-import { parseBeyannameWorkbook } from "./beyannameParser";
+import { parseBeyannameWorkbook, parseIhracatWorkbook } from "./beyannameParser";
 import { benzerlikSkoru, ESLESME_AUTO_ESIK, ESLESME_ONERI_ESIK } from "./eslestirme";
 import {
   netBakiye, gecikme, isAktivitesiAcigi, bakiyeFaturaAcigi, riskProfili,
@@ -1990,9 +1990,9 @@ export async function registerRoutes(
       const dosyaAdi = (headerDosyaAdi ? fixUploadFilename(headerDosyaAdi) : (req.query.dosya as string) || `ingest-${Date.now()}.xlsx`).toString();
       const buffer = req.body as Buffer;
 
-      if (tip !== "mizan" && tip !== "beyanname") {
-        await storage.insertOtomatikYuklemeLog({ tip: req.params.tip, dosyaAdi, durum: "hata", kayitSayisi: 0, mesaj: "Geçersiz tip (mizan | beyanname)", zaman: zamanDamgasi() });
-        return res.status(400).json({ error: "Geçersiz tip (mizan | beyanname)" });
+      if (tip !== "mizan" && tip !== "beyanname" && tip !== "beyanname-ex") {
+        await storage.insertOtomatikYuklemeLog({ tip: req.params.tip, dosyaAdi, durum: "hata", kayitSayisi: 0, mesaj: "Geçersiz tip (mizan | beyanname | beyanname-ex)", zaman: zamanDamgasi() });
+        return res.status(400).json({ error: "Geçersiz tip (mizan | beyanname | beyanname-ex)" });
       }
       if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
         await storage.insertOtomatikYuklemeLog({ tip, dosyaAdi, durum: "hata", kayitSayisi: 0, mesaj: "Boş gövde — dosya gönderilmedi", zaman: zamanDamgasi() });
@@ -2013,12 +2013,21 @@ export async function registerRoutes(
             }
             throw e;
           }
-        } else {
-          // Bu uc YALNIZ ithalat raporunu alir. EX icin ayri uc gelecek (Faz 1b).
-          const { rows } = parseBeyannameWorkbook(buffer, "IM");
+        } else if (tip === "beyanname-ex") {
+          const { rows, uyarilar } = parseIhracatWorkbook(buffer);
           if (!rows.length) throw new Error("Excel'de veri satırı bulunamadı");
           const sonuc = await storage.upsertBeyannameler(rows);
-          const mesaj = `${rows.length} satır (${sonuc.eklenen} yeni, ${sonuc.guncellenen} güncellendi)`;
+          const mesaj = `${rows.length} satır (${sonuc.eklenen} yeni, ${sonuc.guncellenen} güncellendi)`
+            + (uyarilar.length ? ` — UYARI: ${uyarilar.join("; ")}` : "");
+          await storage.insertOtomatikYuklemeLog({ tip, dosyaAdi, durum: "basarili", kayitSayisi: rows.length, mesaj, zaman: zamanDamgasi() });
+          return res.json({ durum: "basarili", tip, kayitSayisi: rows.length, mesaj });
+        } else {
+          // Bu uc YALNIZ ithalat raporunu alir; ihracat /api/ingest/beyanname-ex'e gider.
+          const { rows, uyarilar } = parseBeyannameWorkbook(buffer);
+          if (!rows.length) throw new Error("Excel'de veri satırı bulunamadı");
+          const sonuc = await storage.upsertBeyannameler(rows);
+          const mesaj = `${rows.length} satır (${sonuc.eklenen} yeni, ${sonuc.guncellenen} güncellendi)`
+            + (uyarilar.length ? ` — UYARI: ${uyarilar.join("; ")}` : "");
           await storage.insertOtomatikYuklemeLog({ tip, dosyaAdi, durum: "basarili", kayitSayisi: rows.length, mesaj, zaman: zamanDamgasi() });
           return res.json({ durum: "basarili", tip, kayitSayisi: rows.length, mesaj });
         }
@@ -4645,7 +4654,7 @@ export async function registerRoutes(
     try {
       if (!req.file) return res.status(400).json({ error: "Dosya gerekli" });
       // Bu uc da YALNIZ ithalat raporunu alir (yonetim panelinden elle yukleme).
-      const { rows } = parseBeyannameWorkbook(req.file.buffer, "IM");
+      const { rows } = parseBeyannameWorkbook(req.file.buffer);
       if (!rows.length) return res.status(400).json({ error: "Excel'de veri satırı bulunamadı" });
       const sonuc = await storage.upsertBeyannameler(rows);
       const eslesmeyen = await storage.getEslesmeyenBeyannameKullanicilari();
