@@ -21,7 +21,7 @@ type Detay = { bakiye: number; acik: { avanslar: OperasyonAvans[]; masraflar: Op
 // Kasam/Kapanışlarım tablolarıyla BİREBİR aynı grid şablonu (hizalama şartı).
 // SABİT sütun genişlikleri — her satır ayrı grid; "auto" olsaydı içerik uzunluğu
 // satırdan satıra değişip sütunları kaydırırdı (Meksika dalgası). Sabit → hizalı.
-const GRID = "grid-cols-[140px_minmax(0,1fr)_minmax(0,1.4fr)_130px_20px]";
+const GRID = "grid-cols-[150px_190px_minmax(0,1fr)_120px_20px]";
 
 export default function OperasyonTakipSayfasi() {
   const { toast } = useToast();
@@ -203,7 +203,7 @@ export default function OperasyonTakipSayfasi() {
                         return (
                           <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-acik-${g.beyannameId}`}>
                             <button type="button" onClick={() => acikGrupAcKapa(g.beyannameId)} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid={`button-group-toggle-acik-${g.beyannameId}`}>
-                              <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? "?"}</span>
+                              <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? (b?.rejim === "TR" ? "TR" : "?")}</span>
                               <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
                               <span className="truncate" title={b?.alici ?? ""}>{b?.alici ?? "?"}</span>
                               <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
@@ -304,7 +304,7 @@ export default function OperasyonTakipSayfasi() {
                               return (
                                 <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-kapanis-${k.id}-${g.beyannameId}`}>
                                   <button type="button" onClick={() => kapanisGrupAcKapa(anahtar)} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid={`button-group-toggle-${k.id}-${g.beyannameId}`}>
-                                    <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? "?"}</span>
+                                    <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? (b?.rejim === "TR" ? "TR" : "?")}</span>
                                     <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
                                     <span className="truncate" title={b?.alici ?? ""}>{b?.alici ?? "?"}</span>
                                     <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>

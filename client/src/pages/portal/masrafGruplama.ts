@@ -33,5 +33,9 @@ export function masraflariGrupla(
     beyannameId, beyanname: beyannameMap.get(beyannameId), masraflar: list, toplam: topla(list),
     tarih: list.reduce((min, m) => (m.tarih < min ? m.tarih : min), list[0].tarih),
   }));
+  // Kronolojik sırala (YYYY-MM-DD lexicographic = kronolojik); eşit tarihte dosya no.
+  gruplar.sort((a, b) =>
+    a.tarih < b.tarih ? -1 : a.tarih > b.tarih ? 1 :
+    (a.beyanname?.dosyaNo ?? "").localeCompare(b.beyanname?.dosyaNo ?? "", "tr"));
   return { gruplar, ofisMasraflar: ofis, ofisToplam: topla(ofis) };
 }

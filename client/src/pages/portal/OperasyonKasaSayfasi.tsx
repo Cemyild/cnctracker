@@ -17,7 +17,7 @@ type Ozet = { bakiye: number; avanslar: OperasyonAvans[]; masraflar: OperasyonMa
 // Açık Hareketler tablosu sütun şablonu — TÜM satırlarda birebir aynı olmalı ki
 // sütunlar hizalansın. Her satır ayrı bir grid container; sütunlar ancak SABİT
 // genişlikle satırlar arası aynı hizaya oturur ("auto" → içeriğe göre kayma/dalga).
-const GRID = "grid-cols-[140px_minmax(0,1fr)_minmax(0,1.4fr)_130px_20px]";
+const GRID = "grid-cols-[150px_190px_minmax(0,1fr)_120px_20px]";
 
 export default function OperasyonKasaSayfasi() {
   const { toast } = useToast();
@@ -132,7 +132,7 @@ export default function OperasyonKasaSayfasi() {
                 return (
                   <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-beyanname-${g.beyannameId}`}>
                     <button type="button" onClick={() => grupAcKapa(g.beyannameId)} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid={`button-group-toggle-${g.beyannameId}`}>
-                      <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? "?"}</span>
+                      <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? (b?.rejim === "TR" ? "TR" : "?")}</span>
                       <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
                       <span className="truncate" title={b?.alici ?? ""}>{b?.alici ?? "?"}</span>
                       <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
