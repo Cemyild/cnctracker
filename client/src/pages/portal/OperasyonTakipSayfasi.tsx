@@ -224,7 +224,7 @@ export default function OperasyonTakipSayfasi() {
                               <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
                                 {g.masraflar.map((m) => (
                                   <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                                    <span className="min-w-0 truncate">{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                                    <span className="min-w-0 truncate"><span className="text-muted-foreground">{formatTarihKisa(m.tarih)}</span> · {m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
                                     <span className="shrink-0 font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
                                   </div>
                                 ))}
@@ -244,7 +244,7 @@ export default function OperasyonTakipSayfasi() {
                             <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
                               {aOfis.map((m) => (
                                 <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                                  <span className="min-w-0 truncate"><Badge variant="outline" className="mr-1">Ofis</Badge>{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.aciklama ? ` · ${m.aciklama}` : ""}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                                  <span className="min-w-0 truncate"><Badge variant="outline" className="mr-1">Ofis</Badge><span className="text-muted-foreground">{formatTarihKisa(m.tarih)}</span> · {m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.aciklama ? ` · ${m.aciklama}` : ""}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
                                   <span className="shrink-0 font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
                                 </div>
                               ))}
@@ -325,7 +325,7 @@ export default function OperasyonTakipSayfasi() {
                                     <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
                                       {g.masraflar.map((m) => (
                                         <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                                          <span className="min-w-0 truncate">{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                                          <span className="min-w-0 truncate"><span className="text-muted-foreground">{formatTarihKisa(m.tarih)}</span> · {m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
                                           <span className="shrink-0 font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
                                         </div>
                                       ))}
@@ -348,7 +348,7 @@ export default function OperasyonTakipSayfasi() {
                                     <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
                                       {ofisMasraflar.map((m) => (
                                         <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                                          <span className="min-w-0 truncate"><Badge variant="outline" className="mr-1">Ofis</Badge>{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.aciklama ? ` · ${m.aciklama}` : ""}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                                          <span className="min-w-0 truncate"><Badge variant="outline" className="mr-1">Ofis</Badge><span className="text-muted-foreground">{formatTarihKisa(m.tarih)}</span> · {m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.aciklama ? ` · ${m.aciklama}` : ""}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
                                           <span className="shrink-0 font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
                                         </div>
                                       ))}

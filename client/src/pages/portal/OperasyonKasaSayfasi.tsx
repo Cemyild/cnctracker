@@ -142,7 +142,7 @@ export default function OperasyonKasaSayfasi() {
                       <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
                         {g.masraflar.map((m) => (
                           <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                            <span className="min-w-0 truncate">{m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                            <span className="min-w-0 truncate"><span className="text-muted-foreground">{formatTarihKisa(m.tarih)}</span> · {m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
                             <span className="flex shrink-0 items-center gap-2">
                               <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
                               <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
@@ -166,7 +166,7 @@ export default function OperasyonKasaSayfasi() {
                     <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
                       {ofisMasraflar.map((m) => (
                         <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                          <span className="min-w-0 truncate"><Badge variant="outline" className="mr-1">Ofis</Badge>{m.masrafTuru ?? "Masraf"} · {m.aciklama ?? "—"}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
+                          <span className="min-w-0 truncate"><Badge variant="outline" className="mr-1">Ofis</Badge><span className="text-muted-foreground">{formatTarihKisa(m.tarih)}</span> · {m.masrafTuru ?? "Masraf"} · {m.aciklama ?? "—"}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
                           <span className="flex shrink-0 items-center gap-2">
                             <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
                             <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
