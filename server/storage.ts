@@ -423,6 +423,8 @@ export interface IStorage {
   masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; sube: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string | null; belgeAdi: string | null }): Promise<OperasyonMasraf>;
   getOperasyonMasraf(id: string): Promise<OperasyonMasraf | undefined>;
   masrafSil(id: string): Promise<void>;
+  getOperasyonAvans(id: string): Promise<OperasyonAvans | undefined>;
+  avansSil(id: string): Promise<void>;
   getAcikHareketler(operasyonId: string): Promise<{ avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>;
   gunuKapat(operasyonId: string, gunTarihi: string): Promise<OperasyonGunKapanis | null>;
   getKapanislar(operasyonId: string): Promise<Array<OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>>;
@@ -3944,6 +3946,15 @@ export class DatabaseStorage implements IStorage {
 
   async masrafSil(id: string): Promise<void> {
     await db.delete(operasyonMasraflar).where(eq(operasyonMasraflar.id, id));
+  }
+
+  async getOperasyonAvans(id: string): Promise<OperasyonAvans | undefined> {
+    const [a] = await db.select().from(operasyonAvanslar).where(eq(operasyonAvanslar.id, id));
+    return a;
+  }
+
+  async avansSil(id: string): Promise<void> {
+    await db.delete(operasyonAvanslar).where(eq(operasyonAvanslar.id, id));
   }
 
   async getAcikHareketler(operasyonId: string): Promise<{ avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }> {

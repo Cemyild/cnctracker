@@ -125,6 +125,17 @@ export default function OperasyonTakipSayfasi() {
     finally { setGonderiliyor(false); }
   };
 
+  // Muhasebe yanlış girdiği (açık) avansı silebilir. Kapanmış gün avansı kilitli → buton görünmez.
+  const avansKaldir = async (id: string) => {
+    if (!confirm("Bu avansı silmek istediğinize emin misiniz?")) return;
+    try {
+      const res = await fetch(`/api/portal/operasyon-takip/avans/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error((await res.json()).error || "Silinemedi");
+      toast({ title: "Avans silindi" });
+      tazele();
+    } catch (err: any) { toast({ title: "Hata", description: err.message, variant: "destructive" }); }
+  };
+
   const geriAc = async (kapanisId: string) => {
     try {
       const res = await fetch(`/api/portal/operasyon-takip/kapanis/${kapanisId}/geri-ac`, { method: "POST", credentials: "include" });
@@ -186,7 +197,7 @@ export default function OperasyonTakipSayfasi() {
                             <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
                             {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
                           </div>
-                          <div className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</div>
+                          <div className="flex shrink-0 items-center gap-2"><span className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</span>{!a.kapanisId && <Button variant="ghost" size="sm" onClick={() => avansKaldir(a.id)} data-testid={`button-avans-kaldir-${a.id}`}>Kaldır</Button>}</div>
                         </div>
                       ))}
                     </div>
@@ -286,7 +297,7 @@ export default function OperasyonTakipSayfasi() {
                                   <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
                                   {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
                                 </div>
-                                <div className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</div>
+                                <div className="flex shrink-0 items-center gap-2"><span className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</span>{!a.kapanisId && <Button variant="ghost" size="sm" onClick={() => avansKaldir(a.id)} data-testid={`button-avans-kaldir-${a.id}`}>Kaldır</Button>}</div>
                               </div>
                             ))}
                           </div>

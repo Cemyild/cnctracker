@@ -5541,6 +5541,18 @@ export async function registerRoutes(
     } catch (e: any) { sil(); res.status(500).json({ error: e.message }); }
   });
 
+  // Muhasebe yanlış girdiği avansı silebilir — YALNIZ açık (kapanmamış) avans.
+  app.delete("/api/portal/operasyon-takip/avans/:id", requireMuhasebe, async (req, res) => {
+    try {
+      const a = await storage.getOperasyonAvans(req.params.id);
+      if (!a) return res.status(404).json({ error: "Bulunamadı" });
+      if (a.kapanisId) return res.status(409).json({ error: "Kapanmış gün — silinemez" });
+      if (a.belgeDosya) fs.promises.unlink(a.belgeDosya).catch(() => {}); // dekontu da temizle
+      await storage.avansSil(a.id);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.post("/api/portal/operasyon-takip/kapanis/:kapanisId/geri-ac", requireMuhasebe, async (req, res) => {
     try {
       const ben = await portalKullanici(req);
