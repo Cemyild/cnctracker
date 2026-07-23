@@ -129,7 +129,7 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
             <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 p-3">
               <div className="min-w-0 truncate text-sm">
                 {dosyaYok ? <span className="font-medium">Ofis Masrafı</span> : (
-                  <><span className="font-medium">{seciliBeyanname?.dosyaNo ?? "?"}</span> · {seciliBeyanname?.alici ?? "?"}{seciliBeyanname?.beyanNo ? ` · ${seciliBeyanname.beyanNo}` : ""}</>
+                  <><span className="font-medium">{seciliBeyanname?.dosyaNo ?? seciliBeyanname?.beyanNo ?? "?"}</span> · {seciliBeyanname?.alici ?? "?"}{seciliBeyanname?.dosyaNo && seciliBeyanname?.beyanNo ? ` · ${seciliBeyanname.beyanNo}` : ""}</>
                 )}
               </div>
               <Button variant="ghost" size="sm" className="shrink-0" onClick={beyannameDegistir} data-testid="button-op-beyanname-degistir">Değiştir</Button>
