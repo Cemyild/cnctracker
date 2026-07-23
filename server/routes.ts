@@ -4864,6 +4864,21 @@ export async function registerRoutes(
     }
   });
 
+  // Manuel transit ekleme — TR beyannameleri otomatik gelmiyor, masrafi giren elle ekler.
+  // Mukerrer beyan_no: mevcut transit doner (hata degil).
+  app.post("/api/portal/transit", requirePortal, async (req, res) => {
+    try {
+      const beyanNo = String(req.body?.beyanNo ?? "").trim();
+      const alici = String(req.body?.alici ?? "").trim();
+      const gumrukIdaresi = String(req.body?.gumrukIdaresi ?? "").trim() || null;
+      if (!beyanNo || !alici) return res.status(400).json({ error: "Beyanname no ve firma zorunlu" });
+      const transit = await storage.createManuelTransit({ beyanNo, alici, gumrukIdaresi });
+      res.json(transit);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   // Kayıtlı ödeme şirketleri — alacaklı alanı öneri listesi (depo onaylarından birikir)
   app.get("/api/portal/odeme-sirketleri", requirePortal, async (_req, res) => {
     try {

@@ -395,6 +395,7 @@ export interface IStorage {
   upsertBeyannameler(rows: InsertBeyanname[]): Promise<{ eklenen: number; guncellenen: number }>;
   getBeyannameler(kullanici?: string): Promise<Beyanname[]>;
   getBeyanname(id: string): Promise<Beyanname | undefined>;
+  createManuelTransit(girdi: { beyanNo: string; alici: string; gumrukIdaresi: string | null }): Promise<Beyanname>;
   getEslesmeyenBeyannameKullanicilari(): Promise<{ kullanici: string; adet: number }[]>;
   getMasrafTurleri(sadeceAktif?: boolean): Promise<MasrafTuru[]>;
   createMasrafTuru(t: InsertMasrafTuru): Promise<MasrafTuru>;
@@ -3483,17 +3484,50 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getBeyannameler(kullanici?: string): Promise<Beyanname[]> {
+    // Transit satirlari dosya_no=null; NULLS LAST ile listenin SONUNA gider (basini kaplamasin).
+    // Emsal: storage.ts:700 sql`... desc nulls last`.
+    const siralama = sql`${beyannameler.dosyaNo} desc nulls last, ${beyannameler.beyanNo} desc`;
     if (kullanici !== undefined) {
       return db.select().from(beyannameler)
         .where(eq(beyannameler.kullanici, kullanici))
-        .orderBy(desc(beyannameler.dosyaNo));
+        .orderBy(siralama);
     }
-    return db.select().from(beyannameler).orderBy(desc(beyannameler.dosyaNo));
+    return db.select().from(beyannameler).orderBy(siralama);
   }
 
   async getBeyanname(id: string): Promise<Beyanname | undefined> {
     const [b] = await db.select().from(beyannameler).where(eq(beyannameler.id, id));
     return b;
+  }
+
+  async createManuelTransit(girdi: { beyanNo: string; alici: string; gumrukIdaresi: string | null }): Promise<Beyanname> {
+    // Mukerrer beyan_no: mevcut TR satirini dondur (masraf-turu kalibi). Kismi unique indeks
+    // (beyannameler_tr_beyan_no_idx WHERE rejim='TR') yaris backstop'u.
+    const mevcutBul = async (): Promise<Beyanname | undefined> => {
+      const [b] = await db.select().from(beyannameler)
+        .where(and(eq(beyannameler.rejim, "TR"), eq(beyannameler.beyanNo, girdi.beyanNo)));
+      return b;
+    };
+    const mevcut = await mevcutBul();
+    if (mevcut) return mevcut;
+    try {
+      const [yeni] = await db.insert(beyannameler).values({
+        dosyaNo: null,
+        alici: girdi.alici,
+        gonderen: null,
+        gumrukIdaresi: girdi.gumrukIdaresi,
+        beyanNo: girdi.beyanNo,
+        kullanici: null,
+        rejim: "TR",
+        kaynak: "manuel",
+      }).returning();
+      return yeni;
+    } catch (e) {
+      // Yaris: iki kullanici ayni anda ekledi -> ikincisi mevcudu alsin.
+      const tekrar = await mevcutBul();
+      if (tekrar) return tekrar;
+      throw e;
+    }
   }
 
   async getEslesmeyenBeyannameKullanicilari(): Promise<{ kullanici: string; adet: number }[]> {
