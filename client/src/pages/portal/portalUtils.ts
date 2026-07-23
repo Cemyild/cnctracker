@@ -15,6 +15,14 @@ export function formatTarih(ymd: string | null | undefined): string {
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+// "YYYY-MM-DD" → "dd/mm" (kısa; yıl gizli, dar sütunlar için) — new Date() KULLANILMAZ
+export function formatTarihKisa(ymd: string | null | undefined): string {
+  if (!ymd) return "—";
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return ymd;
+  return `${m[3]}/${m[2]}`;
+}
+
 export function formatPara(tutar: string | number | null | undefined, doviz?: string | null): string {
   if (tutar == null) return "—";
   const n = typeof tutar === "string" ? parseFloat(tutar) : tutar;

@@ -7,12 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatTarih, formatPara } from "./portalUtils";
+import { formatTarihKisa, formatPara } from "./portalUtils";
 import YeniOdemeModal from "./YeniOdemeModal";
 import { masraflariGrupla } from "./masrafGruplama";
 import { ChevronRight, ChevronDown } from "lucide-react";
 
 type Ozet = { bakiye: number; avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] };
+
+// Açık Hareketler tablosu sütun şablonu — TÜM satırlarda birebir aynı olmalı ki
+// sütunlar hizalansın. Her satır ayrı bir grid container; sütunlar ancak SABİT
+// genişlikle satırlar arası aynı hizaya oturur ("auto" → içeriğe göre kayma/dalga).
+const GRID = "grid-cols-[140px_minmax(0,1fr)_minmax(0,1.4fr)_130px_20px]";
 
 export default function OperasyonKasaSayfasi() {
   const { toast } = useToast();
@@ -100,7 +105,7 @@ export default function OperasyonKasaSayfasi() {
               {(ozet?.avanslar ?? []).map((a) => (
                 <div key={a.id} className="flex items-center justify-between rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-900 dark:bg-green-950/40" data-testid={`row-avans-${a.id}`}>
                   <div className="text-green-700 dark:text-green-400">
-                    <span className="font-medium">Avans</span> · {formatTarih(a.tarih)}{a.aciklama ? ` · ${a.aciklama}` : ""}
+                    <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
                     {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
                   </div>
                   <div className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</div>
@@ -113,8 +118,8 @@ export default function OperasyonKasaSayfasi() {
           {(gruplar.length > 0 || ofisMasraflar.length > 0) && (
             <div className="rounded-md border">
               {/* Sütun başlıkları — yalnız en üstte bir kez */}
-              <div className="grid grid-cols-[minmax(80px,auto)_minmax(0,1fr)_minmax(0,1.4fr)_auto_20px] gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                <span>Dosya No</span>
+              <div className={`grid ${GRID} gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground`}>
+                <span>Tarih · Dosya No</span>
                 <span>Beyanname No</span>
                 <span>Firma</span>
                 <span className="text-right">Tutar</span>
@@ -126,10 +131,10 @@ export default function OperasyonKasaSayfasi() {
                 const b = g.beyanname;
                 return (
                   <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-beyanname-${g.beyannameId}`}>
-                    <button type="button" onClick={() => grupAcKapa(g.beyannameId)} className="grid w-full grid-cols-[minmax(80px,auto)_minmax(0,1fr)_minmax(0,1.4fr)_auto_20px] items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50" data-testid={`button-group-toggle-${g.beyannameId}`}>
-                      <span className="font-semibold">{b?.dosyaNo ?? "?"}</span>
+                    <button type="button" onClick={() => grupAcKapa(g.beyannameId)} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid={`button-group-toggle-${g.beyannameId}`}>
+                      <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? "?"}</span>
                       <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
-                      <span className="truncate">{b?.alici ?? "?"}</span>
+                      <span className="truncate" title={b?.alici ?? ""}>{b?.alici ?? "?"}</span>
                       <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
                       {acik ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}
                     </button>
@@ -152,7 +157,7 @@ export default function OperasyonKasaSayfasi() {
 
               {ofisMasraflar.length > 0 && (
                 <div data-testid="group-ofis">
-                  <button type="button" onClick={() => grupAcKapa("__ofis__")} className="grid w-full grid-cols-[minmax(80px,auto)_minmax(0,1fr)_minmax(0,1.4fr)_auto_20px] items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50" data-testid="button-group-toggle-ofis">
+                  <button type="button" onClick={() => grupAcKapa("__ofis__")} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid="button-group-toggle-ofis">
                     <span className="col-span-3 font-semibold">Ofis Masrafları</span>
                     <span className="text-right font-semibold text-destructive">−{formatPara(ofisToplam, "TL")}</span>
                     {acikGruplar.has("__ofis__") ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}

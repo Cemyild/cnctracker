@@ -5526,12 +5526,14 @@ export async function registerRoutes(
     try {
       const ben = await portalKullanici(req);
       if (!ben) { sil(); return res.status(401).json({ error: "Giriş gerekli" }); }
-      const { tutar, aciklama } = req.body || {};
+      const { tutar, aciklama, tarih } = req.body || {};
       const tutarNum = parseTutar(tutar);
       if (tutarNum === null || tutarNum <= 0) { sil(); return res.status(400).json({ error: "Geçerli tutar girin" }); }
+      // Tarih opsiyonel — geriye dönük avans için. Verilmez/geçersizse bugün (YYYY-MM-DD doğrula).
+      const avansTarih = typeof tarih === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tarih) ? tarih : bugunYmd();
       const avans = await storage.avansYukle({
         operasyonId: req.params.operasyonId, tutar: tutarNum,
-        aciklama: aciklama ? String(aciklama) : null, tarih: bugunYmd(), gonderenId: ben.id,
+        aciklama: aciklama ? String(aciklama) : null, tarih: avansTarih, gonderenId: ben.id,
         belgeDosya: dekont ? dekont.path.replace(/\\/g, "/") : null,
         belgeAdi: dekont ? fixUploadFilename(dekont.originalname) : null,
       });

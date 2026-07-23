@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatTarih, formatPara } from "./portalUtils";
+import { formatTarih, formatTarihKisa, formatPara } from "./portalUtils";
 import { masraflariGrupla } from "./masrafGruplama";
 import { ChevronRight, ChevronDown } from "lucide-react";
 
@@ -19,7 +19,9 @@ type Kapanis = OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: Op
 type Detay = { bakiye: number; acik: { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }; kapanislar: Kapanis[] };
 
 // Kasam/Kapanışlarım tablolarıyla BİREBİR aynı grid şablonu (hizalama şartı).
-const GRID = "grid-cols-[minmax(80px,auto)_minmax(0,1fr)_minmax(0,1.4fr)_auto_20px]";
+// SABİT sütun genişlikleri — her satır ayrı grid; "auto" olsaydı içerik uzunluğu
+// satırdan satıra değişip sütunları kaydırırdı (Meksika dalgası). Sabit → hizalı.
+const GRID = "grid-cols-[140px_minmax(0,1fr)_minmax(0,1.4fr)_130px_20px]";
 
 export default function OperasyonTakipSayfasi() {
   const { toast } = useToast();
@@ -51,6 +53,7 @@ export default function OperasyonTakipSayfasi() {
   const [avansTutar, setAvansTutar] = useState("");
   const [avansAciklama, setAvansAciklama] = useState("");
   const [avansDekont, setAvansDekont] = useState<File | null>(null);
+  const [avansTarih, setAvansTarih] = useState(""); // geriye dönük avans için (boş → bugün)
   const [dekontSayac, setDekontSayac] = useState(0); // file input'u sıfırlamak için key
   const [gonderiliyor, setGonderiliyor] = useState(false);
 
@@ -91,7 +94,11 @@ export default function OperasyonTakipSayfasi() {
   // Aksi hâlde seçili dosya bir sonraki şubenin kaydına sessizce eklenir (Radix dialog
   // unmount olduğundan alan BOŞ görünür ama state doludur).
   const avansFormSifirla = () => {
-    setAvansTutar(""); setAvansAciklama("");
+    // Tarih varsayılanı BUGÜN (yerel gün — new Date() argümansız, parse yok). Kullanıcı
+    // geriye dönük avans için değiştirebilir.
+    const d = new Date();
+    const bugun = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    setAvansTutar(""); setAvansAciklama(""); setAvansTarih(bugun);
     setAvansDekont(null); setDekontSayac((s) => s + 1);
   };
   const avansDialogAc = (s: Satir) => { setSecili(s); avansFormSifirla(); setAvansDialog(true); };
@@ -105,6 +112,7 @@ export default function OperasyonTakipSayfasi() {
       const fd = new FormData();
       fd.set("tutar", avansTutar);
       fd.set("aciklama", avansAciklama);
+      if (avansTarih) fd.set("tarih", avansTarih); // geriye dönük avans tarihi
       if (avansDekont) fd.set("dekont", avansDekont); // OPSİYONEL
       const res = await fetch(`/api/portal/operasyon-takip/${secili.id}/avans`, {
         method: "POST", body: fd, credentials: "include",
@@ -175,7 +183,7 @@ export default function OperasyonTakipSayfasi() {
                       {detay.acik.avanslar.map((a) => (
                         <div key={a.id} className="flex items-center justify-between rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-900 dark:bg-green-950/40" data-testid={`row-avans-${a.id}`}>
                           <div className="text-green-700 dark:text-green-400">
-                            <span className="font-medium">Avans</span> · {formatTarih(a.tarih)}{a.aciklama ? ` · ${a.aciklama}` : ""}
+                            <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
                             {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
                           </div>
                           <div className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</div>
@@ -187,7 +195,7 @@ export default function OperasyonTakipSayfasi() {
                   {(aGruplar.length > 0 || aOfis.length > 0) && (
                     <div className="rounded-md border">
                       <div className={`grid ${GRID} gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground`}>
-                        <span>Dosya No</span><span>Beyanname No</span><span>Firma</span><span className="text-right">Tutar</span><span />
+                        <span>Tarih · Dosya No</span><span>Beyanname No</span><span>Firma</span><span className="text-right">Tutar</span><span />
                       </div>
                       {aGruplar.map((g) => {
                         const acik = acikAcikGruplar.has(g.beyannameId); // VARSAYILAN KAPALI
@@ -195,9 +203,9 @@ export default function OperasyonTakipSayfasi() {
                         return (
                           <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-acik-${g.beyannameId}`}>
                             <button type="button" onClick={() => acikGrupAcKapa(g.beyannameId)} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid={`button-group-toggle-acik-${g.beyannameId}`}>
-                              <span className="font-semibold">{b?.dosyaNo ?? "?"}</span>
+                              <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? "?"}</span>
                               <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
-                              <span className="truncate">{b?.alici ?? "?"}</span>
+                              <span className="truncate" title={b?.alici ?? ""}>{b?.alici ?? "?"}</span>
                               <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
                               {acik ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}
                             </button>
@@ -275,7 +283,7 @@ export default function OperasyonTakipSayfasi() {
                             {k.avanslar.map((a) => (
                               <div key={a.id} className="flex items-center justify-between rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-900 dark:bg-green-950/40" data-testid={`row-avans-${a.id}`}>
                                 <div className="text-green-700 dark:text-green-400">
-                                  <span className="font-medium">Avans</span> · {formatTarih(a.tarih)}{a.aciklama ? ` · ${a.aciklama}` : ""}
+                                  <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
                                   {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
                                 </div>
                                 <div className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</div>
@@ -287,7 +295,7 @@ export default function OperasyonTakipSayfasi() {
                         {(gruplar.length > 0 || ofisMasraflar.length > 0) ? (
                           <div className="rounded-md border">
                             <div className={`grid ${GRID} gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground`}>
-                              <span>Dosya No</span><span>Beyanname No</span><span>Firma</span><span className="text-right">Tutar</span><span />
+                              <span>Tarih · Dosya No</span><span>Beyanname No</span><span>Firma</span><span className="text-right">Tutar</span><span />
                             </div>
                             {gruplar.map((g) => {
                               const anahtar = `${k.id}-${g.beyannameId}`;
@@ -296,9 +304,9 @@ export default function OperasyonTakipSayfasi() {
                               return (
                                 <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-kapanis-${k.id}-${g.beyannameId}`}>
                                   <button type="button" onClick={() => kapanisGrupAcKapa(anahtar)} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid={`button-group-toggle-${k.id}-${g.beyannameId}`}>
-                                    <span className="font-semibold">{b?.dosyaNo ?? "?"}</span>
+                                    <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? "?"}</span>
                                     <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
-                                    <span className="truncate">{b?.alici ?? "?"}</span>
+                                    <span className="truncate" title={b?.alici ?? ""}>{b?.alici ?? "?"}</span>
                                     <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
                                     {acik ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}
                                   </button>
@@ -358,6 +366,7 @@ export default function OperasyonTakipSayfasi() {
           <div className="space-y-3">
             <div className="space-y-1"><Label>Tutar (TL)</Label><Input placeholder="0,00" value={avansTutar} onChange={(e) => setAvansTutar(e.target.value)} data-testid="input-avans-tutar" /></div>
             <div className="space-y-1"><Label>Açıklama</Label><Input value={avansAciklama} onChange={(e) => setAvansAciklama(e.target.value)} data-testid="input-avans-aciklama" /></div>
+            <div className="space-y-1"><Label>Tarih</Label><Input type="date" value={avansTarih} onChange={(e) => setAvansTarih(e.target.value)} data-testid="input-avans-tarih" /><p className="text-xs text-muted-foreground">Geriye dönük avans için tarihi değiştirebilirsiniz.</p></div>
             <div className="space-y-1"><Label>Dekont (opsiyonel)</Label><Input key={dekontSayac} type="file" onChange={(e) => setAvansDekont(e.target.files?.[0] ?? null)} data-testid="input-avans-dekont" /></div>
           </div>
           <DialogFooter>

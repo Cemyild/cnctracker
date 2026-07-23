@@ -7,6 +7,7 @@ export type MasrafGrubu = {
   beyanname: Beyanname | undefined;
   masraflar: OperasyonMasraf[];
   toplam: number;
+  tarih: string; // grubun en erken masraf tarihi (dd/mm gösterimi için)
 };
 
 export type GruplamaSonucu = {
@@ -30,6 +31,7 @@ export function masraflariGrupla(
     Math.round(list.reduce((s, m) => s + parseFloat(m.tutar), 0) * 100) / 100;
   const gruplar = Array.from(harita.entries()).map(([beyannameId, list]) => ({
     beyannameId, beyanname: beyannameMap.get(beyannameId), masraflar: list, toplam: topla(list),
+    tarih: list.reduce((min, m) => (m.tarih < min ? m.tarih : min), list[0].tarih),
   }));
   return { gruplar, ofisMasraflar: ofis, ofisToplam: topla(ofis) };
 }

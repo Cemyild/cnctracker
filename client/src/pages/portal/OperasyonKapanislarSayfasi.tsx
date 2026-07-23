@@ -4,13 +4,14 @@ import type { Beyanname, OperasyonAvans, OperasyonGunKapanis, OperasyonMasraf } 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight, ChevronDown } from "lucide-react";
-import { formatTarih, formatPara } from "./portalUtils";
+import { formatTarih, formatTarihKisa, formatPara } from "./portalUtils";
 import { masraflariGrupla } from "./masrafGruplama";
 
 type Kapanis = OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] };
 
 // Kasam'daki tabloyla BİREBİR aynı grid şablonu (hizalama şartı).
-const GRID = "grid-cols-[minmax(80px,auto)_minmax(0,1fr)_minmax(0,1.4fr)_auto_20px]";
+// SABİT sütun genişlikleri — "auto" satırdan satıra kayardı (dalga); sabit → hizalı.
+const GRID = "grid-cols-[140px_minmax(0,1fr)_minmax(0,1.4fr)_130px_20px]";
 
 export default function OperasyonKapanislarSayfasi() {
   const { data: kapanislar = [] } = useQuery<Kapanis[]>({ queryKey: ["/api/portal/operasyon/kapanislar"] });
@@ -62,7 +63,7 @@ export default function OperasyonKapanislarSayfasi() {
                     {k.avanslar.map((a) => (
                       <div key={a.id} className="flex items-center justify-between rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-900 dark:bg-green-950/40" data-testid={`row-avans-${a.id}`}>
                         <div className="text-green-700 dark:text-green-400">
-                          <span className="font-medium">Avans</span> · {formatTarih(a.tarih)}{a.aciklama ? ` · ${a.aciklama}` : ""}
+                          <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
                           {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
                         </div>
                         <div className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</div>
@@ -74,7 +75,7 @@ export default function OperasyonKapanislarSayfasi() {
                 {(gruplar.length > 0 || ofisMasraflar.length > 0) ? (
                   <div className="rounded-md border">
                     <div className={`grid ${GRID} gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground`}>
-                      <span>Dosya No</span>
+                      <span>Tarih · Dosya No</span>
                       <span>Beyanname No</span>
                       <span>Firma</span>
                       <span className="text-right">Tutar</span>
@@ -88,9 +89,9 @@ export default function OperasyonKapanislarSayfasi() {
                       return (
                         <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-kapanis-${k.id}-${g.beyannameId}`}>
                           <button type="button" onClick={() => grupAcKapa(anahtar)} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid={`button-group-toggle-${k.id}-${g.beyannameId}`}>
-                            <span className="font-semibold">{b?.dosyaNo ?? "?"}</span>
+                            <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? "?"}</span>
                             <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
-                            <span className="truncate">{b?.alici ?? "?"}</span>
+                            <span className="truncate" title={b?.alici ?? ""}>{b?.alici ?? "?"}</span>
                             <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
                             {acik ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}
                           </button>
