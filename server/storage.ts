@@ -3488,8 +3488,11 @@ export class DatabaseStorage implements IStorage {
     // Emsal: storage.ts:700 sql`... desc nulls last`.
     const siralama = sql`${beyannameler.dosyaNo} desc nulls last, ${beyannameler.beyanNo} desc`;
     if (kullanici !== undefined) {
+      // Temsilci kendi (avAdi) IM/EX dosyalarini gorur; ARTI tum transitler (kaynak='manuel',
+      // kullanici=null) herkese ortak gorunur — Faz 1 karari: "transit ortak liste". Aksi halde
+      // temsilci kendi ekledigi transiti bile filtreli gorunumde goremezdi.
       return db.select().from(beyannameler)
-        .where(eq(beyannameler.kullanici, kullanici))
+        .where(or(eq(beyannameler.kullanici, kullanici), eq(beyannameler.rejim, "TR")))
         .orderBy(siralama);
     }
     return db.select().from(beyannameler).orderBy(siralama);
