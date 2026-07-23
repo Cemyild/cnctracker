@@ -26,6 +26,17 @@ export default function BeyannameSecici({
 }: Props) {
   const [acik, setAcik] = useState(false);
   const [arama, setArama] = useState("");
+  const [rejimFiltre, setRejimFiltre] = useState<"hepsi" | "IM" | "EX" | "TR">("hepsi");
+
+  // Serit: ic kod -> etiket. Sira sabit.
+  const REJIMLER: { kod: "hepsi" | "IM" | "EX" | "TR"; etiket: string }[] = [
+    { kod: "hepsi", etiket: "Hepsi" },
+    { kod: "IM", etiket: "İthalat" },
+    { kod: "EX", etiket: "İhracat" },
+    { kod: "TR", etiket: "Transit" },
+  ];
+  // Satir etiketi: rejim kodu -> kisa rozet.
+  const REJIM_ETIKET: Record<string, string> = { IM: "İTH", EX: "İHR", TR: "TR" };
 
   const secili = beyannameler.find((b) => b.id === value);
   // dosyaNo transitte null olabilir -> beyanNo'ya duser.
@@ -36,19 +47,22 @@ export default function BeyannameSecici({
   // shouldFilter={false} ve filtreleme BURADA, toLocaleLowerCase("tr") ile yapilir.
   const eslesenler = useMemo(() => {
     const q = arama.trim().toLocaleLowerCase("tr");
-    if (!q) return beyannameler;
-    return beyannameler.filter(
-      (b) =>
+    return beyannameler.filter((b) => {
+      // Rejim EK filtre — basit esitlik, locale sorunu yok. null savunmasi: varsayilan IM.
+      if (rejimFiltre !== "hepsi" && (b.rejim ?? "IM") !== rejimFiltre) return false;
+      if (!q) return true;
+      return (
         (b.dosyaNo ?? "").toLocaleLowerCase("tr").includes(q) ||
         (b.alici ?? "").toLocaleLowerCase("tr").includes(q) ||
-        (b.beyanNo ?? "").toLocaleLowerCase("tr").includes(q),
-    );
-  }, [beyannameler, arama]);
+        (b.beyanNo ?? "").toLocaleLowerCase("tr").includes(q)
+      );
+    });
+  }, [beyannameler, arama, rejimFiltre]);
 
   const gosterilen = eslesenler.slice(0, LIMIT);
   const kirpildi = eslesenler.length > LIMIT;
 
-  const acKapa = (o: boolean) => { setAcik(o); if (!o) setArama(""); };
+  const acKapa = (o: boolean) => { setAcik(o); if (!o) { setArama(""); setRejimFiltre("hepsi"); } };
   const sec = (id: string) => { onChange(id); setArama(""); setAcik(false); };
 
   return (
@@ -78,6 +92,24 @@ export default function BeyannameSecici({
             placeholder={placeholder}
             data-testid={`${testId}-arama`}
           />
+          <div className="flex gap-1 border-b p-1.5">
+            {REJIMLER.map((r) => (
+              <button
+                key={r.kod}
+                type="button"
+                onClick={() => setRejimFiltre(r.kod)}
+                className={cn(
+                  "flex-1 rounded px-2 py-1 text-xs transition-colors",
+                  rejimFiltre === r.kod
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-muted",
+                )}
+                data-testid={`${testId}-rejim-${r.kod}`}
+              >
+                {r.etiket}
+              </button>
+            ))}
+          </div>
           <CommandList>
             {gosterilen.length === 0 ? (
               <div className="py-6 text-center text-sm text-muted-foreground" data-testid={`${testId}-bos`}>
@@ -93,7 +125,14 @@ export default function BeyannameSecici({
                 >
                   <Check className={cn("mr-2 h-4 w-4 shrink-0", b.id === value ? "opacity-100" : "opacity-0")} />
                   <div className="min-w-0">
-                    <div className="font-semibold">{kimlik(b)}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold">{kimlik(b)}</span>
+                      {REJIM_ETIKET[b.rejim ?? "IM"] && (
+                        <span className="shrink-0 rounded border px-1 text-[10px] leading-tight text-muted-foreground">
+                          {REJIM_ETIKET[b.rejim ?? "IM"]}
+                        </span>
+                      )}
+                    </div>
                     <div className="truncate text-xs text-muted-foreground">{b.alici ?? "?"}</div>
                     {b.dosyaNo && b.beyanNo && <div className="truncate text-xs text-muted-foreground">{b.beyanNo}</div>}
                   </div>

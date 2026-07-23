@@ -9,7 +9,7 @@ type OtoLog = {
   dosyaAdi: string;
 };
 
-export function OtomatikYuklemeRozeti({ tip }: { tip: "mizan" | "beyanname" }) {
+export function OtomatikYuklemeRozeti({ tip, baslik }: { tip: "mizan" | "beyanname" | "beyanname-ex"; baslik?: string }) {
   const { data: loglar } = useQuery<OtoLog[]>({
     queryKey: [`/api/otomatik-yukleme/log?tip=${tip}&limit=5`],
     refetchInterval: 60000,
@@ -28,7 +28,7 @@ export function OtomatikYuklemeRozeti({ tip }: { tip: "mizan" | "beyanname" }) {
   return (
     <div className="rounded-md border p-3 text-sm space-y-1" data-testid={`oto-yukleme-${tip}`}>
       <div className="font-medium">
-        Son otomatik yükleme: {tarih} — <span className={renk}>{son.mesaj || son.durum}</span>
+        {baslik ? `${baslik} — son yükleme: ` : "Son otomatik yükleme: "}{tarih} — <span className={renk}>{son.mesaj || son.durum}</span>
       </div>
       {loglar.length > 1 && (
         <ul className="text-xs text-muted-foreground">

@@ -439,7 +439,10 @@ export default function Odemeler() {
         </TabsList>
 
         <TabsContent value="izleme" className="space-y-4">
-          <OtomatikYuklemeRozeti tip="beyanname" />
+          <div className="grid gap-3 md:grid-cols-2">
+            <OtomatikYuklemeRozeti tip="beyanname" baslik="İthalat" />
+            <OtomatikYuklemeRozeti tip="beyanname-ex" baslik="İhracat" />
+          </div>
           <ExcelYukleme />
           {ozet && ozet.eslesmeyen.length > 0 && (
             <Card>
