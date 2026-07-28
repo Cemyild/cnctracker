@@ -1,0 +1,188 @@
+<h2>Kasam — v5 (alt kalem hizası + belge butonu)</h2>
+<p class="subtitle">Alt kalemlerde tarih artık en solda ana Tarih sütununda; masraf türü Tür sütununun altında; belge ise en sağda gerçek ikon buton (yazı değil). Her şey ana grid'e tam hizalı.</p>
+
+<style>
+  .x{--ink:#101828;--sub:#475467;--faint:#98a1b0;--line:#eaecf0;--bg:#f9fafb;--card:#fff;
+     --ac:#4f46e5;--acs:#eef2ff;--pos:#12b76a;--neg:#f04438;--poss:#ecfdf3;--negs:#fef3f2;
+     --im:#4f46e5;--ims:#eef2ff;--ex:#0d9488;--exs:#effcfa;--tr:#7c3aed;--trs:#f5f3ff;--of:#c4600a;--ofs:#fff6ed;
+     background:var(--bg);border-radius:16px;padding:24px 26px;font-family:Inter,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+  .x *{box-sizing:border-box;} .x .num{font-variant-numeric:tabular-nums;} .x svg{display:block;}
+
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
+  .top .l h3{margin:0;font-size:20px;font-weight:700;letter-spacing:-.02em;}
+  .top .l .s{font-size:12.5px;color:var(--faint);margin-top:2px;}
+  .top .r{display:flex;align-items:center;gap:14px;}
+  .daybox{display:flex;align-items:center;gap:9px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 13px;box-shadow:0 1px 2px rgba(16,24,40,.04);}
+  .daybox .ic{color:var(--ac);} .daybox .ic svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.9;}
+  .daybox .d b{font-size:13px;font-weight:600;display:block;line-height:1.2;} .daybox .d span{font-size:10.5px;color:var(--faint);}
+  .av{width:38px;height:38px;border-radius:50%;background:var(--acs);color:var(--ac);font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px;}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.05);}
+  .kpi .r1{display:flex;align-items:center;gap:10px;margin-bottom:13px;}
+  .kpi .ico{width:36px;height:36px;border-radius:10px;background:var(--acs);color:var(--ac);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .kpi .ico svg{width:18px;height:18px;stroke-width:1.9;fill:none;stroke:currentColor;}
+  .kpi .lbl{font-size:12.5px;color:var(--sub);font-weight:500;}
+  .kpi .val{font-size:25px;font-weight:700;letter-spacing:-.025em;line-height:1;}
+  .kpi .cur{font-size:14px;font-weight:600;color:var(--faint);margin-left:2px;}
+  .kpi .t{margin-top:10px;font-size:11px;color:var(--faint);display:flex;align-items:center;gap:6px;}
+  .kpi .t .b{font-weight:600;padding:2px 7px;border-radius:6px;background:var(--acs);color:var(--ac);}
+  .kpi .t .b.pos{background:var(--poss);color:var(--pos);} .kpi .t .b.neg{background:var(--negs);color:var(--neg);}
+  .kpi.dev .flow{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;margin-bottom:3px;}
+  .kpi.dev .flow .g{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:2px 8px;}
+  .kpi.dev .amt{font-size:21px;font-weight:700;letter-spacing:-.02em;}
+
+  .actions{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
+  .btn{font-size:13px;font-weight:600;padding:10px 16px;border-radius:10px;cursor:pointer;border:1px solid transparent;display:inline-flex;align-items:center;gap:8px;font-family:inherit;}
+  .btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;}
+  .btn.primary{background:var(--ac);color:#fff;box-shadow:0 1px 2px rgba(79,70,229,.28);}
+  .btn.primary:hover{background:#4338ca;}
+  .btn.ghost{background:var(--card);color:var(--sub);border-color:var(--line);box-shadow:0 1px 2px rgba(16,24,40,.04);}
+  .btn.ghost:hover{background:var(--bg);border-color:#d0d5dd;color:var(--ink);}
+
+  .lst{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(16,24,40,.05);overflow:hidden;}
+  .lst .h0{display:flex;justify-content:space-between;align-items:center;padding:16px 20px 13px;}
+  .lst .h0 b{font-size:15px;font-weight:600;} .lst .h0 .c{font-size:12px;color:var(--faint);} .lst .h0 .c b{color:var(--neg);font-weight:700;}
+
+  /* sütun şablonu — başlık ve grup satırı AYNI grid */
+  .grid{display:grid;grid-template-columns:66px 96px 104px 168px 1fr 116px 26px;gap:12px;align-items:center;}
+  .thead{padding:9px 20px;font-size:10.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;background:var(--bg);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+  .thead .r{text-align:right;}
+  .grp{border-bottom:1px solid var(--line);}
+  .grp:last-child{border-bottom:none;}
+  .ghead{padding:13px 20px;cursor:pointer;} .ghead:hover{background:#fcfcfd;}
+  .ghead .dt b{font-size:13px;font-weight:700;} .ghead .dt{font-size:11px;color:var(--faint);}
+  .dosya{font-variant-numeric:tabular-nums;font-weight:600;font-size:13px;color:var(--ink);}
+  .beyan{font-variant-numeric:tabular-nums;font-size:11.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rej{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;display:inline-block;}
+  .rej.im{background:var(--ims);color:var(--im);} .rej.ex{background:var(--exs);color:var(--ex);} .rej.tr{background:var(--trs);color:var(--tr);} .rej.of{background:var(--ofs);color:var(--of);}
+  .firm{display:flex;align-items:center;gap:10px;min-width:0;}
+  .fav{width:32px;height:32px;border-radius:8px;background:var(--acs);color:var(--ac);font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .firm .fn{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .gamt{text-align:right;font-weight:700;color:var(--neg);font-size:14px;font-variant-numeric:tabular-nums;}
+  .chev{display:flex;justify-content:flex-end;color:var(--faint);} .chev svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;}
+  .cnt{display:inline-block;font-size:10px;font-weight:600;color:var(--faint);background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:1px 7px;margin-left:6px;}
+
+  /* açılan alt masraflar */
+  .sub{background:#fbfbfd;border-top:1px solid var(--line);}
+  .srow{display:grid;grid-template-columns:66px 96px 104px 168px 1fr 116px 26px;gap:12px;align-items:center;padding:9px 20px;font-size:12px;border-bottom:1px dashed var(--line);}
+  .srow:last-child{border-bottom:none;}
+  .srow .sdate{grid-column:1;font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums;}
+  .srow .styp{grid-column:3;font-weight:600;color:var(--ink);}
+  .srow .samt{grid-column:6;text-align:right;font-weight:600;color:var(--neg);font-variant-numeric:tabular-nums;}
+  .srow .sbtn{grid-column:7;justify-self:end;width:24px;height:24px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ac);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+  .srow .sbtn:hover{background:var(--acs);border-color:var(--ac);}
+  .srow .sbtn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;}
+</style>
+
+<div class="x">
+  <div class="top">
+    <div class="l"><h3>Kasam</h3><div class="s">İstanbul – İHL şubesi</div></div>
+    <div class="r">
+      <div class="daybox">
+        <span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span>
+        <div class="d"><b>23 Temmuz 2026</b><span>Çarşamba · bugün açık</span></div>
+      </div>
+      <div class="av">YK</div>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="r1"><div class="ico"><svg viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 1-1 1v-2"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></div><span class="lbl">Güncel Bakiye</span></div><div class="val num">15.562<span class="cur">₺</span></div><div class="t"><span class="b">devrediyor</span>şube kasası</div></div>
+    <div class="kpi"><div class="r1"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg></div><span class="lbl">Gelen Avans</span></div><div class="val num" style="color:var(--pos)">0<span class="cur">₺</span></div><div class="t"><span class="b pos">güncel</span>bekleyen yok</div></div>
+    <div class="kpi"><div class="r1"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></div><span class="lbl">Güncel Masraflar</span></div><div class="val num" style="color:var(--neg)">53.320<span class="cur">₺</span></div><div class="t"><span class="b neg">4 dosya</span>kapatılmamış</div></div>
+    <div class="kpi dev"><div class="r1"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></div><span class="lbl">Son Devir</span></div><div class="flow"><span class="g num">22/07</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#98a1b0" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span class="g num">23/07</span></div><div class="amt num">20.562 ₺</div><div class="t" style="margin-top:5px">önceki gün açılışı</div></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Yeni Ödeme Kaydet</button>
+    <button class="btn ghost"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Günü Kapat</button>
+  </div>
+
+  <div class="lst">
+    <div class="h0"><b>Güncel Masraflar</b><span class="c num">4 dosya · 6 masraf · toplam <b>−96.428 ₺</b></span></div>
+
+    <div class="grid thead">
+      <span>Tarih</span><span>Dosya No</span><span>Tür</span><span>Beyanname No</span><span>Firma</span><span class="r">Tutar</span><span></span>
+    </div>
+
+    <!-- GRUP 1: açık (3 masraf) -->
+    <div class="grp">
+      <div class="ghead grid">
+        <span class="dt"><b class="num">20/07</b></span>
+        <span class="dosya">26-10337</span>
+        <span><span class="rej im">İthalat</span></span>
+        <span class="beyan">26341453IM00398506</span>
+        <span class="firm"><span class="fav">FE</span><span class="fn">FEKA OTOMOTİV MAMULLERİ</span></span>
+        <span class="gamt">−48.640 ₺<span class="cnt num">3</span></span>
+        <span class="chev"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+      </div>
+      <div class="sub">
+        <div class="srow"><span class="sdate num">20/07</span><span class="styp">Nakliye</span><span class="samt num">−31.320 ₺</span><button class="sbtn" title="Belgeyi indir"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>
+        <div class="srow"><span class="sdate num">20/07</span><span class="styp">Ardiye</span><span class="samt num">−12.000 ₺</span></div>
+        <div class="srow"><span class="sdate num">21/07</span><span class="styp">Ordino</span><span class="samt num">−5.320 ₺</span><button class="sbtn" title="Belgeyi indir"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>
+      </div>
+    </div>
+
+    <!-- GRUP 2: kapalı -->
+    <div class="grp">
+      <div class="ghead grid">
+        <span class="dt"><b class="num">20/07</b></span>
+        <span class="dosya">26-10868</span>
+        <span><span class="rej im">İthalat</span></span>
+        <span class="beyan">26341453IM00166010</span>
+        <span class="firm"><span class="fav">FI</span><span class="fn">FICOSA INTERNATIONAL</span></span>
+        <span class="gamt">−36.108 ₺</span>
+        <span class="chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+      </div>
+    </div>
+
+    <!-- GRUP 3: ihracat, kapalı -->
+    <div class="grp">
+      <div class="ghead grid">
+        <span class="dt"><b class="num">21/07</b></span>
+        <span class="dosya">26-13312</span>
+        <span><span class="rej ex">İhracat</span></span>
+        <span class="beyan">26341453EX00180863</span>
+        <span class="firm"><span class="fav">FE</span><span class="fn">FEKA OTOMOTİV MAMULLERİ</span></span>
+        <span class="gamt">−10.000 ₺</span>
+        <span class="chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+      </div>
+    </div>
+
+    <!-- GRUP 4: transit, kapalı -->
+    <div class="grp">
+      <div class="ghead grid">
+        <span class="dt"><b class="num">20/07</b></span>
+        <span class="dosya">—</span>
+        <span><span class="rej tr">Transit</span></span>
+        <span class="beyan">56560J9</span>
+        <span class="firm"><span class="fav" style="background:var(--trs);color:var(--tr)">SO</span><span class="fn">SOHO PERAKENDE</span></span>
+        <span class="gamt">−12.000 ₺</span>
+        <span class="chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+      </div>
+    </div>
+
+    <!-- OFİS: beyannamesiz grup -->
+    <div class="grp">
+      <div class="ghead grid">
+        <span class="dt"><b class="num">23/07</b></span>
+        <span class="dosya">—</span>
+        <span><span class="rej of">Ofis</span></span>
+        <span class="beyan" style="color:var(--faint)">beyannamesiz</span>
+        <span class="firm"><span class="fav" style="background:var(--ofs);color:var(--of)">AD</span><span class="fn">ada · ofis masrafı</span></span>
+        <span class="gamt">−5.000 ₺</span>
+        <span class="chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+      </div>
+    </div>
+  </div>
+
+  <p style="font-size:11.5px;color:#98a1b0;margin:13px 2px 0;display:flex;gap:18px;flex-wrap:wrap">
+    <span><span class="rej im" style="font-size:9.5px">İthalat</span> IM beyanname</span>
+    <span><span class="rej ex" style="font-size:9.5px">İhracat</span> EX beyanname</span>
+    <span><span class="rej tr" style="font-size:9.5px">Transit</span> TR / serbest</span>
+    <span><span class="rej of" style="font-size:9.5px">Ofis</span> beyannamesiz</span>
+  </p>
+</div>
+
+<p class="subtitle" style="margin-top:18px"><b>v4:</b> gerçek sütunlar (Tarih · Dosya · Tür · Beyanname No · Firma · Tutar) · rejim rozeti renk-kodlu · çok masraflı dosya <b>açılıyor</b> (ilk grup açık, alt kalemler: tür + tarih + belge + tutar) · dosya sayısı rozeti (³). Sütun yapısı ve genişleme böyle mi? Sütun sırası/genişliği değişsin mi?</p>
