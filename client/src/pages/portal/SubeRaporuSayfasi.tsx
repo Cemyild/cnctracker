@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { SubeGiderRaporu } from "@shared/schema";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Building2 } from "lucide-react";
 import { formatPara } from "./portalUtils";
+import { SayfaBasligi, KpiKart, IK } from "./kasaUI";
 
 // YEREL bileşenlerden YYYY-MM-DD üretir. Depolanan tarih string'ini PARSE ETMEZ
 // (new Date("2026-07-01") UTC yorumlanıp timezone kayması yaratır — bu fonksiyonlar o riski taşımaz).
@@ -31,58 +32,87 @@ export default function SubeRaporuSayfasi() {
     window.location.href = `/api/portal/operasyon-takip/rapor/sube/excel?baslangic=${baslangic}&bitis=${bitis}`;
   };
 
+  const veriVar = (data?.subeler.length ?? 0) > 0;
+
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader><CardTitle>Şube Gider Raporu</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <Label>Başlangıç</Label>
-              <Input type="date" value={baslangic} onChange={(e) => setBaslangic(e.target.value)} data-testid="input-rapor-baslangic" />
-            </div>
-            <div className="space-y-1">
-              <Label>Bitiş</Label>
-              <Input type="date" value={bitis} onChange={(e) => setBitis(e.target.value)} data-testid="input-rapor-bitis" />
-            </div>
-            <Button variant="outline" onClick={excelIndir} data-testid="button-sube-rapor-excel">Excel İndir</Button>
+      <SayfaBasligi baslik="Şube Gider Raporu" alt="Seçilen tarih aralığında şube bazlı masraf dökümü" />
+
+      {/* Tarih aralığı + Excel */}
+      <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <Label>Başlangıç</Label>
+            <Input type="date" value={baslangic} onChange={(e) => setBaslangic(e.target.value)} data-testid="input-rapor-baslangic" />
+          </div>
+          <div className="space-y-1">
+            <Label>Bitiş</Label>
+            <Input type="date" value={bitis} onChange={(e) => setBitis(e.target.value)} data-testid="input-rapor-bitis" />
+          </div>
+          <Button variant="outline" onClick={excelIndir} data-testid="button-sube-rapor-excel">
+            <IK.Download className="mr-1.5 h-4 w-4" />Excel İndir
+          </Button>
+        </div>
+      </div>
+
+      {isLoading && (
+        <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground shadow-sm">Yükleniyor…</div>
+      )}
+      {isError && (
+        <div className="rounded-xl border bg-card p-4 text-sm text-destructive shadow-sm" data-testid="text-rapor-hata">
+          Rapor yüklenemedi: {(error as Error)?.message ?? "Bilinmeyen hata"}
+        </div>
+      )}
+      {!isLoading && !isError && !veriVar && (
+        <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground shadow-sm" data-testid="text-rapor-bos">
+          Seçilen aralıkta masraf yok.
+        </div>
+      )}
+
+      {veriVar && data && (
+        <>
+          {/* Özet KPI'lar */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <KpiKart
+              ikon={<IK.ArrowUpFromLine className="h-[19px] w-[19px]" />}
+              label="Genel Toplam"
+              deger={<span data-testid="text-rapor-genel-toplam">{formatPara(data.genelToplam, "₺")}</span>}
+              renk="text-rose-600"
+              alt={`${data.subeler.length} şube`}
+            />
+            <KpiKart
+              ikon={<Building2 className="h-[19px] w-[19px]" />}
+              label="Şube Sayısı"
+              deger={data.subeler.length}
+              alt="masraf kaydı olan şube"
+            />
           </div>
 
-          {isLoading && <p className="text-sm text-muted-foreground">Yükleniyor…</p>}
-          {isError && (
-            <p className="text-sm text-destructive" data-testid="text-rapor-hata">
-              Rapor yüklenemedi: {(error as Error)?.message ?? "Bilinmeyen hata"}
-            </p>
-          )}
-          {!isLoading && !isError && (data?.subeler.length ?? 0) === 0 && (
-            <p className="text-sm text-muted-foreground" data-testid="text-rapor-bos">Seçilen aralıkta masraf yok.</p>
-          )}
-
-          {data?.subeler.map((b) => (
-            <div key={b.sube} className="rounded-md border p-3 space-y-1" data-testid={`rapor-sube-${b.sube}`}>
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{b.sube}</span>
-                <span className="font-bold" data-testid={`rapor-sube-toplam-${b.sube}`}>{formatPara(b.toplam, "TL")}</span>
+          {/* Şube bazlı döküm */}
+          <div className="space-y-4">
+            {data.subeler.map((b) => (
+              <div key={b.sube} className="overflow-hidden rounded-xl border bg-card shadow-sm" data-testid={`rapor-sube-${b.sube}`}>
+                <div className="flex items-center justify-between border-b bg-muted/40 px-5 py-3">
+                  <span className="font-semibold">{b.sube}</span>
+                  <span className="font-bold tabular-nums text-rose-600" data-testid={`rapor-sube-toplam-${b.sube}`}>
+                    {formatPara(b.toplam, "₺")}
+                  </span>
+                </div>
+                <div className="divide-y divide-border/60">
+                  {b.turler.map((t, i) => (
+                    <div key={`${t.masrafTuru}-${i}`} className="flex items-center justify-between px-5 py-2 text-sm hover:bg-muted/30">
+                      <span className="text-muted-foreground">
+                        {t.masrafTuru} <span className="text-xs">· {t.adet} adet</span>
+                      </span>
+                      <span className="font-medium tabular-nums">{formatPara(t.tutar, "₺")}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="border-t pt-1 space-y-0.5">
-                {b.turler.map((t, i) => (
-                  <div key={`${t.masrafTuru}-${i}`} className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{t.masrafTuru} · {t.adet} adet</span>
-                    <span>{formatPara(t.tutar, "TL")}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-
-          {data && data.subeler.length > 0 && (
-            <div className="flex items-center justify-between border-t pt-3">
-              <span className="font-medium">GENEL TOPLAM</span>
-              <span className="text-lg font-bold" data-testid="text-rapor-genel-toplam">{formatPara(data.genelToplam, "TL")}</span>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

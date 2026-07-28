@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -17,7 +16,21 @@ import {
   type TalepDetay, formatTarih, formatPara,
   TIP_ETIKET, DURUM_ETIKET,
 } from "./portalUtils";
+import { SayfaBasligi } from "./kasaUI";
 import BelgeLinkleri from "./BelgeLinkleri";
+
+const TH = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
+
+function bas2(s: string | null | undefined) {
+  return (s ?? "?").trim().slice(0, 2).toUpperCase();
+}
+
+function DurumRozeti({ durum }: { durum: string }) {
+  const stil = durum === "odendi"
+    ? "border-transparent bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+    : "border-transparent bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
+  return <Badge className={stil}>{DURUM_ETIKET[durum] ?? durum}</Badge>;
+}
 
 function OdemeDialog({
   talep, kapat,
@@ -60,11 +73,11 @@ function OdemeDialog({
         </DialogHeader>
         {talep && (
           <div className="space-y-4">
-            <div className="text-sm rounded-md border p-3 space-y-1">
+            <div className="space-y-1 rounded-lg border bg-muted/20 p-3 text-sm">
               <div><span className="font-medium">Dosya:</span> {talep.beyanname?.dosyaNo ?? "—"} — {talep.beyanname?.alici ?? "—"}</div>
               <div><span className="font-medium">Talep Eden:</span> {talep.talepEdenAd}</div>
               <div><span className="font-medium">Tür:</span> {TIP_ETIKET[talep.odemeTipi] ?? talep.odemeTipi} / {talep.masrafTuru}</div>
-              <div><span className="font-medium">Tutar:</span> {formatPara(talep.tutar, talep.paraBirimi)}</div>
+              <div><span className="font-medium">Tutar:</span> <span className="font-semibold tabular-nums text-rose-600">{formatPara(talep.tutar, talep.paraBirimi)}</span></div>
               {talep.konsimentoNo && (
                 <div>
                   <span className="font-medium">Konşimento:</span> {talep.konsimentoNo}
@@ -102,89 +115,98 @@ export default function GelenTaleplerSayfasi() {
   });
   const [odemeTalebi, setOdemeTalebi] = useState<TalepDetay | null>(null);
 
+  const bekleyenSayisi = talepler.filter((t) => t.durum === "bekliyor").length;
+
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Tüm Temsilcilerin Talepleri</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Tarih</TableHead>
-                <TableHead>Temsilci</TableHead>
-                <TableHead>Dosya No</TableHead>
-                <TableHead>Müşteri</TableHead>
-                <TableHead>Tür</TableHead>
-                <TableHead>Konşimento No</TableHead>
-                <TableHead>Tutar</TableHead>
-                <TableHead>Alacaklı</TableHead>
-                <TableHead>Belgeler</TableHead>
-                <TableHead>Durum</TableHead>
-                <TableHead></TableHead>
+      <SayfaBasligi
+        baslik="Gelen Talepler"
+        alt={`Tüm temsilcilerin ödeme talepleri${bekleyenSayisi > 0 ? ` · ${bekleyenSayisi} bekliyor` : ""}`}
+      />
+
+      <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/40 hover:bg-muted/40">
+              <TableHead className={TH}>Tarih</TableHead>
+              <TableHead className={TH}>Temsilci</TableHead>
+              <TableHead className={TH}>Dosya No</TableHead>
+              <TableHead className={TH}>Müşteri</TableHead>
+              <TableHead className={TH}>Tür</TableHead>
+              <TableHead className={TH}>Konşimento No</TableHead>
+              <TableHead className={`text-right ${TH}`}>Tutar</TableHead>
+              <TableHead className={TH}>Alacaklı</TableHead>
+              <TableHead className={TH}>Belgeler</TableHead>
+              <TableHead className={TH}>Durum</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {talepler.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={11} className="text-center text-muted-foreground">
+                  Talep yok
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {talepler.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={11} className="text-center text-muted-foreground">
-                    Talep yok
-                  </TableCell>
-                </TableRow>
-              )}
-              {talepler.map((t) => (
-                <TableRow key={t.id} data-testid={`row-muhasebe-talep-${t.id}`}>
-                  <TableCell>{formatTarih(t.talepTarihi)}</TableCell>
-                  <TableCell>{t.talepEdenAd}</TableCell>
-                  <TableCell>
-                    {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
-                  </TableCell>
-                  <TableCell className="max-w-44 truncate">{t.beyanname?.alici ?? "—"}</TableCell>
-                  <TableCell>
-                    {TIP_ETIKET[t.odemeTipi] ?? t.odemeTipi}
-                    {t.odemeTipi === "masraf" ? ` / ${t.masrafTuru}` : ""}
-                  </TableCell>
-                  <TableCell>
-                    {t.konsimentoNo ? (
-                      <div>
-                        <div className="text-sm">{t.konsimentoNo}</div>
-                        {t.tasiyici && (
-                          <div className="text-xs text-muted-foreground">{t.tasiyici}</div>
-                        )}
-                      </div>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell>{formatPara(t.tutar, t.paraBirimi)}</TableCell>
-                  <TableCell className="max-w-36 truncate">
-                    {t.alacakli}
-                    {t.iban && <div className="text-xs text-muted-foreground">{t.iban}</div>}
-                  </TableCell>
-                  <TableCell><BelgeLinkleri talep={t} /></TableCell>
-                  <TableCell>
-                    <Badge variant={t.durum === "odendi" ? "default" : "secondary"}>
-                      {DURUM_ETIKET[t.durum] ?? t.durum}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {t.durum === "bekliyor" && (
-                      <Button
-                        size="sm"
-                        onClick={() => setOdemeTalebi(t)}
-                        data-testid={`button-ode-${t.id}`}
-                      >
-                        Öde
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            )}
+            {talepler.map((t) => (
+              <TableRow key={t.id} className="hover:bg-muted/30" data-testid={`row-muhasebe-talep-${t.id}`}>
+                <TableCell className="tabular-nums">{formatTarih(t.talepTarihi)}</TableCell>
+                <TableCell>
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-[11px] font-bold text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
+                      {bas2(t.talepEdenAd)}
+                    </span>
+                    <span className="truncate font-medium">{t.talepEdenAd}</span>
+                  </div>
+                </TableCell>
+                <TableCell className="font-medium tabular-nums">
+                  {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
+                </TableCell>
+                <TableCell className="max-w-44 truncate" title={t.beyanname?.alici ?? ""}>{t.beyanname?.alici ?? "—"}</TableCell>
+                <TableCell>
+                  {TIP_ETIKET[t.odemeTipi] ?? t.odemeTipi}
+                  {t.odemeTipi === "masraf" ? ` / ${t.masrafTuru}` : ""}
+                </TableCell>
+                <TableCell>
+                  {t.konsimentoNo ? (
+                    <div>
+                      <div className="text-sm tabular-nums">{t.konsimentoNo}</div>
+                      {t.tasiyici && (
+                        <div className="text-xs text-muted-foreground">{t.tasiyici}</div>
+                      )}
+                    </div>
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
+                <TableCell className="text-right font-semibold tabular-nums text-rose-600">
+                  {formatPara(t.tutar, t.paraBirimi)}
+                </TableCell>
+                <TableCell className="max-w-36 truncate">
+                  {t.alacakli}
+                  {t.iban && <div className="text-xs text-muted-foreground">{t.iban}</div>}
+                </TableCell>
+                <TableCell><BelgeLinkleri talep={t} /></TableCell>
+                <TableCell>
+                  <DurumRozeti durum={t.durum} />
+                </TableCell>
+                <TableCell>
+                  {t.durum === "bekliyor" && (
+                    <Button
+                      size="sm"
+                      onClick={() => setOdemeTalebi(t)}
+                      data-testid={`button-ode-${t.id}`}
+                    >
+                      Öde
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
 
       <OdemeDialog
         key={odemeTalebi?.id ?? "odeme-kapali"}
