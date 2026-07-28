@@ -81,5 +81,18 @@ export function SonDevirKart({ gunTarihi, kapanisBakiye }: { gunTarihi: string |
   );
 }
 
+// Tüm portal ekranlarının ortak başlık şeridi: sol başlık + alt açıklama, sağda slot (gün kutusu / aksiyon).
+export function SayfaBasligi({ baslik, alt, sag }: { baslik: string; alt?: string; sag?: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <h1 className="text-xl font-bold tracking-tight">{baslik}</h1>
+        {alt && <p className="text-sm text-muted-foreground">{alt}</p>}
+      </div>
+      {sag}
+    </div>
+  );
+}
+
 // Ekranlarda KpiKart ikonu için kısayol.
 export const IK = { Wallet, ArrowDownToLine, ArrowUpFromLine, Download };
