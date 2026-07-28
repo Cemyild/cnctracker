@@ -17,6 +17,8 @@ import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIbanlariByPB,
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 import MasrafTuruSecici from "./MasrafTuruSecici";
 import BeyannameSecici from "./BeyannameSecici";
+import { SayfaBasligi } from "./kasaUI";
+import { Plus, Send, Trash2 } from "lucide-react";
 
 type KalemDurum = "bekliyor" | "gonderiliyor" | "gonderildi" | "hata";
 
@@ -287,7 +289,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
   const durumEtiketi = (k: Kalem): { metin: string; sinif: string } => {
     switch (k.durum) {
       case "gonderiliyor": return { metin: "Gönderiliyor…", sinif: "text-muted-foreground" };
-      case "gonderildi": return { metin: "✓ Gönderildi", sinif: "text-green-600" };
+      case "gonderildi": return { metin: "✓ Gönderildi", sinif: "text-emerald-600" };
       case "hata": return { metin: `✗ ${k.hataMesaji ?? "Hata"}`, sinif: "text-destructive" };
       default: return { metin: "", sinif: "text-muted-foreground" };
     }
@@ -295,15 +297,20 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
 
   return (
     <div className="space-y-6">
+      <SayfaBasligi
+        baslik="Yeni Ödeme Talebi"
+        alt="Muhasebeye gönderilecek masraf veya depo teminatı taleplerini oluşturun"
+      />
+
       <Card>
         <CardHeader>
-          <CardTitle>Yeni Ödeme Talebi</CardTitle>
+          <CardTitle className="text-base font-semibold">Talep Formu</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={kalemEkle} className="space-y-4">
+          <form onSubmit={kalemEkle} className="space-y-6">
             <div className="space-y-2">
               <Label>Beyanname / Dosya</Label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2.5">
                 <Checkbox
                   id="dosya-yok"
                   checked={dosyaYok}
@@ -334,23 +341,23 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                 />
               )}
               {!dosyaYok && secili && (
-                <div className="text-xs text-muted-foreground rounded-md border p-2 space-y-0.5">
-                  <div><span className="font-medium">Müşteri:</span> {secili.alici ?? "—"}</div>
-                  <div><span className="font-medium">Beyan No:</span> {secili.beyanNo ?? "—"}</div>
+                <div className="rounded-lg border bg-muted/30 p-3 text-xs space-y-1">
+                  <div><span className="font-medium text-foreground">Müşteri:</span> <span className="text-muted-foreground">{secili.alici ?? "—"}</span></div>
+                  <div><span className="font-medium text-foreground">Beyan No:</span> <span className="text-muted-foreground">{secili.beyanNo ?? "—"}</span></div>
                   <div>
-                    <span className="font-medium">Beyan Tarihi:</span>{" "}
-                    {secili.beyanTarihi ? formatTarih(secili.beyanTarihi) : "beyan tarihi yok"}
+                    <span className="font-medium text-foreground">Beyan Tarihi:</span>{" "}
+                    <span className="text-muted-foreground">{secili.beyanTarihi ? formatTarih(secili.beyanTarihi) : "beyan tarihi yok"}</span>
                   </div>
-                  <div><span className="font-medium">Gümrük:</span> {secili.gumrukIdaresi ?? "—"}</div>
+                  <div><span className="font-medium text-foreground">Gümrük:</span> <span className="text-muted-foreground">{secili.gumrukIdaresi ?? "—"}</span></div>
                   <div>
-                    <span className="font-medium">Fatura:</span>{" "}
-                    {formatPara(secili.fatBedeli, secili.doviz)}
+                    <span className="font-medium text-foreground">Fatura:</span>{" "}
+                    <span className="tabular-nums text-muted-foreground">{formatPara(secili.fatBedeli, secili.doviz)}</span>
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t pt-6">
               <div className="space-y-2">
                 <Label>Ödeme Tipi</Label>
                 <Select
@@ -385,6 +392,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                     placeholder="0,00"
                     value={tutar}
                     onChange={(e) => setTutar(e.target.value)}
+                    className="tabular-nums"
                     data-testid="input-tutar"
                   />
                   <Select value={paraBirimi} onValueChange={setParaBirimi}>
@@ -405,7 +413,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
               <KonsimentoAnalizAlani key={formSayac} deger={konsimento} onDegisim={konsimentoDegisti} idOnEki="talep" />
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t pt-6">
               <div className="space-y-2">
                 <Label>Kime Ödenecek (Alacaklı)</Label>
                 <Input
@@ -428,7 +436,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                         key={f.id}
                         type="button"
                         onClick={() => firmaSec(f)}
-                        className="text-xs rounded-full border px-2 py-0.5 hover:bg-accent"
+                        className="text-xs rounded-full border px-2 py-0.5 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:border-indigo-900 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
                         data-testid={`cip-firma-${i}`}
                       >
                         {f.ad}
@@ -459,6 +467,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                   placeholder="TR.."
                   value={iban}
                   onChange={(e) => setIban(e.target.value)}
+                  className="tabular-nums"
                   data-testid="input-iban"
                 />
               </div>
@@ -485,9 +494,12 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
               />
             </div>
 
-            <Button type="submit" disabled={gonderimAktif} data-testid="button-kalem-ekle">
-              Ekle
-            </Button>
+            <div className="flex justify-end border-t pt-5">
+              <Button type="submit" disabled={gonderimAktif} data-testid="button-kalem-ekle">
+                <Plus className="h-4 w-4" />
+                Ekle
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -495,7 +507,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
       {listeDolu && (
         <Card>
           <CardHeader>
-            <CardTitle>Eklenen Kalemler ({kalemler.length})</CardTitle>
+            <CardTitle className="text-base font-semibold">Eklenen Kalemler ({kalemler.length})</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-2" data-testid="list-kalemler">
@@ -504,22 +516,23 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                 return (
                   <div
                     key={i}
-                    className={`flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 ${k.durum === "gonderildi" ? "opacity-60" : ""}`}
+                    className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3.5 ${k.durum === "gonderildi" ? "opacity-60" : ""}`}
                     data-testid={`row-kalem-${i}`}
                   >
-                    <div className="space-y-0.5 text-sm">
-                      <div className="font-medium">
+                    <div className="min-w-0 space-y-1 text-sm">
+                      <div className="font-semibold">
                         {k.odemeTipi === "depo_teminat" ? "Depo Teminatı" : k.masrafTuru}
-                        {" — "}
-                        {k.alacakli}
+                        <span className="font-normal text-muted-foreground"> — {k.alacakli}</span>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatPara(k.tutar, k.paraBirimi)}
-                        {k.belgeler.length > 0 && ` · ${k.belgeler.length} belge`}
-                        {k.konsimento && ` · Konşimento: ${k.konsimento.konsimentoNo}`}
+                      <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                        <span className="font-semibold tabular-nums text-rose-600">
+                          {formatPara(k.tutar, k.paraBirimi)}
+                        </span>
+                        {k.belgeler.length > 0 && <span>· {k.belgeler.length} belge</span>}
+                        {k.konsimento && <span>· Konşimento: {k.konsimento.konsimentoNo}</span>}
                       </div>
                       {d.metin && (
-                        <div className={`text-xs ${d.sinif}`} data-testid={`text-kalem-durum-${i}`}>{d.metin}</div>
+                        <div className={`text-xs font-medium ${d.sinif}`} data-testid={`text-kalem-durum-${i}`}>{d.metin}</div>
                       )}
                     </div>
                     {k.durum !== "gonderildi" && (
@@ -531,6 +544,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                         onClick={() => kalemKaldir(i)}
                         data-testid={`button-kalem-kaldir-${i}`}
                       >
+                        <Trash2 className="h-3.5 w-3.5" />
                         Kaldır
                       </Button>
                     )}
@@ -538,12 +552,14 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                 );
               })}
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
-              <div className="text-sm text-muted-foreground" data-testid="text-kalem-toplamlar">
-                {kalemler.length} kalem —{" "}
-                {Object.entries(toplamlar)
-                  .map(([pb, top]) => `${top.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${pb}`)
-                  .join(" + ")}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+              <div className="text-sm" data-testid="text-kalem-toplamlar">
+                <span className="text-muted-foreground">{kalemler.length} kalem — </span>
+                <span className="font-semibold tabular-nums text-rose-600">
+                  {Object.entries(toplamlar)
+                    .map(([pb, top]) => `${top.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${pb}`)
+                    .join(" + ")}
+                </span>
               </div>
               <Button
                 type="button"
@@ -551,6 +567,7 @@ export default function YeniTalepSayfasi({ me }: { me: PortalMe }) {
                 onClick={topluGonder}
                 data-testid="button-toplu-gonder"
               >
+                <Send className="h-4 w-4" />
                 {gonderimAktif
                   ? "Gönderiliyor…"
                   : hataVar

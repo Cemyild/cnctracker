@@ -16,6 +16,11 @@ import { formatTarih, formatPara, tamEslesme, benzerFirmalar, firmaIbanlariByPB,
 import KonsimentoAnalizAlani, { type KonsimentoBilgisi, BOS_KONSIMENTO } from "./KonsimentoAnalizAlani";
 import MasrafTuruSecici from "./MasrafTuruSecici";
 import BeyannameSecici from "./BeyannameSecici";
+import { SayfaBasligi } from "./kasaUI";
+import { Check } from "lucide-react";
+
+// Bölüm başlığı stili — form içi gruplama (tablo başlıklarıyla aynı dil).
+const BOLUM_BASLIK = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
 
 // Muhasebenin talepsiz ödeme girişi — tek adımda "Ödendi" kaydı oluşur (dekont zorunlu).
 export default function DogrudanOdemeSayfasi() {
@@ -175,178 +180,193 @@ export default function DogrudanOdemeSayfasi() {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Doğrudan Ödeme Girişi</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={gonder} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Beyanname / Dosya</Label>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="dogrudan-dosya-yok"
-                checked={dosyaYok}
-                onCheckedChange={(v) => {
-                  setDosyaYok(v === true);
-                  if (v === true) setBeyannameId("");
-                }}
-                data-testid="checkbox-dogrudan-dosya-yok"
-              />
-              <Label htmlFor="dogrudan-dosya-yok" className="font-normal text-muted-foreground">
-                Dosya yok — beyannamesiz kayıt (açıklama zorunlu)
-              </Label>
-            </div>
-            {!dosyaYok && (
-              <BeyannameSecici
-                beyannameler={beyannameler}
-                value={beyannameId}
-                onChange={setBeyannameId}
-                testId="select-dogrudan-beyanname"
-                placeholder="Aramak için Ref, Alıcı yada Beyanname No yazın, yada açılır listeden seçin (tüm liste)"
-              />
-            )}
-            {!dosyaYok && secili && (
-              <div className="text-xs text-muted-foreground rounded-md border p-2 space-y-0.5">
-                <div><span className="font-medium">Müşteri:</span> {secili.alici ?? "—"}</div>
-                <div><span className="font-medium">Beyan No:</span> {secili.beyanNo ?? "—"}</div>
-                <div>
-                  <span className="font-medium">Beyan Tarihi:</span>{" "}
-                  {secili.beyanTarihi ? formatTarih(secili.beyanTarihi) : "beyan tarihi yok"}
-                </div>
-                <div>
-                  <span className="font-medium">Fatura:</span>{" "}
-                  {formatPara(secili.fatBedeli, secili.doviz)}
-                </div>
-              </div>
-            )}
-          </div>
+    <div className="space-y-6">
+      <SayfaBasligi
+        baslik="Doğrudan Ödeme"
+        alt="Talepsiz ödeme girişi — tek adımda “Ödendi” durumunda kayıt oluşur (dekont zorunlu)"
+      />
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label>Ödeme Tipi</Label>
-              <Select
-                value={odemeTipi}
-                onValueChange={(v) => {
-                  setOdemeTipi(v as "masraf" | "depo_teminat");
-                  // Tip değişince konşimento bilgisi geçersiz — sıfırla (yanıltıcı bayat durum kalmasın)
-                  setKonsimento({ ...BOS_KONSIMENTO });
-                  sonAlacakliOnerisi.current = null;
-                  sonIbanOnerisi.current = null;
-                }}
-              >
-                <SelectTrigger data-testid="select-dogrudan-tip">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="masraf">Normal Masraf</SelectItem>
-                  <SelectItem value="depo_teminat">Depo Teminatı</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {odemeTipi === "masraf" && (
-              <div className="space-y-2">
-                <Label>Masraf Türü</Label>
-                <MasrafTuruSecici value={masrafTuru} onChange={setMasrafTuru} testId="dogrudan-masraf-turu" />
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label>Tutar</Label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="0,00"
-                  value={tutar}
-                  onChange={(e) => setTutar(e.target.value)}
-                  data-testid="input-dogrudan-tutar"
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Ödeme Formu</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={gonder} className="space-y-6">
+            <div className="space-y-3">
+              <Label className={BOLUM_BASLIK}>Beyanname / Dosya</Label>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="dogrudan-dosya-yok"
+                  checked={dosyaYok}
+                  onCheckedChange={(v) => {
+                    setDosyaYok(v === true);
+                    if (v === true) setBeyannameId("");
+                  }}
+                  data-testid="checkbox-dogrudan-dosya-yok"
                 />
-                <Select value={paraBirimi} onValueChange={setParaBirimi}>
-                  <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="TRY">TRY</SelectItem>
-                    <SelectItem value="USD">USD</SelectItem>
-                    <SelectItem value="EUR">EUR</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="dogrudan-dosya-yok" className="font-normal text-muted-foreground">
+                  Dosya yok — beyannamesiz kayıt (açıklama zorunlu)
+                </Label>
               </div>
-            </div>
-          </div>
-
-          {odemeTipi === "depo_teminat" && (
-            <KonsimentoAnalizAlani key={formSayac} deger={konsimento} onDegisim={konsimentoDegisti} idOnEki="dogrudan" />
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Kime Ödendi (Alacaklı)</Label>
-              <Input
-                placeholder="Firma adı"
-                value={alacakli}
-                onChange={(e) => setAlacakli(e.target.value)}
-                list="alacakli-onerileri-dogrudan"
-                data-testid="input-dogrudan-alacakli"
-              />
-              <datalist id="alacakli-onerileri-dogrudan">
-                {odemeSirketleri.map((s) => (
-                  <option key={s.id} value={s.ad} />
-                ))}
-              </datalist>
-              {benzerOneriler.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-1" data-testid="benzer-firmalar-dogrudan">
-                  <span className="text-xs text-muted-foreground w-full">Benzer kayıtlı firmalar:</span>
-                  {benzerOneriler.map((f, i) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => firmaSec(f)}
-                      className="text-xs rounded-full border px-2 py-0.5 hover:bg-accent"
-                      data-testid={`cip-firma-${i}`}
-                    >
-                      {f.ad}
-                      {firmaIbanOzet(f).length > 0
-                        ? ` · ${firmaIbanOzet(f).map((o) => `${o.paraBirimi}${o.adet > 1 ? `×${o.adet}` : ""}`).join(", ")}`
-                        : " · IBAN yok"}
-                    </button>
-                  ))}
+              {!dosyaYok && (
+                <BeyannameSecici
+                  beyannameler={beyannameler}
+                  value={beyannameId}
+                  onChange={setBeyannameId}
+                  testId="select-dogrudan-beyanname"
+                  placeholder="Aramak için Ref, Alıcı yada Beyanname No yazın, yada açılır listeden seçin (tüm liste)"
+                />
+              )}
+              {!dosyaYok && secili && (
+                <div className="space-y-1 rounded-lg border bg-muted/20 p-3 text-xs">
+                  <div><span className="font-medium text-foreground">Müşteri:</span> <span className="text-muted-foreground">{secili.alici ?? "—"}</span></div>
+                  <div><span className="font-medium text-foreground">Beyan No:</span> <span className="text-muted-foreground">{secili.beyanNo ?? "—"}</span></div>
+                  <div>
+                    <span className="font-medium text-foreground">Beyan Tarihi:</span>{" "}
+                    <span className="text-muted-foreground">{secili.beyanTarihi ? formatTarih(secili.beyanTarihi) : "beyan tarihi yok"}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Fatura:</span>{" "}
+                    <span className="font-semibold tabular-nums text-rose-600">{formatPara(secili.fatBedeli, secili.doviz)}</span>
+                  </div>
                 </div>
               )}
-              {ibanSecenekleri.length > 1 && (
-                <div className="pt-1" data-testid="alan-iban-secim">
-                  <Label className="text-xs text-muted-foreground">Bu firmada {paraBirimi} için {ibanSecenekleri.length} hesap — birini seçin</Label>
-                  <Select value={iban} onValueChange={ibanSecimi}>
-                    <SelectTrigger data-testid="select-firma-iban"><SelectValue placeholder="IBAN seçin" /></SelectTrigger>
+            </div>
+
+            <div className="space-y-3 border-t pt-6">
+              <Label className={BOLUM_BASLIK}>Ödeme Detayı</Label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Ödeme Tipi</Label>
+                  <Select
+                    value={odemeTipi}
+                    onValueChange={(v) => {
+                      setOdemeTipi(v as "masraf" | "depo_teminat");
+                      // Tip değişince konşimento bilgisi geçersiz — sıfırla (yanıltıcı bayat durum kalmasın)
+                      setKonsimento({ ...BOS_KONSIMENTO });
+                      sonAlacakliOnerisi.current = null;
+                      sonIbanOnerisi.current = null;
+                    }}
+                  >
+                    <SelectTrigger data-testid="select-dogrudan-tip">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      {ibanSecenekleri.map((s) => (
-                        <SelectItem key={s.id} value={s.iban}>{s.etiket || "—"} · …{s.iban.slice(-4)}</SelectItem>
-                      ))}
+                      <SelectItem value="masraf">Normal Masraf</SelectItem>
+                      <SelectItem value="depo_teminat">Depo Teminatı</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                {odemeTipi === "masraf" && (
+                  <div className="space-y-2">
+                    <Label>Masraf Türü</Label>
+                    <MasrafTuruSecici value={masrafTuru} onChange={setMasrafTuru} testId="dogrudan-masraf-turu" />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>Tutar</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="0,00"
+                      value={tutar}
+                      onChange={(e) => setTutar(e.target.value)}
+                      className="tabular-nums"
+                      data-testid="input-dogrudan-tutar"
+                    />
+                    <Select value={paraBirimi} onValueChange={setParaBirimi}>
+                      <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="TRY">TRY</SelectItem>
+                        <SelectItem value="USD">USD</SelectItem>
+                        <SelectItem value="EUR">EUR</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {odemeTipi === "depo_teminat" && (
+                <KonsimentoAnalizAlani key={formSayac} deger={konsimento} onDegisim={konsimentoDegisti} idOnEki="dogrudan" />
               )}
             </div>
-            <div className="space-y-2">
-              <Label>IBAN (varsa)</Label>
-              <Input
-                placeholder="TR.."
-                value={iban}
-                onChange={(e) => setIban(e.target.value)}
-                data-testid="input-dogrudan-iban"
+
+            <div className="space-y-3 border-t pt-6">
+              <Label className={BOLUM_BASLIK}>Alacaklı &amp; IBAN</Label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Kime Ödendi (Alacaklı)</Label>
+                  <Input
+                    placeholder="Firma adı"
+                    value={alacakli}
+                    onChange={(e) => setAlacakli(e.target.value)}
+                    list="alacakli-onerileri-dogrudan"
+                    data-testid="input-dogrudan-alacakli"
+                  />
+                  <datalist id="alacakli-onerileri-dogrudan">
+                    {odemeSirketleri.map((s) => (
+                      <option key={s.id} value={s.ad} />
+                    ))}
+                  </datalist>
+                  {benzerOneriler.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1" data-testid="benzer-firmalar-dogrudan">
+                      <span className="w-full text-xs text-muted-foreground">Benzer kayıtlı firmalar:</span>
+                      {benzerOneriler.map((f, i) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => firmaSec(f)}
+                          className="rounded-full border px-2.5 py-1 text-xs transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
+                          data-testid={`cip-firma-${i}`}
+                        >
+                          {f.ad}
+                          {firmaIbanOzet(f).length > 0
+                            ? ` · ${firmaIbanOzet(f).map((o) => `${o.paraBirimi}${o.adet > 1 ? `×${o.adet}` : ""}`).join(", ")}`
+                            : " · IBAN yok"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {ibanSecenekleri.length > 1 && (
+                    <div
+                      className="space-y-1.5 rounded-lg border border-indigo-200 bg-indigo-50/60 p-2.5 dark:border-indigo-900 dark:bg-indigo-950/20"
+                      data-testid="alan-iban-secim"
+                    >
+                      <Label className="text-xs text-muted-foreground">Bu firmada {paraBirimi} için {ibanSecenekleri.length} hesap — birini seçin</Label>
+                      <Select value={iban} onValueChange={ibanSecimi}>
+                        <SelectTrigger data-testid="select-firma-iban"><SelectValue placeholder="IBAN seçin" /></SelectTrigger>
+                        <SelectContent>
+                          {ibanSecenekleri.map((s) => (
+                            <SelectItem key={s.id} value={s.iban}>{s.etiket || "—"} · …{s.iban.slice(-4)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>IBAN (varsa)</Label>
+                  <Input
+                    placeholder="TR.."
+                    value={iban}
+                    onChange={(e) => setIban(e.target.value)}
+                    data-testid="input-dogrudan-iban"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 border-t pt-6">
+              <Label className={BOLUM_BASLIK}>Açıklama</Label>
+              <Textarea
+                placeholder="Ödemeyle ilgili not…"
+                value={aciklama}
+                onChange={(e) => setAciklama(e.target.value)}
+                data-testid="input-dogrudan-aciklama"
               />
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label>Açıklama</Label>
-            <Textarea
-              placeholder="Ödemeyle ilgili not…"
-              value={aciklama}
-              onChange={(e) => setAciklama(e.target.value)}
-              data-testid="input-dogrudan-aciklama"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Dekont (zorunlu)</Label>
+            <div className="space-y-2 border-t pt-6">
+              <Label className={BOLUM_BASLIK}>Dekont (zorunlu)</Label>
               <Input
                 key={`dekont-${formSayac}`}
                 type="file"
@@ -354,13 +374,20 @@ export default function DogrudanOdemeSayfasi() {
                 data-testid="input-dogrudan-dekont"
               />
             </div>
-          </div>
 
-          <Button type="submit" disabled={gonderiliyor} data-testid="button-dogrudan-kaydet">
-            {gonderiliyor ? "Kaydediliyor…" : "Ödemeyi Kaydet"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+            <div className="flex justify-end border-t pt-6">
+              <Button type="submit" size="lg" disabled={gonderiliyor} data-testid="button-dogrudan-kaydet">
+                {gonderiliyor ? "Kaydediliyor…" : (
+                  <>
+                    <Check className="mr-1.5 h-4 w-4" />
+                    Ödemeyi Kaydet
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
