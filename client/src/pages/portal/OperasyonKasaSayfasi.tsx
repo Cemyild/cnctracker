@@ -4,20 +4,21 @@ import { queryClient } from "@/lib/queryClient";
 import type { Beyanname, OperasyonAvans, OperasyonMasraf } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { formatTarihKisa, formatPara } from "./portalUtils";
 import YeniOdemeModal from "./YeniOdemeModal";
 import { masraflariGrupla } from "./masrafGruplama";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { KpiKart, GunKutusu, SonDevirKart, IK } from "./kasaUI";
+import { MasrafTablosu } from "./MasrafTablosu";
+import { Plus, Lock } from "lucide-react";
 
-type Ozet = { bakiye: number; avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] };
-
-// Açık Hareketler tablosu sütun şablonu — TÜM satırlarda birebir aynı olmalı ki
-// sütunlar hizalansın. Her satır ayrı bir grid container; sütunlar ancak SABİT
-// genişlikle satırlar arası aynı hizaya oturur ("auto" → içeriğe göre kayma/dalga).
-const GRID = "grid-cols-[150px_190px_minmax(0,1fr)_120px_20px]";
+type Ozet = {
+  bakiye: number;
+  avanslar: OperasyonAvans[];
+  masraflar: OperasyonMasraf[];
+  sonDevir: { gunTarihi: string; kapanisBakiye: string } | null;
+};
 
 export default function OperasyonKasaSayfasi() {
   const { toast } = useToast();
@@ -75,113 +76,60 @@ export default function OperasyonKasaSayfasi() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Güncel Bakiye</CardTitle></CardHeader>
-          <CardContent><div className="text-3xl font-bold" data-testid="text-bakiye">{formatPara(ozet?.bakiye ?? 0, "TL")}</div></CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Açık Avans</CardTitle></CardHeader>
-          <CardContent><div className="text-2xl font-semibold text-green-600">{formatPara(acikAvansToplam, "TL")}</div></CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Açık Masraf</CardTitle></CardHeader>
-          <CardContent><div className="text-2xl font-semibold text-destructive">{formatPara(acikMasrafToplam, "TL")}</div></CardContent>
-        </Card>
+      {/* Başlık şeridi + sabit gün kutusu */}
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">Kasam</h1>
+          <p className="text-sm text-muted-foreground">Şube kasası</p>
+        </div>
+        <GunKutusu />
       </div>
 
-      <div className="flex items-center justify-between">
-        <Button size="lg" onClick={() => setYeniOdeme(true)} data-testid="button-op-yeni-odeme">+ Yeni Ödeme Kaydet</Button>
-        <Button variant="outline" onClick={() => setKapatDialog(true)} disabled={hareketSayisi === 0} data-testid="button-op-gunu-kapat">Günü Kapat</Button>
+      {/* KPI kartları */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <KpiKart ikon={<IK.Wallet className="h-[19px] w-[19px]" />} label="Güncel Bakiye" deger={`${formatPara(ozet?.bakiye ?? 0)} ₺`} alt="şube kasası · devrediyor" />
+        <KpiKart ikon={<IK.ArrowDownToLine className="h-[19px] w-[19px]" />} label="Gelen Avans" deger={`${formatPara(acikAvansToplam)} ₺`} renk="text-emerald-600" alt="muhasebeden bekleyen" />
+        <KpiKart ikon={<IK.ArrowUpFromLine className="h-[19px] w-[19px]" />} label="Güncel Masraflar" deger={`${formatPara(acikMasrafToplam)} ₺`} renk="text-rose-600" alt={`${ozet?.masraflar.length ?? 0} kalem · kapatılmamış`} />
+        <SonDevirKart gunTarihi={ozet?.sonDevir?.gunTarihi ?? null} kapanisBakiye={ozet?.sonDevir?.kapanisBakiye ?? null} />
       </div>
 
+      {/* Aksiyon barı */}
+      <div className="flex items-center justify-between gap-3">
+        <Button size="lg" onClick={() => setYeniOdeme(true)} data-testid="button-op-yeni-odeme"><Plus className="mr-1.5 h-4 w-4" />Yeni Ödeme Kaydet</Button>
+        <Button variant="outline" size="lg" onClick={() => setKapatDialog(true)} disabled={hareketSayisi === 0} data-testid="button-op-gunu-kapat"><Lock className="mr-1.5 h-4 w-4" />Günü Kapat</Button>
+      </div>
+
+      {/* Açık Hareketler */}
       <Card>
         <CardHeader><CardTitle>Açık Hareketler</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {/* Blok 1 — Avanslar (yeşil, sade) */}
           {(ozet?.avanslar.length ?? 0) > 0 && (
-            <div className="space-y-1">
-              <div className="text-xs font-medium text-muted-foreground">Avanslar</div>
+            <div className="space-y-1.5">
+              <div className="text-xs font-medium text-muted-foreground">Gelen Avanslar</div>
               {(ozet?.avanslar ?? []).map((a) => (
-                <div key={a.id} className="flex items-center justify-between rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-900 dark:bg-green-950/40" data-testid={`row-avans-${a.id}`}>
-                  <div className="text-green-700 dark:text-green-400">
+                <div key={a.id} className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm dark:border-emerald-900 dark:bg-emerald-950/40" data-testid={`row-avans-${a.id}`}>
+                  <div className="text-emerald-700 dark:text-emerald-400">
                     <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
                     {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
                   </div>
-                  <div className="font-semibold text-green-700 dark:text-green-400">+{formatPara(a.tutar, "TL")}</div>
+                  <div className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">+{formatPara(a.tutar, "₺")}</div>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Blok 2 — Masraflar (sütun başlıklı grid tablo) */}
           {(gruplar.length > 0 || ofisMasraflar.length > 0) && (
-            <div className="rounded-md border">
-              {/* Sütun başlıkları — yalnız en üstte bir kez */}
-              <div className={`grid ${GRID} gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground`}>
-                <span>Tarih · Dosya No</span>
-                <span>Beyanname No</span>
-                <span>Firma</span>
-                <span className="text-right">Tutar</span>
-                <span />
-              </div>
-
-              {gruplar.map((g) => {
-                const acik = acikGruplar.has(g.beyannameId);
-                const b = g.beyanname;
-                return (
-                  <div key={g.beyannameId} className="border-b last:border-b-0" data-testid={`group-beyanname-${g.beyannameId}`}>
-                    <button type="button" onClick={() => grupAcKapa(g.beyannameId)} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid={`button-group-toggle-${g.beyannameId}`}>
-                      <span className="truncate font-semibold"><span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(g.tarih)}</span>{b?.dosyaNo ?? (b?.rejim === "TR" ? "TR" : "?")}</span>
-                      <span className="truncate text-muted-foreground">{b?.beyanNo ?? "—"}</span>
-                      <span className="truncate" title={b?.alici ?? ""}>{b?.alici ?? "?"}</span>
-                      <span className="text-right font-semibold text-destructive">−{formatPara(g.toplam, "TL")}</span>
-                      {acik ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}
-                    </button>
-                    {acik && (
-                      <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
-                        {g.masraflar.map((m) => (
-                          <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                            <span className="min-w-0 truncate"><span className="text-muted-foreground">{formatTarihKisa(m.tarih)}</span> · {m.masrafTuru ?? "Masraf"} · {m.alacakli}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
-                            <span className="flex shrink-0 items-center gap-2">
-                              <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
-                              <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-              {ofisMasraflar.length > 0 && (
-                <div data-testid="group-ofis">
-                  <button type="button" onClick={() => grupAcKapa("__ofis__")} className={`grid w-full ${GRID} items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50`} data-testid="button-group-toggle-ofis">
-                    <span className="col-span-3 font-semibold">Ofis Masrafları</span>
-                    <span className="text-right font-semibold text-destructive">−{formatPara(ofisToplam, "TL")}</span>
-                    {acikGruplar.has("__ofis__") ? <ChevronDown className="h-4 w-4 justify-self-end" /> : <ChevronRight className="h-4 w-4 justify-self-end" />}
-                  </button>
-                  {acikGruplar.has("__ofis__") && (
-                    <div className="space-y-1 border-t bg-muted/20 px-3 py-1.5">
-                      {ofisMasraflar.map((m) => (
-                        <div key={m.id} className="flex items-center justify-between text-sm py-0.5" data-testid={`row-masraf-${m.id}`}>
-                          <span className="min-w-0 truncate"><Badge variant="outline" className="mr-1">Ofis</Badge><span className="text-muted-foreground">{formatTarihKisa(m.tarih)}</span> · {m.masrafTuru ?? "Masraf"} · {m.aciklama ?? "—"}{m.belgeDosya && <> · <a className="underline" href={"/" + m.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">belge</a></>}</span>
-                          <span className="flex shrink-0 items-center gap-2">
-                            <span className="font-semibold text-destructive">−{formatPara(m.tutar, "TL")}</span>
-                            <Button variant="ghost" size="sm" onClick={() => masrafKaldir(m.id)} data-testid={`button-masraf-kaldir-${m.id}`}>Kaldır</Button>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            <MasrafTablosu
+              gruplarSonucu={{ gruplar, ofisMasraflar, ofisToplam }}
+              acikSet={acikGruplar}
+              onToggle={grupAcKapa}
+              varsayilanAcik={false}
+              onKaldir={masrafKaldir}
+            />
           )}
 
           {hareketSayisi === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-4">Açık hareket yok.</p>
+            <p className="py-4 text-center text-sm text-muted-foreground">Açık hareket yok.</p>
           )}
         </CardContent>
       </Card>
@@ -192,10 +140,10 @@ export default function OperasyonKasaSayfasi() {
         <DialogContent>
           <DialogHeader><DialogTitle>Günü Kapat</DialogTitle></DialogHeader>
           <div className="space-y-1 text-sm">
-            <div className="flex justify-between"><span>Açık avans:</span><span className="text-green-600">+{formatPara(acikAvansToplam, "TL")}</span></div>
-            <div className="flex justify-between"><span>Açık masraf:</span><span className="text-destructive">−{formatPara(acikMasrafToplam, "TL")}</span></div>
-            <div className="flex justify-between font-semibold border-t pt-1"><span>Kapanış bakiyesi:</span><span>{formatPara(ozet?.bakiye ?? 0, "TL")}</span></div>
-            <p className="text-xs text-muted-foreground pt-2">Kapatınca bu hareketler kilitlenir ve rapor muhasebeye iletilir. Bakiye ertesi güne devreder.</p>
+            <div className="flex justify-between"><span>Gelen avans:</span><span className="tabular-nums text-emerald-600">+{formatPara(acikAvansToplam, "₺")}</span></div>
+            <div className="flex justify-between"><span>Güncel masraf:</span><span className="tabular-nums text-rose-600">−{formatPara(acikMasrafToplam, "₺")}</span></div>
+            <div className="flex justify-between border-t pt-1 font-semibold"><span>Kapanış bakiyesi:</span><span className="tabular-nums">{formatPara(ozet?.bakiye ?? 0, "₺")}</span></div>
+            <p className="pt-2 text-xs text-muted-foreground">Kapatınca bu hareketler kilitlenir ve rapor muhasebeye iletilir. Bakiye ertesi güne devreder.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setKapatDialog(false)}>Vazgeç</Button>
