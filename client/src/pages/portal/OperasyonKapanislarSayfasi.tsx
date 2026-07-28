@@ -4,7 +4,7 @@ import type { Beyanname, OperasyonAvans, OperasyonGunKapanis, OperasyonMasraf } 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight, ChevronDown } from "lucide-react";
-import { formatTarih, formatTarihKisa, formatPara } from "./portalUtils";
+import { formatTarih, formatPara } from "./portalUtils";
 import { masraflariGrupla } from "./masrafGruplama";
 import { GunKutusu } from "./kasaUI";
 import { MasrafTablosu } from "./MasrafTablosu";
@@ -64,24 +64,10 @@ export default function OperasyonKapanislarSayfasi() {
 
             {gunAcik && (
               <CardContent className="space-y-4 border-t pt-4">
-                {k.avanslar.length > 0 && (
-                  <div className="space-y-1.5">
-                    {k.avanslar.map((a) => (
-                      <div key={a.id} className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm dark:border-emerald-900 dark:bg-emerald-950/40" data-testid={`row-avans-${a.id}`}>
-                        <div className="text-emerald-700 dark:text-emerald-400">
-                          <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
-                          {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
-                        </div>
-                        <div className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">+{formatPara(a.tutar, "₺")}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {(gunGruplama.gruplar.length > 0 || gunGruplama.ofisMasraflar.length > 0) ? (
-                  <MasrafTablosu gruplarSonucu={gunGruplama} acikSet={kapaliGruplar} onToggle={grupAcKapa} varsayilanAcik={true} anahtarOnEk={k.id} />
+                {(k.avanslar.length > 0 || gunGruplama.gruplar.length > 0 || gunGruplama.ofisMasraflar.length > 0) ? (
+                  <MasrafTablosu gruplarSonucu={gunGruplama} avanslar={k.avanslar} acikSet={kapaliGruplar} onToggle={grupAcKapa} varsayilanAcik={true} anahtarOnEk={k.id} />
                 ) : (
-                  <div className="text-xs text-muted-foreground">Masraf yok.</div>
+                  <div className="text-xs text-muted-foreground">Hareket yok.</div>
                 )}
               </CardContent>
             )}

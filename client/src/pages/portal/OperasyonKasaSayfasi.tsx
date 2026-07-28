@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatTarihKisa, formatPara } from "./portalUtils";
+import { formatPara } from "./portalUtils";
 import YeniOdemeModal from "./YeniOdemeModal";
 import { masraflariGrupla } from "./masrafGruplama";
 import { KpiKart, GunKutusu, SonDevirKart, IK } from "./kasaUI";
@@ -103,24 +103,10 @@ export default function OperasyonKasaSayfasi() {
       <Card>
         <CardHeader><CardTitle>Açık Hareketler</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {(ozet?.avanslar.length ?? 0) > 0 && (
-            <div className="space-y-1.5">
-              <div className="text-xs font-medium text-muted-foreground">Gelen Avanslar</div>
-              {(ozet?.avanslar ?? []).map((a) => (
-                <div key={a.id} className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm dark:border-emerald-900 dark:bg-emerald-950/40" data-testid={`row-avans-${a.id}`}>
-                  <div className="text-emerald-700 dark:text-emerald-400">
-                    <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
-                    {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
-                  </div>
-                  <div className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">+{formatPara(a.tutar, "₺")}</div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {(gruplar.length > 0 || ofisMasraflar.length > 0) && (
+          {((ozet?.avanslar.length ?? 0) > 0 || gruplar.length > 0 || ofisMasraflar.length > 0) && (
             <MasrafTablosu
               gruplarSonucu={{ gruplar, ofisMasraflar, ofisToplam }}
+              avanslar={ozet?.avanslar ?? []}
               acikSet={acikGruplar}
               onToggle={grupAcKapa}
               varsayilanAcik={false}

@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Download, Trash2 } from "lucide-react";
-import type { OperasyonMasraf } from "@shared/schema";
+import type { OperasyonAvans, OperasyonMasraf } from "@shared/schema";
 import type { GruplamaSonucu } from "./masrafGruplama";
 import { formatPara, formatTarihKisa } from "./portalUtils";
 import { RejimRozeti, REJIM_STIL, rejimAnahtar } from "./kasaUI";
@@ -14,7 +14,7 @@ function bas2(s: string | null | undefined) {
 const rozetSayi = "rounded-full border bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground";
 
 export function MasrafTablosu({
-  gruplarSonucu, acikSet, onToggle, varsayilanAcik = false, onKaldir, anahtarOnEk = "",
+  gruplarSonucu, acikSet, onToggle, varsayilanAcik = false, onKaldir, anahtarOnEk = "", avanslar, onAvansKaldir,
 }: {
   gruplarSonucu: GruplamaSonucu;
   acikSet: Set<string>;
@@ -22,6 +22,8 @@ export function MasrafTablosu({
   varsayilanAcik?: boolean; // false: Açık Hareketler (sette-olan-açık) · true: Kapanmış gün içi (sette-olan-kapalı, negatif)
   onKaldir?: (masrafId: string) => void; // verilirse alt kalemlerde "Kaldır" ikonu
   anahtarOnEk?: string; // kapanış içi benzersizlik (ör. k.id)
+  avanslar?: OperasyonAvans[]; // verilirse tablonun başında yeşil "Gelen Avans" satırları
+  onAvansKaldir?: (avansId: string) => void; // yalnız açık avans (muhasebe); kapanmışta gizli
 }) {
   const { gruplar, ofisMasraflar, ofisToplam } = gruplarSonucu;
   const acikMi = (a: string) => (varsayilanAcik ? !acikSet.has(a) : acikSet.has(a));
@@ -52,6 +54,22 @@ export function MasrafTablosu({
       <div className={GRID + " border-b bg-muted/40 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"}>
         <span>Tarih</span><span>Dosya No</span><span>Tür</span><span>Beyanname No</span><span>Firma</span><span className="text-right">Tutar</span><span />
       </div>
+
+      {(avanslar ?? []).map((a) => (
+        <div key={a.id} className={GRID + " border-b bg-emerald-50/70 px-5 py-2.5 dark:bg-emerald-950/20"} data-testid={`row-avans-${a.id}`}>
+          <span className="col-start-1 text-sm font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{formatTarihKisa(a.tarih)}</span>
+          <span className="col-start-2 col-span-4 flex items-center gap-2 text-sm">
+            <span className="inline-block rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">Gelen Avans</span>
+            {a.belgeDosya && <a className="text-xs text-emerald-700 underline dark:text-emerald-400" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a>}
+          </span>
+          <span className="col-start-6 text-right text-sm font-bold tabular-nums text-emerald-600">+{formatPara(a.tutar, "₺")}</span>
+          <span className="col-start-7 flex items-center justify-end">
+            {onAvansKaldir && !a.kapanisId && (
+              <button type="button" className="flex h-6 w-6 items-center justify-center rounded-md border text-muted-foreground hover:border-rose-300 hover:text-rose-600" title="Kaldır" onClick={() => onAvansKaldir(a.id)} data-testid={`button-avans-kaldir-${a.id}`}><Trash2 className="h-3.5 w-3.5" /></button>
+            )}
+          </span>
+        </div>
+      ))}
 
       {gruplar.map((g) => {
         const anahtar = anahtarOnEk ? `${anahtarOnEk}-${g.beyannameId}` : g.beyannameId;

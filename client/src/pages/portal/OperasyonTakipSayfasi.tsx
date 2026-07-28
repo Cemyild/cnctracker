@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatTarih, formatTarihKisa, formatPara } from "./portalUtils";
+import { formatTarih, formatPara } from "./portalUtils";
 import { masraflariGrupla } from "./masrafGruplama";
 import { KpiKart, GunKutusu, SonDevirKart, IK } from "./kasaUI";
 import { MasrafTablosu } from "./MasrafTablosu";
@@ -142,20 +142,6 @@ export default function OperasyonTakipSayfasi() {
     } catch (err: any) { toast({ title: "Hata", description: err.message, variant: "destructive" }); }
   };
 
-  // Gelen avans satırı — açık hareketlerde silinebilir (muhasebe, !kapanisId), kapanmış günde kilitli.
-  const avansSatiri = (a: OperasyonAvans, silinebilir: boolean) => (
-    <div key={a.id} className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm dark:border-emerald-900 dark:bg-emerald-950/40" data-testid={`row-avans-${a.id}`}>
-      <div className="text-emerald-700 dark:text-emerald-400">
-        <span className="mr-1.5 font-normal text-muted-foreground">{formatTarihKisa(a.tarih)}</span><span className="font-medium">Gelen Avans</span>
-        {a.belgeDosya && <> · <a className="underline" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a></>}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">+{formatPara(a.tutar, "₺")}</span>
-        {silinebilir && !a.kapanisId && <Button variant="ghost" size="sm" onClick={() => avansKaldir(a.id)} data-testid={`button-avans-kaldir-${a.id}`}>Kaldır</Button>}
-      </div>
-    </div>
-  );
-
   const acikAvansT = (detay?.acik.avanslar ?? []).reduce((s, a) => s + parseFloat(a.tutar), 0);
   const acikMasrafT = (detay?.acik.masraflar ?? []).reduce((s, m) => s + parseFloat(m.tutar), 0);
   const sonDevir = detay?.kapanislar[0] ? { gunTarihi: detay.kapanislar[0].gunTarihi, kapanisBakiye: detay.kapanislar[0].kapanisBakiye } : null;
@@ -178,7 +164,7 @@ export default function OperasyonTakipSayfasi() {
           {gruplar.map((g) => (
             <div key={g.sube} className="space-y-2" data-testid={`grup-sube-${g.sube}`}>
               <div className="flex items-center justify-between border-b pb-1">
-                <span className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{g.sube}</span>
+                <Badge className="bg-indigo-100 text-xs font-semibold uppercase tracking-wide text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:text-indigo-300">{g.sube}</Badge>
                 <span className="text-sm font-bold tabular-nums" data-testid={`grup-sube-toplam-${g.sube}`}>{formatPara(g.toplam, "₺")}</span>
               </div>
               {g.satirlar.map((s) => (
@@ -224,11 +210,8 @@ export default function OperasyonTakipSayfasi() {
                 <div className="space-y-3">
                   <div className="text-sm font-medium">Açık Hareketler</div>
                   {hicYok && <p className="text-xs text-muted-foreground">Açık hareket yok.</p>}
-                  {detay.acik.avanslar.length > 0 && (
-                    <div className="space-y-1.5">{detay.acik.avanslar.map((a) => avansSatiri(a, true))}</div>
-                  )}
-                  {(acikGruplama.gruplar.length > 0 || acikGruplama.ofisMasraflar.length > 0) && (
-                    <MasrafTablosu gruplarSonucu={acikGruplama} acikSet={acikAcikGruplar} onToggle={acikGrupAcKapa} varsayilanAcik={false} />
+                  {(detay.acik.avanslar.length > 0 || acikGruplama.gruplar.length > 0 || acikGruplama.ofisMasraflar.length > 0) && (
+                    <MasrafTablosu gruplarSonucu={acikGruplama} avanslar={detay.acik.avanslar} onAvansKaldir={avansKaldir} acikSet={acikAcikGruplar} onToggle={acikGrupAcKapa} varsayilanAcik={false} />
                   )}
                 </div>
               );
@@ -265,11 +248,10 @@ export default function OperasyonTakipSayfasi() {
 
                     {gunAcik && (
                       <div className="space-y-3 border-t p-4">
-                        {k.avanslar.length > 0 && <div className="space-y-1.5">{k.avanslar.map((a) => avansSatiri(a, false))}</div>}
-                        {(gunGruplama.gruplar.length > 0 || gunGruplama.ofisMasraflar.length > 0) ? (
-                          <MasrafTablosu gruplarSonucu={gunGruplama} acikSet={kapaliKapanisGruplar} onToggle={kapanisGrupAcKapa} varsayilanAcik={true} anahtarOnEk={k.id} />
+                        {(k.avanslar.length > 0 || gunGruplama.gruplar.length > 0 || gunGruplama.ofisMasraflar.length > 0) ? (
+                          <MasrafTablosu gruplarSonucu={gunGruplama} avanslar={k.avanslar} acikSet={kapaliKapanisGruplar} onToggle={kapanisGrupAcKapa} varsayilanAcik={true} anahtarOnEk={k.id} />
                         ) : (
-                          <div className="text-xs text-muted-foreground">Masraf yok.</div>
+                          <div className="text-xs text-muted-foreground">Hareket yok.</div>
                         )}
                       </div>
                     )}
