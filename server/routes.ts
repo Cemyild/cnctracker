@@ -5395,7 +5395,8 @@ export async function registerRoutes(
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
       const bakiye = await storage.getOperasyonBakiye(ben.id);
       const { avanslar, masraflar } = await storage.getAcikHareketler(ben.id);
-      res.json({ bakiye, avanslar, masraflar });
+      const sonDevir = await storage.getSonKapanis(ben.id);
+      res.json({ bakiye, avanslar, masraflar, sonDevir });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

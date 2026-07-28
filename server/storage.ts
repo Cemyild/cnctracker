@@ -419,6 +419,7 @@ export interface IStorage {
   // Operasyon Kasası (Şube Masraf)
   getOperasyonKullanicilar(): Promise<PortalKullanici[]>;
   getOperasyonBakiye(operasyonId: string): Promise<number>;
+  getSonKapanis(operasyonId: string): Promise<{ gunTarihi: string; kapanisBakiye: string } | null>;
   avansYukle(d: { operasyonId: string; tutar: number; aciklama: string | null; tarih: string; gonderenId: string; belgeDosya: string | null; belgeAdi: string | null }): Promise<OperasyonAvans>;
   masrafKaydet(d: { operasyonId: string; beyannameId: string | null; dosyaYok: boolean; masrafTuru: string | null; sube: string | null; tutar: number; alacakli: string; iban: string | null; aciklama: string | null; tarih: string; belgeDosya: string | null; belgeAdi: string | null }): Promise<OperasyonMasraf>;
   getOperasyonMasraf(id: string): Promise<OperasyonMasraf | undefined>;
@@ -3984,6 +3985,15 @@ export class DatabaseStorage implements IStorage {
     await db.update(operasyonMasraflar).set({ kapanisId: kapanis.id })
       .where(and(eq(operasyonMasraflar.operasyonId, operasyonId), sql`${operasyonMasraflar.kapanisId} IS NULL`));
     return kapanis;
+  }
+
+  async getSonKapanis(operasyonId: string): Promise<{ gunTarihi: string; kapanisBakiye: string } | null> {
+    const [k] = await db.select({ gunTarihi: operasyonGunKapanis.gunTarihi, kapanisBakiye: operasyonGunKapanis.kapanisBakiye })
+      .from(operasyonGunKapanis)
+      .where(eq(operasyonGunKapanis.operasyonId, operasyonId))
+      .orderBy(desc(operasyonGunKapanis.kapanisZamani))
+      .limit(1);
+    return k ?? null;
   }
 
   async getKapanislar(operasyonId: string): Promise<Array<OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }>> {
