@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -21,7 +20,27 @@ import {
   type TalepDetay, formatTarih, formatPara, gunFarki,
   IADE_ETIKET,
 } from "./portalUtils";
+import { SayfaBasligi } from "./kasaUI";
 import BelgeLinkleri from "./BelgeLinkleri";
+
+const TH = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
+
+function bas2(s: string | null | undefined) {
+  return (s ?? "?").trim().slice(0, 2).toUpperCase();
+}
+
+function IadeRozeti({ talep }: { talep: TalepDetay }) {
+  if (talep.durum !== "odendi") {
+    return <Badge variant="secondary">Ödeme Bekliyor</Badge>;
+  }
+  if (!talep.iadeDurumu) {
+    return <Badge variant="outline">—</Badge>;
+  }
+  const stil = talep.iadeDurumu === "iade_edildi"
+    ? "border-transparent bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+    : "border-transparent bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
+  return <Badge className={stil}>{IADE_ETIKET[talep.iadeDurumu] ?? talep.iadeDurumu}</Badge>;
+}
 
 function IadeDialog({
   talep, kapat,
@@ -68,7 +87,7 @@ function IadeDialog({
         {talep && (
           <div className="space-y-4">
             <div className="text-sm text-muted-foreground">
-              {talep.beyanname?.dosyaNo ?? "—"} — {formatPara(talep.tutar, talep.paraBirimi)} — {talep.alacakli}
+              {talep.beyanname?.dosyaNo ?? "—"} — <span className="font-semibold tabular-nums text-rose-600">{formatPara(talep.tutar, talep.paraBirimi)}</span> — {talep.alacakli}
             </div>
             <div className="space-y-2">
               <Label>İade Durumu</Label>
@@ -129,108 +148,114 @@ export default function DepoOdemeleriSayfasi() {
   });
   const [iadeTalebi, setIadeTalebi] = useState<TalepDetay | null>(null);
   const depoTalepleri = talepler.filter((t) => t.odemeTipi === "depo_teminat");
+  const bekleyenIadeSayisi = depoTalepleri.filter(
+    (t) => t.durum === "odendi" && t.iadeDurumu === "beklemede",
+  ).length;
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Depo Teminatları — İade Takibi</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Dosya No</TableHead>
-                <TableHead>Konşimento No</TableHead>
-                <TableHead>Müşteri</TableHead>
-                <TableHead>Temsilci</TableHead>
-                <TableHead>Tutar</TableHead>
-                <TableHead>Ödeme Tarihi</TableHead>
-                <TableHead>Kaç Gündür Açık</TableHead>
-                <TableHead>İade Durumu</TableHead>
-                <TableHead>İade Tutarı</TableHead>
-                <TableHead>Belgeler</TableHead>
-                <TableHead></TableHead>
+      <SayfaBasligi
+        baslik="Depo Teminatları"
+        alt={`İade takibi${bekleyenIadeSayisi > 0 ? ` · ${bekleyenIadeSayisi} iade bekliyor` : ""}`}
+      />
+
+      <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/40 hover:bg-muted/40">
+              <TableHead className={TH}>Dosya No</TableHead>
+              <TableHead className={TH}>Konşimento No</TableHead>
+              <TableHead className={TH}>Müşteri</TableHead>
+              <TableHead className={TH}>Temsilci</TableHead>
+              <TableHead className={`text-right ${TH}`}>Tutar</TableHead>
+              <TableHead className={TH}>Ödeme Tarihi</TableHead>
+              <TableHead className={TH}>Kaç Gündür Açık</TableHead>
+              <TableHead className={TH}>İade Durumu</TableHead>
+              <TableHead className={TH}>İade Tutarı</TableHead>
+              <TableHead className={TH}>Belgeler</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {depoTalepleri.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={11} className="text-center text-muted-foreground">
+                  Depo teminatı kaydı yok
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {depoTalepleri.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={11} className="text-center text-muted-foreground">
-                    Depo teminatı kaydı yok
+            )}
+            {depoTalepleri.map((t) => {
+              const acikGun =
+                t.durum === "odendi" && t.iadeDurumu === "beklemede"
+                  ? gunFarki(t.odemeTarihi)
+                  : null;
+              return (
+                <TableRow key={t.id} className="hover:bg-muted/30" data-testid={`row-depo-${t.id}`}>
+                  <TableCell className="font-medium tabular-nums">
+                    {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
+                  </TableCell>
+                  <TableCell>
+                    {t.konsimentoNo ? (
+                      <div>
+                        <div className="text-sm tabular-nums">{t.konsimentoNo}</div>
+                        {t.tasiyici && (
+                          <div className="text-xs text-muted-foreground">{t.tasiyici}</div>
+                        )}
+                      </div>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-[11px] font-bold text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
+                        {bas2(t.beyanname?.alici)}
+                      </span>
+                      <span className="max-w-36 truncate font-medium" title={t.beyanname?.alici ?? ""}>{t.beyanname?.alici ?? "—"}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>{t.talepEdenAd}</TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums text-rose-600">
+                    {formatPara(t.tutar, t.paraBirimi)}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{formatTarih(t.odemeTarihi)}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {acikGun == null ? "—" : (
+                      <span className={acikGun > 30 ? "font-semibold text-rose-600" : ""}>
+                        {acikGun} gün
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <IadeRozeti talep={t} />
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {t.iadeTutari ? formatPara(t.iadeTutari, t.paraBirimi) : "—"}
+                    {t.iadeNotu && (
+                      <div className="text-xs text-muted-foreground max-w-36 truncate">
+                        {t.iadeNotu}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell><BelgeLinkleri talep={t} /></TableCell>
+                  <TableCell>
+                    {t.durum === "odendi" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setIadeTalebi(t)}
+                        data-testid={`button-iade-${t.id}`}
+                      >
+                        İade Kaydı
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
-              )}
-              {depoTalepleri.map((t) => {
-                const acikGun =
-                  t.durum === "odendi" && t.iadeDurumu === "beklemede"
-                    ? gunFarki(t.odemeTarihi)
-                    : null;
-                return (
-                  <TableRow key={t.id} data-testid={`row-depo-${t.id}`}>
-                    <TableCell>
-                      {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
-                    </TableCell>
-                    <TableCell>
-                      {t.konsimentoNo ? (
-                        <div>
-                          <div className="text-sm">{t.konsimentoNo}</div>
-                          {t.tasiyici && (
-                            <div className="text-xs text-muted-foreground">{t.tasiyici}</div>
-                          )}
-                        </div>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-44 truncate">{t.beyanname?.alici ?? "—"}</TableCell>
-                    <TableCell>{t.talepEdenAd}</TableCell>
-                    <TableCell>{formatPara(t.tutar, t.paraBirimi)}</TableCell>
-                    <TableCell>{formatTarih(t.odemeTarihi)}</TableCell>
-                    <TableCell>
-                      {acikGun == null ? "—" : (
-                        <span className={acikGun > 30 ? "text-red-600 font-medium" : ""}>
-                          {acikGun} gün
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {t.durum !== "odendi" ? (
-                        <Badge variant="secondary">Ödeme Bekliyor</Badge>
-                      ) : (
-                        <Badge variant={t.iadeDurumu === "iade_edildi" ? "default" : "outline"}>
-                          {IADE_ETIKET[t.iadeDurumu ?? ""] ?? "—"}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {t.iadeTutari ? formatPara(t.iadeTutari, t.paraBirimi) : "—"}
-                      {t.iadeNotu && (
-                        <div className="text-xs text-muted-foreground max-w-36 truncate">
-                          {t.iadeNotu}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell><BelgeLinkleri talep={t} /></TableCell>
-                    <TableCell>
-                      {t.durum === "odendi" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setIadeTalebi(t)}
-                          data-testid={`button-iade-${t.id}`}
-                        >
-                          İade Kaydı
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
 
       <IadeDialog
         key={iadeTalebi?.id ?? "iade-kapali"}
