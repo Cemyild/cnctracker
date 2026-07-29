@@ -8,6 +8,8 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import express from "express";
+import { pdfMetniCikar, faturaAnalizEt } from "./nakliye/faturaAnaliz";
+import { faturaDogrula } from "./nakliye/dogrulama";
 
 const ruhsatStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -95,6 +97,23 @@ const egitimStorage = multer.diskStorage({
   },
 });
 const uploadEgitim = multer({ storage: egitimStorage });
+
+// Nakliye e-Arşiv fatura PDF'leri. Geçici adla kaydedilir; analiz sonrası
+// fatura numarasıyla yeniden adlandırılır (fatura no analizden önce bilinmiyor).
+const nakliyeFaturaStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = "uploads/nakliye";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, _file, cb) => {
+    cb(null, `gecici-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pdf`);
+  },
+});
+const uploadNakliyeFatura = multer({
+  storage: nakliyeFaturaStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
 
 // Bordro arşiv: uploads/bordro/{yil}/{ay-sayi}/{filename}
 // ay/yıl req.body'den geldiği için route handler'ında okunuyor; multer'a
@@ -824,6 +843,86 @@ export async function registerRoutes(
     } catch (e) {
       console.error("Firma timeline hatası:", e);
       res.status(500).json({ error: "Timeline alınamadı" });
+    }
+  });
+
+  // Nakliye e-Arşiv faturası yükleme — VPS'teki gmail_poller.py buraya
+  // multipart POST eder. Ayrıştırma (Claude) ve doğrulama burada yapılır;
+  // poller yalnızca PDF taşır.
+  app.post("/api/nakliye/fatura-yukle", uploadNakliyeFatura.single("file"), async (req, res) => {
+    const gecici = req.file?.path;
+    try {
+      if (!req.file) return res.status(400).json({ error: "Dosya yüklenmedi" });
+
+      const buf = fs.readFileSync(req.file.path);
+      const hamMetin = await pdfMetniCikar(buf);
+      const alanlar = await faturaAnalizEt(buf);
+      const dogrulama = faturaDogrula(alanlar, hamMetin);
+
+      if (!alanlar.fatura_no) {
+        fs.unlinkSync(req.file.path);
+        return res.status(422).json({
+          error: "Fatura numarası okunamadı",
+          hatalar: dogrulama.hatalar,
+        });
+      }
+
+      // Dedup katman 1: aynı fatura ikinci kez işlenmez
+      const mevcut = await storage.getNakliyeFaturasiByNo(alanlar.fatura_no);
+      if (mevcut) {
+        fs.unlinkSync(req.file.path);
+        return res.json({
+          success: true, already_exists: true, id: mevcut.id, faturaNo: mevcut.faturaNo,
+        });
+      }
+
+      // PDF'i fatura numarasıyla yeniden adlandır
+      const guvenliAd = alanlar.fatura_no.replace(/[^A-Za-z0-9._-]/g, "_");
+      const kalici = path.join("uploads", "nakliye", `${guvenliAd}.pdf`);
+      fs.renameSync(req.file.path, kalici);
+
+      // e-Arşiv PDF'lerinde ETTN metinde geçer; Paraşüt kaydıyla kesin
+      // eşleştirme için yakalanır (yoksa null).
+      const ettnEslesme = hamMetin.match(
+        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
+      );
+
+      const kayit = await storage.insertNakliyeFaturasi({
+        kaynak: "earsiv",
+        faturaNo: alanlar.fatura_no,
+        faturaTarihi: alanlar.fatura_tarihi,
+        tedarikciUnvan: alanlar.tedarikci_unvan,
+        tedarikciVkn: alanlar.tedarikci_vkn,
+        musteriFirmaAdi: alanlar.musteri_firma_adi,
+        paraBirimi: alanlar.para_birimi || "TRY",
+        kur: "1",
+        matrah: alanlar.matrah !== null ? String(alanlar.matrah) : null,
+        kdvOrani: alanlar.kdv_orani,
+        kdvTutari: alanlar.kdv_tutari !== null ? String(alanlar.kdv_tutari) : null,
+        tevkifatTutari: alanlar.tevkifat_tutari !== null ? String(alanlar.tevkifat_tutari) : null,
+        odenecekTutar: alanlar.odenecek_tutar !== null ? String(alanlar.odenecek_tutar) : null,
+        konteynerler: alanlar.konteynerler.join(", "),
+        aciklama: alanlar.aciklama,
+        pdfYolu: `uploads/nakliye/${guvenliAd}.pdf`,
+        parasutEttn: ettnEslesme ? ettnEslesme[0].toLowerCase() : null,
+        hamMetin,
+        llmJson: JSON.stringify(alanlar),
+        durum: dogrulama.gecerli ? "ayristirildi" : "dogrulama_hatasi",
+        hataMesaji: dogrulama.gecerli ? null : dogrulama.hatalar.join(" | "),
+      });
+
+      res.json({
+        success: true,
+        id: kayit.id,
+        faturaNo: kayit.faturaNo,
+        durum: kayit.durum,
+        hatalar: dogrulama.hatalar,
+      });
+    } catch (error) {
+      if (gecici && fs.existsSync(gecici)) fs.unlinkSync(gecici);
+      console.error("Nakliye fatura yükleme hatası:", error);
+      const mesaj = error instanceof Error ? error.message : "Bilinmeyen hata";
+      res.status(500).json({ error: `Fatura işlenemedi: ${mesaj}` });
     }
   });
 
