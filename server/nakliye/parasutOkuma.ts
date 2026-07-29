@@ -148,7 +148,21 @@ export async function parasuttanCek(
       // aksi halde Paraşüt'ten çekilen e-faturalar ekranda görünmez.
       const ekranKaydi = (await storage.getNakliyeVerileri())
         .find((v) => v.faturaNo === faturaNo);
-      if (!ekranKaydi) {
+      if (ekranKaydi) {
+        // Eski poller döneminden kalan kayıtlarda PDF ve tedarikçi bilgisi yok.
+        // Paraşüt'ten indirdiğimiz PDF'i ve cari bilgisini geriye tamamla.
+        const eksikler: Record<string, unknown> = {};
+        if (!ekranKaydi.pdfYolu && pdfYolu) eksikler.pdfYolu = pdfYolu;
+        if (!ekranKaydi.tedarikciUnvan && supplier?.attributes?.name) {
+          eksikler.tedarikciUnvan = supplier.attributes.name;
+        }
+        if (!ekranKaydi.tedarikciVkn && supplier?.attributes?.tax_number) {
+          eksikler.tedarikciVkn = supplier.attributes.tax_number;
+        }
+        if (Object.keys(eksikler).length > 0) {
+          await storage.updateNakliyeVerisi(ekranKaydi.id, eksikler as any);
+        }
+      } else {
         await storage.insertNakliyeVerileri([{
           faturaNo,
           faturaTarihi: a.issue_date || null,
