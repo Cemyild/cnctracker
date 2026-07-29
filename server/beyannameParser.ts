@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { type InsertBeyanname } from "@shared/schema";
+import { konteynerMetni } from "@shared/konteyner";
 
 // Her iki ayristirici da bunu doner. `uyarilar` YUKLEMEYI BLOKLAMAZ — cagiran uc
 // bunlari otomatik_yukleme_log mesajina ekler. Amac: sessizce eksik yazilan bir
@@ -28,6 +29,16 @@ const BEKLENEN_BASLIKLAR: Record<string, string> = {
 // ama artık SESSİZ değil, uyarı olarak dönülür.
 const REJIM_KODU_SUTUNU = "AU";
 const REJIM_KODU_BASLIGI = "REJİM";
+
+// Konteyner numarası taşıyan sütunlar. İKİSİ DE okunur: ölçümde aynı satırlarda
+// aynı değeri taşıyorlar, ama operatör hangisine yazarsa yazsın yakalanması için
+// yedekli okunuyor. (CS "KONTEYNER" sütunu ölçülen dosyalarda tamamen boştu.)
+// REJİM KODU ile aynı gerekçe: katı doğrulamaya dahil DEĞİL — tamamlayıcı alan,
+// eksikliği çalışan bir içe aktarmayı durdurmamalı; ama sessiz de kalmaz.
+const KONTEYNER_SUTUNLARI: Record<string, string> = {
+  R: "HOUSE NO",
+  BV: "KONŞİMENTO NO",
+};
 
 // ---------------------------------------------------------------- IHRACAT
 
@@ -140,6 +151,23 @@ export function parseBeyannameWorkbook(buffer: Buffer): AyristirmaSonucu {
     );
   }
 
+  // Konteyner sütunları: başlığı tutanları oku, tutmayanı hiç okuma (yanlış
+  // sütundan konteyner "uydurmak" yanlış dosya eşleşmesi demektir) ve uyar.
+  const konteynerIdxler: number[] = [];
+  for (const [harf, baslik] of Object.entries(KONTEYNER_SUTUNLARI)) {
+    const idx = XLSX.utils.decode_col(harf);
+    if (String(baslikSatiri[idx] ?? "").trim() === baslik) {
+      konteynerIdxler.push(idx);
+    } else {
+      uyarilar.push(
+        `konteyner sütunu okunamadı (${harf} başlığı "${baslik}" değil) — bu sütun atlandı`,
+      );
+    }
+  }
+  if (konteynerIdxler.length === 0) {
+    uyarilar.push("hiçbir konteyner sütunu okunamadı — nakliye eşleştirmesi bu yüklemeden beslenemez");
+  }
+
   const col = (harf: string) => XLSX.utils.decode_col(harf);
   const rows: InsertBeyanname[] = [];
   for (let r = baslikIdx + 1; r < grid.length; r++) {
@@ -158,6 +186,7 @@ export function parseBeyannameWorkbook(buffer: Buffer): AyristirmaSonucu {
       fatBedeli: paraMetni(satir[col("M")]),
       doviz: metin(satir[col("N")]),
       kullanici: metin(satir[col("AV")]),
+      konteynerler: konteynerMetni(...konteynerIdxler.map((i) => metin(satir[i]))),
       rejim: "IM",
       rejimKodu: rejimKoduVar ? metin(satir[rejimKoduIdx]) : null,
       kaynak: "excel",

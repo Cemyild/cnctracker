@@ -394,6 +394,7 @@ export interface IStorage {
   updatePortalKullanici(id: string, k: Partial<InsertPortalKullanici>): Promise<PortalKullanici | undefined>;
   upsertBeyannameler(rows: InsertBeyanname[]): Promise<{ eklenen: number; guncellenen: number }>;
   getBeyannameler(kullanici?: string): Promise<Beyanname[]>;
+  getBeyannameKonteynerVerileri(): Promise<Beyanname[]>;
   getBeyanname(id: string): Promise<Beyanname | undefined>;
   createManuelTransit(girdi: { beyanNo: string; alici: string; gumrukIdaresi: string | null }): Promise<Beyanname>;
   getEslesmeyenBeyannameKullanicilari(): Promise<{ kullanici: string; adet: number }[]>;
@@ -3478,6 +3479,9 @@ export class DatabaseStorage implements IStorage {
           kullanici: sql`excluded.kullanici`,
           // Basligi bozuk bir dosya, mevcut DOLU rejim kodlarini NULL'a EZMESIN.
           rejimKodu: sql`coalesce(excluded.rejim_kodu, ${beyannameler.rejimKodu})`,
+          // Ayni gerekce: konteyner sutunu okunamayan bir yukleme, daha once
+          // dogru okunmus konteyner numaralarini silmesin.
+          konteynerler: sql`coalesce(excluded.konteynerler, ${beyannameler.konteynerler})`,
           sonGuncelleme: sql`now()`,
         },
       });
@@ -3499,6 +3503,16 @@ export class DatabaseStorage implements IStorage {
         .orderBy(siralama);
     }
     return db.select().from(beyannameler).orderBy(siralama);
+  }
+
+  // Nakliye eşleştirmesi için: yalnız konteyner numarası çıkarılabilmiş beyannameler.
+  // Gümrük tarafındaki getGumrukHouseNoVerileri ile aynı gerekçe — DB-side WHERE
+  // ile transfer küçültülür (tablonun ~%12'si konteyner taşıyor).
+  async getBeyannameKonteynerVerileri(): Promise<Beyanname[]> {
+    return await db
+      .select()
+      .from(beyannameler)
+      .where(isNotNull(beyannameler.konteynerler));
   }
 
   async getBeyanname(id: string): Promise<Beyanname | undefined> {

@@ -993,6 +993,10 @@ export const beyannameler = pgTable("beyannameler", {
   fatBedeli: decimal("fat_bedeli", { precision: 18, scale: 2 }),
   doviz: text("doviz"),
   kullanici: text("kullanici"), // AV sütunu — temsilci filtre alanı
+  // Nakliye eşleştirmesi için: R (HOUSE NO) + BV (KONŞİMENTO NO) sütunlarından
+  // çıkarılan benzersiz konteyner numaraları, virgülle ayrılmış.
+  // Örn. "MRKU7242360, MSKU1234567". Hiç yoksa null.
+  konteynerler: text("konteynerler"),
   // KANAL: hangi rapordan/uctan geldi. Gumruk rejim kodu DEGIL.
   // DEFAULT yalniz mevcut satirlari doldurmak icin; ice aktarma her zaman acikca yazar.
   rejim: text("rejim").notNull().default("IM"), // 'IM' | 'EX' | 'TR'

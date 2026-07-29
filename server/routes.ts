@@ -156,6 +156,7 @@ function fixUploadFilename(name: string): string {
 }
 
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar } from "@shared/schema";
+import { konteynerAnahtarlari } from "@shared/konteyner";
 import { createHash, timingSafeEqual } from "crypto";
 import { z } from "zod";
 import {
@@ -2933,48 +2934,128 @@ export async function registerRoutes(
       const nakliyeVerileri = await storage.getNakliyeVerileri();
       let matchCount = 0;
 
-      // Sadece houseNo'su dolu gümrük kayıtları (nakliye eşleştirme için
-      // tek lazım olan bunlar). DB-side WHERE ile transfer optimize.
-      const gumrukVerileri = await storage.getGumrukHouseNoVerileri();
-      
-      // Hızlı arama için House No tabanlı Map (Multi-Value)
-      // Key: Normalized Container No -> Value: Array of Records
-      const gumrukMap = new Map<string, InsertGumrukVerisi[]>();
-
-      // Normalization Helper
-      const normalizeContainer = (val: string) => {
-          if (!val) return "";
-          return val.replace(/[^A-Z0-9]/g, '').toUpperCase();
+      // ---------------------------------------------------------
+      // 0. EŞLEŞME HAVUZU — İKİ KAYNAK
+      // ---------------------------------------------------------
+      // (a) gumruk_verileri  → Gümrük ▸ Satışlar yüklemesi, "HOUSE NO" sütunu
+      // (b) beyannameler     → Ödemeler ▸ Beyanname yüklemesi, "HOUSE NO" + "KONŞİMENTO NO"
+      // Eskiden yalnız (a) taranıyordu; ölçümde o listelerin ancak %2-3'ünde
+      // kullanılabilir konteyner numarası vardı, dolayısıyla eşleşmelerin
+      // büyük kısmı hiç kurulamıyordu.
+      type EslesmeAdayi = {
+        kaynak: "gumruk" | "beyanname";
+        dosyaNo: string | null;
+        firmaUnvan: string | null;
+        gumrukAdi: string | null;
+        dovizKiymeti: string | null;
+        doviz: string | null;
+        tescilNo: string | null;
+        tescilTarihi: string | null;  // ham; görüntü biçimi aşağıda normalize edilir
+        houseNo: string | null;       // eşleşmeyi kuran numara
       };
-      
-      gumrukVerileri.forEach(g => {
-        if (g.houseNo) {
-           const cleanHouse = normalizeContainer(g.houseNo);
-           if (cleanHouse.length > 3) {
-              if (!gumrukMap.has(cleanHouse)) {
-                  gumrukMap.set(cleanHouse, []);
-              }
-              gumrukMap.get(cleanHouse)!.push(g);
-           }
-        }
-      });
 
-      console.log(`Gümrük Map Hazır: ${gumrukMap.size} unique konteyner.`);
+      // Excel seri numarası → "DD.MM.YYYY" (görüntü için). Excel epoch'u 1899-12-30.
+      const formatExcelDate = (serial: string | number): string => {
+        if (!serial) return "";
+        const num = typeof serial === "string" ? parseFloat(serial) : serial;
+        if (isNaN(num)) return serial.toString();
+        const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+        const day = date.getDate().toString().padStart(2, "0");
+        const month = (date.getMonth() + 1).toString().padStart(2, "0");
+        return `${day}.${month}.${date.getFullYear()}`;
+      };
+
+      // "YYYY-MM-DD" → "DD.MM.YYYY". new Date() ile AYRIŞTIRMA yok: timezone
+      // off-by-one tuzağı (commit c897dff) — düz metin işlemi.
+      const ymdToDisplay = (s: string): string => {
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
+      };
+
+      // Tarih karşılaştırması için ortak ayrıştırıcı. Üç biçimi de tanır:
+      //   "YYYY-MM-DD" (beyanname), "DD.MM.YYYY" (gümrük), "46044" (Excel serisi).
+      // Excel serisi ÖNEMLİ: gümrük tescil tarihleri seri sayı olarak gelebiliyor;
+      // eski kod bunu ayrıştıramayıp tarihi yok sayıyordu.
+      const tariheCevir = (ham: string | null | undefined): Date | null => {
+        if (!ham) return null;
+        const s = String(ham).trim();
+        let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+        m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+        if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+        if (/^\d+$/.test(s)) {
+          const gun = parseInt(s, 10);
+          const d = new Date(Date.UTC(1899, 11, 30) + gun * 86400000);
+          const yil = d.getUTCFullYear();
+          if (Number.isFinite(yil) && yil >= 1990 && yil <= 2100) {
+            return new Date(yil, d.getUTCMonth(), d.getUTCDate());
+          }
+        }
+        return null;
+      };
+
+      // Anahtar: normalize konteyner no → adaylar
+      const havuz = new Map<string, EslesmeAdayi[]>();
+      const havuzaEkle = (ham: string | null | undefined, aday: Omit<EslesmeAdayi, "houseNo">) => {
+        for (const anahtar of konteynerAnahtarlari(ham)) {
+          if (!havuz.has(anahtar)) havuz.set(anahtar, []);
+          havuz.get(anahtar)!.push({ ...aday, houseNo: anahtar });
+        }
+      };
+
+      const gumrukVerileri = await storage.getGumrukHouseNoVerileri();
+      for (const g of gumrukVerileri) {
+        havuzaEkle(g.houseNo, {
+          kaynak: "gumruk",
+          dosyaNo: g.dosyaNo,
+          firmaUnvan: g.firmaUnvan,
+          gumrukAdi: g.gumruk,
+          dovizKiymeti: g.dovizKiymeti,
+          doviz: g.doviz,
+          tescilNo: g.tescilNo,
+          tescilTarihi: g.tescilTarihi,
+        });
+      }
+      const gumrukAnahtarSayisi = havuz.size;
+
+      const beyannameVerileri = await storage.getBeyannameKonteynerVerileri();
+      for (const b of beyannameVerileri) {
+        havuzaEkle(b.konteynerler, {
+          kaynak: "beyanname",
+          dosyaNo: b.dosyaNo,
+          // İthalatta ALICI = bizim müşterimiz; gümrük tarafındaki firmaUnvan'ın karşılığı.
+          firmaUnvan: b.alici,
+          gumrukAdi: b.gumrukIdaresi,
+          dovizKiymeti: b.fatBedeli,
+          doviz: b.doviz,
+          tescilNo: b.beyanNo,
+          tescilTarihi: b.beyanTarihi,
+        });
+      }
+
+      console.log(
+        `Eşleşme havuzu hazır: ${havuz.size} benzersiz konteyner ` +
+        `(gümrük listesinden ${gumrukAnahtarSayisi}, beyanname listesiyle birlikte toplam)`,
+      );
+
+      // Fatura tarihi ile tescil/beyan tarihi arasındaki azami fark.
+      // Navlun faturası tescilden epey sonra kesilebildiği için 45 → 90 gün.
+      const AZAMI_GUN_FARKI = 90;
 
       for (const n of nakliyeVerileri) {
         // ---------------------------------------------------------
         // 1. DYNAMIC EXTRACTION & PERSISTENCE (User Request)
         // ---------------------------------------------------------
         let activeKonteynerler = n.konteynerler || "";
-        
+
         // Regex exactly as used in Frontend (Nakliye.tsx) but relaxed for backend processing
         // Removed leading \b to capture "TaşimaHMMU..." cases
         const containerRegex = /([A-Z]{4})\s*(\d{6,7})\b/g;
         const extracted = (n.malHizmet || "").match(containerRegex);
-        
+
         if (extracted && extracted.length > 0) {
              const uniqueExtracted = Array.from(new Set(extracted)).join(", ");
-             
+
              // If DB is empty, or we found MORE/DIFFERENT data, update it.
              // Simple check: if current is empty or doesn't include the new find
              if (!activeKonteynerler || activeKonteynerler.length < uniqueExtracted.length) {
@@ -2993,129 +3074,67 @@ export async function registerRoutes(
         // ---------------------------------------------------------
         // 2. MATCHING LOGIC
         // ---------------------------------------------------------
+        const invoiceDate = tariheCevir(n.faturaTarihi);
 
-        // Fatura Tarihi Parse (DD.MM.YYYY typically from Excel/PDF)
-        let invoiceDate: Date | null = null;
-        if (n.faturaTarihi) {
-            // Try DD.MM.YYYY
-            const parts = n.faturaTarihi.split('.');
-            if (parts.length === 3) {
-                invoiceDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-            } else {
-                // Try standard YYYY-MM-DD
-                const d = new Date(n.faturaTarihi);
-                if (!isNaN(d.getTime())) invoiceDate = d;
-            }
-        }
-
-        const konteynerList = activeKonteynerler.split(',').map(c => normalizeContainer(c.trim()));
+        // Tek hücrede birden fazla numara olabilir; desenle çıkarılır.
+        const konteynerList = konteynerAnahtarlari(activeKonteynerler);
 
         for (const cont of konteynerList) {
-          if (cont.length < 3) continue;
+          const candidates = havuz.get(cont);
+          if (!candidates || candidates.length === 0) continue;
 
-          // DEBUG for Target Container
-          const isTargetDebug = cont.includes("HMMU2071981");
+          let bestMatch: EslesmeAdayi | null = null;
+          let minDayDiff = Number.POSITIVE_INFINITY;
 
-          // Eşleşme ara
-          const candidates = gumrukMap.get(cont);
-          
-          if (candidates && candidates.length > 0) {
-             
-             let bestMatch: InsertGumrukVerisi | null = null;
-             let minDayDiff = 9999;
+          for (const cand of candidates) {
+            const tescilDate = tariheCevir(cand.tescilTarihi);
 
-             if (isTargetDebug) {
-                 console.log(`DEBUG Check HMMU2071981: Found ${candidates.length} candidates.`);
-             }
+            if (!invoiceDate || !tescilDate) {
+              // Tarih yoksa eleyemeyiz; tarihi olan bir aday çıkarsa o kazanır.
+              if (!bestMatch) bestMatch = cand;
+              continue;
+            }
 
-             // Find best match based on Date (within reasonable window, e.g. 45 days)
-             // Customs Declaration (Tescil) usually happens around the invoice date
-             for (const cand of candidates) {
-                 // Parse Tescil Tarihi
-                 let tescilDate: Date | null = null;
-                 if (cand.tescilTarihi) {
-                    const tParts = cand.tescilTarihi.split('.'); // Typically DD.MM.YYYY per previous lines
-                    if (tParts.length === 3) {
-                        tescilDate = new Date(parseInt(tParts[2]), parseInt(tParts[1]) - 1, parseInt(tParts[0]));
-                    } else if (cand.faturaTarihi) {
-                        // Fallback to Customs Invoice Date
-                        const fParts = cand.faturaTarihi.split('.');
-                        if (fParts.length === 3) {
-                            tescilDate = new Date(parseInt(fParts[2]), parseInt(fParts[1]) - 1, parseInt(fParts[0]));
-                        }
-                    }
-                 }
+            const diffDays = Math.ceil(
+              Math.abs(tescilDate.getTime() - invoiceDate.getTime()) / 86400000,
+            );
+            if (diffDays > AZAMI_GUN_FARKI) continue;
 
-                 if (!invoiceDate || !tescilDate) {
-                     // If no dates available, matching is risky but if it's the only one, take it.
-                     // Or prioritze the one closest to "now" if multiple? 
-                     // Let's just take the first if dates fail, but prioritize date match.
-                     if (!bestMatch) bestMatch = cand;
-                     continue;
-                 }
+            // En yakın tarih kazanır. Eşitlikte gümrük kaynağı öncelikli:
+            // dosya no + firma ünvanı + tescil no orada daha eksiksiz.
+            const dahaIyi =
+              diffDays < minDayDiff ||
+              (diffDays === minDayDiff && cand.kaynak === "gumruk" && bestMatch?.kaynak !== "gumruk");
+            if (dahaIyi) {
+              minDayDiff = diffDays;
+              bestMatch = cand;
+            }
+          }
 
-                 // Log date comparison for debug
-                 const diffTime = Math.abs(tescilDate.getTime() - invoiceDate.getTime());
-                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+          if (!bestMatch) continue;
 
-                 if (isTargetDebug) {
-                     console.log(`  Candidate: Tescil=${cand.tescilTarihi} vs Invoice=${n.faturaTarihi} -> Diff=${diffDays} days`);
-                 }
+          // Tescil tarihini görüntü biçimine getir: Excel serisi veya YYYY-MM-DD olabilir.
+          let finalTescilTarihi = bestMatch.tescilTarihi;
+          if (finalTescilTarihi) {
+            if (/^\d+$/.test(finalTescilTarihi)) finalTescilTarihi = formatExcelDate(finalTescilTarihi);
+            else finalTescilTarihi = ymdToDisplay(finalTescilTarihi);
+          }
 
-                 // Allow match if within 45 days window
-                 if (diffDays <= 45) {
-                     if (diffDays < minDayDiff) {
-                         minDayDiff = diffDays;
-                         bestMatch = cand;
-                     }
-                 }
-             }
-
-             // Helper to convert Excel Serial Date (e.g., 46044) to DD.MM.YYYY
-             const formatExcelDate = (serial: string | number): string => {
-                 if (!serial) return "";
-                 const num = typeof serial === 'string' ? parseFloat(serial) : serial;
-                 if (isNaN(num)) return serial.toString();
-                 
-                 // Excel base date is Dec 30, 1899
-                 const date = new Date(Math.round((num - 25569) * 86400 * 1000));
-                 const day = date.getDate().toString().padStart(2, '0');
-                 const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                 const year = date.getFullYear();
-                 return `${day}.${month}.${year}`;
-             };
-
-             if (bestMatch) {
-                if (isTargetDebug) {
-                     console.log(`  MATCH_FOUND for HMMU2071981! Unvan: ${bestMatch.firmaUnvan}`);
-                }
-                const match = bestMatch; // Alias for readability
-
-                // Format Tescil Tarihi if it looks like an Excel serial number (numeric)
-                let finalTescilTarihi = match.tescilTarihi;
-                if (match.tescilTarihi && /^\d+$/.test(match.tescilTarihi)) {
-                    finalTescilTarihi = formatExcelDate(match.tescilTarihi);
-                }
-
-                try {
-                  await storage.updateNakliyeVerisi(n.id, {
-                    ilgiliDosyaNo: match.dosyaNo,
-                    gumrukFirmaUnvan: match.firmaUnvan,
-                    gumrukAdi: match.gumruk,
-                    gumrukDovizKiymeti: match.dovizKiymeti,
-                    gumrukDovizCinsi: match.doviz,
-                    gumrukTescilNo: match.tescilNo,
-                    gumrukTescilTarihi: finalTescilTarihi,
-                    eslesenHouseNo: match.houseNo
-                  });
-                  matchCount++;
-                  break; // Found a match for this invoice
-                } catch (err) {
-                  console.error(`Nakliye güncelleme hatası ID: ${n.id}`, err);
-                }
-             } else {
-                 if (isTargetDebug) console.log("  No match found within 45 days window.");
-             }
+          try {
+            await storage.updateNakliyeVerisi(n.id, {
+              ilgiliDosyaNo: bestMatch.dosyaNo,
+              gumrukFirmaUnvan: bestMatch.firmaUnvan,
+              gumrukAdi: bestMatch.gumrukAdi,
+              gumrukDovizKiymeti: bestMatch.dovizKiymeti,
+              gumrukDovizCinsi: bestMatch.doviz,
+              gumrukTescilNo: bestMatch.tescilNo,
+              gumrukTescilTarihi: finalTescilTarihi,
+              eslesenHouseNo: bestMatch.houseNo,
+            });
+            matchCount++;
+            break; // Found a match for this invoice
+          } catch (err) {
+            console.error(`Nakliye güncelleme hatası ID: ${n.id}`, err);
           }
         }
       }
