@@ -523,22 +523,42 @@ export default function Nakliye() {
         });
     }, [enrichedInvoices, dateRange.start, dateRange.end]);
 
+    // Tarihi sıralanabilir bir sayıya çevirir. Kayıtlar iki formatta olabilir:
+    // "YYYY-MM-DD" (PDF analizinden) ve "DD.MM.YYYY" (eski n8n kayıtları).
+    // new Date() KULLANILMAZ — timezone kayması hatası (commit c897dff).
+    const tarihAnahtari = (t: any): number => {
+        const s = String(t ?? "").trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return Number(s.slice(0, 10).replace(/-/g, ""));
+        if (/^\d{2}[.\-/]\d{2}[.\-/]\d{4}/.test(s)) {
+            const [g, a, y] = s.slice(0, 10).split(/[.\-/]/);
+            return Number(`${y}${a}${g}`);
+        }
+        return 0; // tarihsiz kayıtlar en sona
+    };
+
     const sortedInvoices = useMemo(() => {
-        if (!sortConfig) return filteredInvoices;
+        // Varsayılan: en yeni fatura en üstte
+        const aktif = sortConfig ?? { key: "faturaTarihi", direction: "desc" as const };
+
         return [...filteredInvoices].sort((a, b) => {
-            const aValue = a[sortConfig.key];
-            const bValue = b[sortConfig.key];
+            if (aktif.key === "faturaTarihi") {
+                const fark = tarihAnahtari(a.faturaTarihi) - tarihAnahtari(b.faturaTarihi);
+                return aktif.direction === "asc" ? fark : -fark;
+            }
+
+            const aValue = a[aktif.key];
+            const bValue = b[aktif.key];
 
             if (aValue === null || aValue === undefined) return 1;
             if (bValue === null || bValue === undefined) return -1;
 
             if (typeof aValue === 'string' && typeof bValue === 'string') {
-                return sortConfig.direction === 'asc'
+                return aktif.direction === 'asc'
                     ? aValue.localeCompare(bValue, 'tr')
                     : bValue.localeCompare(aValue, 'tr');
             }
 
-            return sortConfig.direction === 'asc'
+            return aktif.direction === 'asc'
                 ? (aValue > bValue ? 1 : -1)
                 : (aValue < bValue ? 1 : -1);
         });
@@ -753,7 +773,23 @@ export default function Nakliye() {
                                 {sortedInvoices.length > 0 ? (
                                     sortedInvoices.map((inv) => (
                                         <TableRow key={inv.id} className="cursor-pointer" onClick={() => setSelectedInvoice(inv)}>
-                                            <TableCell className="px-2.5 py-1.5 font-bold tabular-nums" style={{ color: "#0284c7" }}>{inv.faturaNo || "N/A"}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 font-bold tabular-nums" style={{ color: "#0284c7" }}>
+                                                {inv.pdfYolu ? (
+                                                    // Fatura numarasına tıklanınca kaynak PDF yeni sekmede açılır.
+                                                    // stopPropagation: satır tıklaması modalı açmasın.
+                                                    <a
+                                                        href={`/${String(inv.pdfYolu).replace(/^\/+/, "")}`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                                                        title="Kaynak PDF'i aç"
+                                                    >
+                                                        {inv.faturaNo || "N/A"}
+                                                        <FileText className="h-3 w-3 opacity-60" />
+                                                    </a>
+                                                ) : (inv.faturaNo || "N/A")}
+                                            </TableCell>
                                             <TableCell className="px-2.5 py-1.5 tabular-nums text-muted-foreground">{formatDate(inv.faturaTarihi)}</TableCell>
                                             <TableCell className="max-w-[240px] truncate px-2.5 py-1.5 font-medium" title={inv.malHizmet || undefined}>{inv.malHizmet || "-"}</TableCell>
                                             <TableCell className="max-w-[150px] truncate px-2.5 py-1.5 font-mono text-[12px] font-medium" style={{ color: "#0284c7" }} title={inv.konteynerler || undefined}>{inv.konteynerler || inv._konteynerIlk}</TableCell>
@@ -829,6 +865,16 @@ export default function Nakliye() {
                                 <div className="flex flex-col items-center gap-1 sm:items-start">
                                     <span className="text-xs font-bold uppercase text-muted-foreground">Fatura No</span>
                                     <span className="font-mono text-xl font-black tracking-tight" style={{ color: "#0284c7" }}>{selectedInvoice.faturaNo}</span>
+                                    {selectedInvoice.pdfYolu && (
+                                        <a
+                                            href={`/${String(selectedInvoice.pdfYolu).replace(/^\/+/, "")}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-sky-600 underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                                        >
+                                            <FileText className="h-3.5 w-3.5" /> Kaynak PDF'i aç
+                                        </a>
+                                    )}
                                 </div>
                                 <div className="hidden h-8 w-px bg-border sm:block"></div>
                                 <div className="flex flex-col items-center gap-1 sm:items-end">

@@ -302,6 +302,11 @@ export const nakliyeVerileri = pgTable("nakliye_verileri", {
   musteri: text("musteri"), // Eşleştirilen/Düzeltilen Müşteri
   konteynerler: text("konteynerler"), // Eşleştirilen/Düzeltilen Konteynerler (Virgülle ayrılmış)
   rawJson: text("raw_json"), // Her ihtimale karşı tüm veriyi saklamak için
+  // Kaynak PDF'in sunucudaki yolu (uploads/nakliye/... ). Fatura satırından
+  // tıklanınca indirilir. PDF analizinden gelen kayıtlarda dolu olur.
+  pdfYolu: text("pdf_yolu"),
+  tedarikciUnvan: text("tedarikci_unvan"),
+  tedarikciVkn: text("tedarikci_vkn"),
   
   // Gümrük Eşleşme Verileri
   ilgiliDosyaNo: text("ilgili_dosya_no"),

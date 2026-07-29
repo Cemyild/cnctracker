@@ -867,19 +867,16 @@ export async function registerRoutes(
         });
       }
 
-      // Dedup katman 1: aynı fatura ikinci kez işlenmez
-      const mevcut = await storage.getNakliyeFaturasiByNo(alanlar.fatura_no);
-      if (mevcut) {
-        fs.unlinkSync(req.file.path);
-        return res.json({
-          success: true, already_exists: true, id: mevcut.id, faturaNo: mevcut.faturaNo,
-        });
-      }
-
-      // PDF'i fatura numarasıyla yeniden adlandır
+      // PDF'i fatura numarasıyla yeniden adlandır (mükerrer yüklemede üzerine yazar)
       const guvenliAd = alanlar.fatura_no.replace(/[^A-Za-z0-9._-]/g, "_");
       const kalici = path.join("uploads", "nakliye", `${guvenliAd}.pdf`);
+      if (fs.existsSync(kalici)) fs.unlinkSync(kalici);
       fs.renameSync(req.file.path, kalici);
+
+      // Dedup katman 1: aynı fatura ikinci kez işlenmez.
+      // Yine de nakliye_verileri kontrolü aşağıda yapılır — ekranın kullandığı
+      // tabloda kayıt eksikse tamamlanır.
+      const mevcut = await storage.getNakliyeFaturasiByNo(alanlar.fatura_no);
 
       // e-Arşiv PDF'lerinde ETTN metinde geçer; Paraşüt kaydıyla kesin
       // eşleştirme için yakalanır (yoksa null).
@@ -887,7 +884,7 @@ export async function registerRoutes(
         /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
       );
 
-      const kayit = await storage.insertNakliyeFaturasi({
+      const kayit = mevcut ?? await storage.insertNakliyeFaturasi({
         kaynak: "earsiv",
         faturaNo: alanlar.fatura_no,
         faturaTarihi: alanlar.fatura_tarihi,
@@ -910,6 +907,37 @@ export async function registerRoutes(
         durum: dogrulama.gecerli ? "ayristirildi" : "dogrulama_hatasi",
         hataMesaji: dogrulama.gecerli ? null : dogrulama.hatalar.join(" | "),
       });
+
+      // Nakliye ekranının (Navlun Faturaları) kullandığı tabloya da yaz.
+      // Geçiş dönemi: nakliye_verileri ekranı besler, nakliye_faturalari
+      // Paraşüt akışını yürütür; ikisi faturaNo üzerinden eşleşir.
+      const mevcutVeri = (await storage.getNakliyeVerileri())
+        .find((v) => v.faturaNo === alanlar.fatura_no);
+      if (!mevcutVeri) {
+        const kdvOrani = alanlar.kdv_orani ?? 0;
+        const matrah = alanlar.matrah ?? 0;
+        await storage.insertNakliyeVerileri([{
+          faturaNo: alanlar.fatura_no,
+          faturaTarihi: alanlar.fatura_tarihi,
+          malHizmet: alanlar.aciklama,
+          miktar: "1",
+          birimFiyat: String(matrah),
+          kdvOranı: kdvOrani,
+          kdvTutarı: alanlar.kdv_tutari !== null ? String(alanlar.kdv_tutari) : null,
+          malHizmetToplamTutarı: String(matrah),
+          hesaplananKdv20: alanlar.kdv_tutari !== null ? String(alanlar.kdv_tutari) : null,
+          hesaplananKdvTevkifat20:
+            alanlar.tevkifat_tutari !== null ? String(alanlar.tevkifat_tutari) : null,
+          vergilerDahilToplamTutar: String(matrah + (alanlar.kdv_tutari ?? 0)),
+          odenecekTutar: alanlar.odenecek_tutar !== null ? String(alanlar.odenecek_tutar) : null,
+          musteri: alanlar.musteri_firma_adi,
+          konteynerler: alanlar.konteynerler.join(", "),
+          tedarikciUnvan: alanlar.tedarikci_unvan,
+          tedarikciVkn: alanlar.tedarikci_vkn,
+          pdfYolu: `uploads/nakliye/${guvenliAd}.pdf`,
+          rawJson: JSON.stringify(alanlar),
+        }]);
+      }
 
       res.json({
         success: true,
