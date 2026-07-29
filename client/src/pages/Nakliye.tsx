@@ -501,7 +501,11 @@ export default function Nakliye() {
             const konteynerListe = extractContainerRefs(inv.malHizmet);
             return {
                 ...inv,
-                _musteri: inv.musteri || matchCustomer(customerIndex, inv.malHizmet),
+                // Öncelik sırası: beyannamedeki RESMÎ unvan → kayıtlı müşteri →
+                // açıklamadan tahmin. Eşleşme kurulduysa beyanname tek doğru
+                // kaynaktır; PDF'ten çıkarılan kısa ad ("BTS bant") sadece
+                // eşleştirme sinyaliydi.
+                _musteri: inv.gumrukFirmaUnvan || inv.musteri || matchCustomer(customerIndex, inv.malHizmet),
                 _konteynerListe: konteynerListe,
                 _konteynerIlk: konteynerListe[0] || "-",
             };

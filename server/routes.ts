@@ -3257,6 +3257,11 @@ export async function registerRoutes(
               gumrukTescilNo: bestMatch.tescilNo,
               gumrukTescilTarihi: finalTescilTarihi,
               eslesenHouseNo: bestMatch.houseNo,
+              // Müşteri, beyannamedeki RESMÎ firma unvanı olur. PDF'ten
+              // çıkarılan kısa ad ("BTS bant", "Eny Tekstil") yalnızca
+              // eşleştirme sinyalidir; eşleşme kurulduktan sonra beyannamedeki
+              // tam unvan tek doğru kaynaktır.
+              ...(bestMatch.firmaUnvan ? { musteri: bestMatch.firmaUnvan } : {}),
             });
             matchCount++;
             break; // Found a match for this invoice
