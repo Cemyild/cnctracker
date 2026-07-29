@@ -45,12 +45,25 @@ VPS'te (`167.235.252.49`) saatlik bir cron:
 
 ### İki ayrı gelen-fatura kanalı
 
-| Kanal | Nereye düşer | Nasıl alınır |
-|---|---|---|
-| **e-Arşiv** (sysmond) | GİB gelen kutusuna düşmez, alıcıya mail/portal ile gider | Mail poller — tek yol |
-| **e-Fatura** | Paraşüt gelen e-fatura kutusuna düşer | Paraşüt'te manuel onaylanır → `purchase_bills` GET |
+| Kanal | Nereye düşer | Nasıl alınır | Paraşüt'e nasıl girer |
+|---|---|---|---|
+| **e-Arşiv** (sysmond vb.) | GİB gelen kutusuna düşmez, alıcıya mail/portal ile gider | Mail poller — tek yol | **Bugün elle giriliyor → bu sistemle otomatikleşecek** |
+| **e-Fatura** | Paraşüt gelen e-fatura kutusuna düşer | Paraşüt'te manuel onaylanır → `purchase_bills` GET | Onay sonrası kendiliğinden |
 
-Çakışma yok; aynı fatura iki yoldan gelemez.
+### Elle giriş gerçeği (doğrulandı 2026-07-29)
+
+Paraşüt'teki alış faturaları ile `nakliye_verileri` birebir örtüşüyor:
+
+| Fatura No | CNC `odenecek_tutar` | Paraşüt `net_total` | Tedarikçi | `e_invoices_count` |
+|---|---|---|---|---|
+| GIB2026000000072 | 12.760 | 12.760 | HANİFE EKER | 0 |
+| GIB2026000000074 | 23.200 | 23.200 | HANİFE EKER | 0 |
+| GIB2026000000075 | 11.600 | 11.600 | HANİFE EKER | 0 |
+| GIB2026000000076 | 34.800 | 34.800 | HANİFE EKER | 0 |
+
+`e_invoices_count: 0` → bunlar e-fatura değil; **muhasebeci elle giriyor.** Bu projenin birincil amacı bu elle girişi ortadan kaldırmaktır. Dolayısıyla akış Paraşüt'e **yazar**, ve elle giriş durdurulur.
+
+Ayrıca nakliye tedarikçisi sysmond'dan ibaret değil — örn. **DSV Hava ve Deniz Taşımacılığı** (200 USD, KDV %0) gibi kayıtlar da var. Bunlar e-fatura kanalından geldiği için `purchase_bills` poll'u ile kendiliğinden kapsama girer.
 
 ---
 
@@ -64,8 +77,43 @@ Kaynak: `https://apidocs.parasut.com/swagger.json` (OpenAPI 2.0, 81 endpoint). R
 | Kimlik | OAuth2; `authorization_code` veya `password` grant. `CLIENT_ID`/`CLIENT_SECRET` destek@parasut.com'dan alınır |
 | Token | `access_token` 2 saat; `refresh_token` **rotasyonlu** (her yenilemede yenisi gelir, eskisi ölür) |
 | Rate limit | **10 istek / 10 saniye** |
-| Format | JSON:API (`data.attributes` + `data.relationships`) |
-| Webhook | Swagger'da **yok**. Resmî olmayan bir SDK (`Sergeant61/parasut-api-v4`) `{firma_no}/webhooks` çağırıyor ama doğrulanmadı |
+| Format | JSON:API (`data.attributes` + `data.relationships`); `consumes` yalnızca `application/vnd.api+json` |
+| Webhook | **YOK — canlıda doğrulandı.** `GET /v4/216831/webhooks` → HTTP 404. Resmî olmayan SDK'daki (`Sergeant61/parasut-api-v4`) modül spekülatifmiş. Polling kalıcı mimari |
+| Dosya eki | **YOK.** `purchase_bills` ilişkileri yalnızca `details, supplier, paid_by_employee, category, tags`; multipart desteklenmiyor. Alış faturasına PDF eklenemez |
+
+### Canlı hesap bilgileri (doğrulandı 2026-07-29)
+
+| | |
+|---|---|
+| Firma no | **216831** — CNC NAKLİYE HİZMETLERİ LOJİSTİK VE KONTEYNER TAŞIMACILIĞI A.Ş. |
+| VKN | 2110687188 |
+| e-Fatura / e-Arşiv | 2020-12-08'den beri aktif |
+| Kayıtlı alış faturası | 2.089 |
+| Kayıtlı ürün | 1.113 — **`NAKLİYE BEDELİ` id `8644976`** (birim ADET) kullanılacak, yeni ürün açılmayacak |
+
+### `net_total` tuzağı — matrah türetme
+
+Paraşüt'ün `purchase_bills.net_total` alanı **KDV dahil ve tevkifat düşülmüş** tutardır (yani "ödenecek"). Marj tabanı olan matrah türetilmelidir:
+
+```
+matrah = net_total − total_vat + total_vat_withholding
+```
+
+Canlı doğrulama (4 fatura, hepsi tuttu):
+
+| Fatura | net_total | total_vat | tevkifat | → matrah |
+|---|---|---|---|---|
+| GIB2026000000075 | 11.600 | 2.000 | 400 | 10.000 |
+| GIB2026000000074 | 23.200 | 4.000 | 800 | 20.000 |
+| GIB2026000000076 | 34.800 | 6.000 | 1.200 | 30.000 |
+| GIB2026000000072 | 12.760 | 2.200 | 440 | 11.000 |
+
+`net_total`'ı matrah sanmak her faturayı yanlış hesaplatır — bu türetme kodda tek bir yardımcı fonksiyonda toplanır.
+
+### `purchase_bills` GET filtreleri
+
+Mevcut: `filter[issue_date]`, `filter[due_date]`, `filter[supplier_id]`, `filter[item_type]`, `filter[spender_id]`.
+**`filter[invoice_no]` YOK** → "bu fatura Paraşüt'te var mı?" sorusu ancak tarih aralığı çekilip istemci tarafında elenerek cevaplanır. Dedup mantığı buna dayanır.
 
 ### Gelen e-fatura
 
@@ -265,6 +313,35 @@ GIB2026000000023
 
 KDV %0 (istisna) faturalar da var: matrah 7.000 → ödenecek 7.000.
 
+### Paraşüt'e yazma (e-Arşiv kanalı)
+
+Doğrulamayı geçen fatura `POST /purchase_bills#detailed` ile Paraşüt'e yazılır. Bu, bugün elle yapılan girişin yerini alır.
+
+**Dedup — `filter[invoice_no]` olmadığı için üç katmanlı:**
+
+1. Yerel: `nakliye_faturalari.faturaNo` unique → aynı PDF iki kez işlenmez
+2. Uzak: yazmadan önce `GET /purchase_bills?filter[issue_date]=<fatura tarihi ±7 gün>` çekilir, dönen kayıtların `invoice_no`'ları arasında aynısı varsa **yazılmaz**; bunun yerine mevcut Paraşüt kaydının id'si `parasutPurchaseBillId` alanına bağlanır ve `durum = 'parasutta'` olur
+3. Yazma başarılıysa dönen id hemen kaydedilir; ikinci deneme adım 2'de zaten yakalanır
+
+Bu, **geçiş dönemini güvenli kılar**: muhasebeci elle girmeye devam etse bile sistem çift kayıt yaratmaz, mevcut kayda bağlanır. Elle giriş durduğunda adım 2 hiçbir şey bulmaz ve akış tam otomatik hale gelir.
+
+**Alan eşlemesi:**
+
+| Paraşüt alanı | Kaynak |
+|---|---|
+| `item_type` | `purchase_bill` |
+| `issue_date` | `faturaTarihi` |
+| `due_date` | `faturaTarihi` (vade bilgisi PDF'te yoksa aynı gün) |
+| `invoice_no` | `faturaNo` |
+| `currency` | `paraBirimi` (TRY → `TRL`) |
+| `exchange_rate` | `kur` (TRY ise 1) |
+| `withholding_rate` | gelen faturadaki tevkifat oranı — **alışta korunur** (gidenden farklı olarak) |
+| `description` | `<açıklama> · PDF: <CNC url>/uploads/nakliye/<fatura_no>.pdf` |
+| `details[]` | tek kalem: `quantity` 1, `unit_price` = matrah, `vat_rate` = `kdvOrani`, `vat_withholding_rate` = gelen orana göre |
+| `supplier` | VKN ile `GET /contacts?filter[tax_number]=`; bulunamazsa **kuyruk** (cari otomatik yaratılmaz) |
+
+**PDF eklenemez** — Paraşüt API'si dosya eki desteklemiyor. PDF `uploads/nakliye/` altında durur; Paraşüt tarafında `description` alanındaki bağlantı üzerinden erişilir.
+
 ---
 
 ## 8. Python poller — küçültme
@@ -335,7 +412,7 @@ Her eşleşen gelen fatura → bir kalem:
 | `vat_rate` | gelen faturanın `kdvOrani` (20 veya 0) |
 | `vat_withholding_rate` | **0 — kodda sabit** |
 | `description` | `<tedarikçi> · <fatura no> · <konteyner>` |
-| `product` | tek "Nakliye Hizmeti" ürünü, id `.env`'de (`PARASUT_NAKLIYE_URUN_ID`) |
+| `product` | mevcut **`NAKLİYE BEDELİ`** ürünü, id `8644976` (`.env` → `PARASUT_NAKLIYE_URUN_ID`). Ürünün üzerindeki %18 KDV önemsiz — oran kalem seviyesinde veriliyor |
 
 Fatura seviyesi: `withholding_rate: 0` (kodda sabit), `item_type: "invoice"`, `currency` gelen faturayla aynı, `issue_date` bugün, `tags` → beyanname `dosya_no`.
 
@@ -383,9 +460,12 @@ Yeni sayfa. `pageTitles` ve `<Switch>`'e [client/src/App.tsx](../../../client/sr
 | `house_no` doluluk oranı %1-3 → otomatik eşleşme tavanı düşük | Kabul edildi. Kuyruk ekranı ana çalışma yüzeyi olacak. `musteriFirmaAdi` ile aday önerme bunu kısmen telafi eder |
 | `konteyner_sayisi` %30 dolu → otomatik tetikleme sınırlı | Boş olanlar kuyrukta bekler, operasyon tetikler |
 | LLM halüsinasyonu | İki katmanlı doğrulama (metin + aritmetik); tutmazsa Paraşüt'e yazılmaz |
-| Paraşüt webhook varlığı | Doğrulanmadı. Polling varsayılan; webhook çıkarsa üstüne takılır |
-| `CLIENT_ID`/`CLIENT_SECRET` henüz alınmadı | destek@parasut.com'dan talep edilecek. Bu olmadan hiçbir Paraşüt ucu test edilemez |
-| Paraşüt'te "Nakliye Hizmeti" ürünü | Elle oluşturulup id `.env`'ye yazılacak |
+| ~~Paraşüt webhook varlığı~~ | **Kapandı** — `GET /webhooks` 404. Webhook yok, polling kalıcı |
+| ~~`CLIENT_ID`/`CLIENT_SECRET`~~ | **Kapandı** — alındı, `.env`'de. Token akışı canlıda doğrulandı |
+| ~~"Nakliye Hizmeti" ürünü~~ | **Kapandı** — mevcut `NAKLİYE BEDELİ` (id 8644976) kullanılacak |
+| Elle giriş ile çakışma (geçiş dönemi) | Üç katmanlı dedup (bölüm 7). Elle girilmiş kayıt bulunursa yazılmaz, mevcut kayda bağlanır |
+| PDF Paraşüt'e eklenemez | API desteklemiyor. PDF `uploads/nakliye/` altında; Paraşüt `description` alanına CNC bağlantısı yazılır |
+| `refresh_token` rotasyonu | Eşzamanlı yenileme zinciri koparabilir. Tek yazıcı + transaction; koparsa tek seferlik `authorization_code` akışı tekrarlanır |
 | Poller küçültme sırasında kesinti | Yeni uç canlıya çıktıktan sonra poller güncellenir; `faturaNo` unique olduğu için çift çalışma zarar vermez |
 
 ---
