@@ -154,13 +154,13 @@ export default function GelenTaleplerSayfasi() {
           )}
           {list.map((t) => (
             <TableRow key={t.id} className="hover:bg-muted/30" data-testid={`row-muhasebe-talep-${t.id}`}>
-              <TableCell className="tabular-nums">{formatTarih(t.talepTarihi)}</TableCell>
-              <TableCell className="font-medium">{t.talepEdenAd}</TableCell>
-              <TableCell className="font-medium tabular-nums">
+              <TableCell className="whitespace-nowrap tabular-nums">{formatTarih(t.talepTarihi)}</TableCell>
+              <TableCell className="whitespace-nowrap font-medium">{t.talepEdenAd}</TableCell>
+              <TableCell className="whitespace-nowrap font-medium tabular-nums">
                 {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
               </TableCell>
               <TableCell className="max-w-44 truncate" title={t.beyanname?.alici ?? ""}>{t.beyanname?.alici ?? "—"}</TableCell>
-              <TableCell>
+              <TableCell className="whitespace-nowrap">
                 {TIP_ETIKET[t.odemeTipi] ?? t.odemeTipi}
                 {t.odemeTipi === "masraf" ? ` / ${t.masrafTuru}` : ""}
               </TableCell>
@@ -176,14 +176,14 @@ export default function GelenTaleplerSayfasi() {
                   "—"
                 )}
               </TableCell>
-              <TableCell className="text-right font-semibold tabular-nums text-rose-600">
+              <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums text-rose-600">
                 {formatPara(t.tutar, t.paraBirimi)}
               </TableCell>
               <TableCell className="max-w-36 truncate">
                 {t.alacakli}
-                {t.iban && <div className="text-xs text-muted-foreground">{t.iban}</div>}
+                {t.iban && <div className="truncate text-xs text-muted-foreground">{t.iban}</div>}
               </TableCell>
-              <TableCell><BelgeLinkleri talep={t} /></TableCell>
+              <TableCell><BelgeLinkleri talep={t} kompakt /></TableCell>
               <TableCell>
                 <DurumRozeti durum={t.durum} />
               </TableCell>
