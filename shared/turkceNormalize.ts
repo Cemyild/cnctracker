@@ -1,9 +1,13 @@
 // Türkçe firma unvanlarını karşılaştırılabilir hale getirir.
 // "CNC NAKLİYE HİZMETLERİ A.Ş." ve "cnc nakliye hizmetleri aş" aynı sonucu verir.
 
+// Sıra önemli: çok kelimeli ekler önce elenmeli.
 const SIRKET_EKLERI = [
   "ANONIM SIRKETI", "LIMITED SIRKETI", "KOLLEKTIF SIRKETI",
-  "A S", "AS", "LTD STI", "LTD", "STI", "SAN", "TIC", "SANAYI", "TICARET", "VE",
+  "IC VE DIS TICARET", "DIS TICARET", "ITHALAT IHRACAT",
+  "A S", "AS", "LTD STI", "LTD", "STI",
+  "SANAYI", "TICARET", "SAN", "TIC",
+  "ITHALAT", "IHRACAT", "IC", "DIS", "VE",
 ];
 
 /**
@@ -35,17 +39,27 @@ export function normalizeFirmaAdi(s: string): string {
 
 /**
  * İki firma adı arasındaki benzerliği 0-100 arası döndürür.
- * Ortak kelime oranına dayanır (Jaccard). Tam eşleşme 100.
+ *
+ * KAPSAMA (containment) metriği kullanılır, Jaccard değil: karşılaştırılan
+ * taraflardan biri müşterinin KISA ADI ("BTS BANT"), diğeri gümrük
+ * kaydındaki TAM UNVAN ("BTS BANT İÇ VE DIŞ TİCARET LTD.ŞTİ.") olur.
+ * Jaccard uzun unvanı haksız cezalandırıp %50 verirken, kısa adın uzun
+ * unvan içinde bulunma oranı doğru cevabı (%100) verir.
+ *
+ * Tek harfli parçalar gürültü olduğu için elenir.
  */
 export function firmaAdiBenzerligi(a: string, b: string): number {
   const na = normalizeFirmaAdi(a);
   const nb = normalizeFirmaAdi(b);
   if (!na || !nb) return 0;
   if (na === nb) return 100;
-  const sa = new Set(na.split(" "));
-  const sb = new Set(nb.split(" "));
+
+  const sa = new Set(na.split(" ").filter((k) => k.length >= 2));
+  const sb = new Set(nb.split(" ").filter((k) => k.length >= 2));
+  if (sa.size === 0 || sb.size === 0) return 0;
+
+  const [kisa, uzun] = sa.size <= sb.size ? [sa, sb] : [sb, sa];
   let kesisim = 0;
-  sa.forEach((k) => { if (sb.has(k)) kesisim++; });
-  const birlesim = new Set([...Array.from(sa), ...Array.from(sb)]).size;
-  return Math.round((kesisim / birlesim) * 100);
+  kisa.forEach((k) => { if (uzun.has(k)) kesisim++; });
+  return Math.round((kesisim / kisa.size) * 100);
 }

@@ -44,9 +44,10 @@ const FATURA_SEMASI = {
     musteri_firma_adi: {
       type: ["string", "null"],
       description:
-        "Fatura açıklamasında/kaleminde adı geçen NİHAİ MÜŞTERİ firma adı. " +
-        "Faturayı kesen ya da faturanın kesildiği firma DEĞİL; taşımanın kime " +
-        "ait olduğunu belirten firma. Yoksa null.",
+        "Mal/hizmet açıklamasının ortasında geçen MÜŞTERİ KISA ADI. " +
+        "Açıklama kalıbı: <güzergah> <MÜŞTERİ> <hizmet> <konteyner no>. " +
+        "Faturayı kesen firma DEĞİL, 'SAYIN' bölümündeki firma DEĞİL. " +
+        "Açıklama yalnızca konteyner numaralarından ibaretse null.",
     },
     konteynerler: {
       type: "array",
@@ -78,8 +79,28 @@ KURALLAR:
 - tevkifat_tutari belgede yoksa 0 döndür.
 - konteynerler: 4 harf + 7 rakam biçimindeki numaralar (örn. MSBU4529335).
   Belgede yoksa boş dizi döndür.
-- musteri_firma_adi: taşımanın kime ait olduğunu belirten firma. Faturayı
-  kesen firma ya da faturanın kesildiği firma DEĞİL. Emin değilsen null.`;
+
+MÜŞTERİ ADI ÇIKARIMI (musteri_firma_adi):
+Mal/hizmet açıklaması şu kalıptadır:
+  <güzergah> <MÜŞTERİ KISA ADI> <hizmet ifadesi> <konteyner no>
+Güzergah "Gemlik" ile başlar ve bir varış noktası içerir (Bursa, Serbest
+Bölge, Demirtaş DOSAB, Hasanağa, Liman, Gökçe köy, Işıksoy Antrepo...).
+Hizmet ifadesi "konteyner taşıma" ya da benzeridir. Aradaki kısım müşteridir.
+
+Örnekler:
+  "Gemlik Bursa Hasanağa Deka kimya Konteyner Taşıma MRKU0850707"
+      → musteri_firma_adi: "Deka kimya"
+  "Gemlik Serbest Bölge Nobel Otomotiv Konteyner Taşıma MSBU4030346"
+      → musteri_firma_adi: "Nobel Otomotiv"
+  "Gemlik Demirtaş DOSAB Antrepo Eny Tekstil Konteyner Taşıma CAAU4972376"
+      → musteri_firma_adi: "Eny Tekstil"
+  "Gemlik Bursa BTS bant konteyner taşıma MRKU7242360"
+      → musteri_firma_adi: "BTS bant"
+  "MSMU4556503 MSNU7596587 UETU7713936"
+      → musteri_firma_adi: null   (yalnızca konteyner listesi)
+
+Faturayı kesen firmayı ya da "SAYIN" bölümündeki alıcı firmayı ASLA müşteri
+olarak döndürme. Kalıba oturmuyorsa null döndür.`;
 
 /**
  * PDF'i Claude ile ayrıştırır. Doğrulama YAPMAZ — çağıran taraf
