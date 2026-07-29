@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, RefreshCcw, Save, Trash2, X, ArrowUpDown, ArrowUp, ArrowDown, Check, ChevronsUpDown, Truck } from "lucide-react";
@@ -10,6 +10,161 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn, formatCurrencyFull } from "@/lib/utils";
 
+// ============================================================================
+// Müşteri eşleştirme — ÖN-DERLENMİŞ İNDEKS
+// ----------------------------------------------------------------------------
+// Bu mantık eskiden bileşen içinde, her satır için, her render'da çalışıyordu.
+// Firma başına token ayrıştırma + RegExp derleme her çağrıda tekrarlandığı için
+// ~500 firma × 279 fatura → tek render'da ~2 sn saf JS (ölçüldü).
+// Artık RegExp'ler firma listesi başına BİR KEZ derleniyor; eşleştirme mantığı
+// birebir aynı (aynı ağırlıklar, aynı eşikler, aynı özel kurallar).
+// ============================================================================
+
+const IGNORED_COMPANY_WORDS = new Set([
+    "ltd", "şti", "sti", "a.ş", "a.s", "as", "san", "tic", "ve", "iç", "dış",
+    "ic", "dis", "sanayi", "ticaret", "limitet", "anonim", "şirketi", "sirketi",
+    "gıda", "tekstil", "lojistik", "otomotiv", "inş", "ins", "yapı", "yapi",
+    "nakliyat", "nak", "tür", "tur", "petrol", "kimya", "plastik", "ambalaj",
+    "ith", "ihr", "tas", "taş", "group", "grup",
+    "bursa", "gemlik", "istanbul", "ankara", "izmir", "kocaeli", "yalova", "türkiye", "turkiye",
+]);
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+type CompiledToken = {
+    weight: number;
+    index: number;
+    primary: RegExp;   // \bTOKEN\b
+    clean: RegExp | null;  // tireler atılmış hâli: "DE-KA" -> "DEKA"
+    spaced: RegExp | null; // tire yerine boşluk: "DE-KA" -> "DE\s+KA"
+};
+
+type CustomerEntry = {
+    name: string;
+    lower: string;
+    compiled: CompiledToken[];
+    totalWeight: number;
+    tokenCount: number;
+    isEnyteks: boolean;
+    isIberyarns: boolean;
+};
+
+function buildCustomerIndex(customers: string[]): CustomerEntry[] {
+    return customers.map((customer) => {
+        const lower = customer.toLocaleLowerCase("tr");
+        // Tire üzerinden BÖLME yok — "DE-KA" tek token kalmalı.
+        const tokens = lower
+            .split(/[\s\.,()\[\]]+/)
+            .map((t) => t.trim())
+            .filter((t) => t.length > 1)
+            .filter((t) => !IGNORED_COMPANY_WORDS.has(t));
+
+        let totalWeight = 0;
+        const compiled = tokens.map((token, index) => {
+            const weight = index === 0 ? 2.0 : index === 1 ? 1.5 : 1.0;
+            totalWeight += weight;
+            const cleanToken = token.replace(/-/g, "");
+            return {
+                weight,
+                index,
+                primary: new RegExp(`\\b${escapeRegExp(token)}\\b`, "i"),
+                clean: cleanToken.length > 2 ? new RegExp(`\\b${escapeRegExp(cleanToken)}\\b`, "i") : null,
+                spaced: token.includes("-")
+                    ? new RegExp(`\\b${token.split("-").map(escapeRegExp).join("\\s+")}\\b`, "i")
+                    : null,
+            };
+        });
+
+        return {
+            name: customer,
+            lower,
+            compiled,
+            totalWeight,
+            tokenCount: tokens.length,
+            isEnyteks: lower.includes("enyteks"),
+            isIberyarns: lower.includes("iberyarns"),
+        };
+    });
+}
+
+// Özel manuel kurallar (metin tarafı sabit olduğu için modül seviyesinde derlendi)
+const RE_ENY = /\beny\b/i;
+const RE_IBER_YARNS = /\biber\s*yarns\b/i;
+const RE_IBER = /\biber\b/i;
+
+function matchCustomer(index: CustomerEntry[], text: string | null | undefined): string {
+    if (!text || index.length === 0) return "-";
+    const textLower = text.toLocaleLowerCase("tr");
+
+    let bestName = "-";
+    let bestScore = 0;
+
+    for (const c of index) {
+        // 1. Tam alt-dize eşleşmesi (en yüksek öncelik, kısa adlarda gürültü olmasın diye >4)
+        if (c.lower.length > 4 && textLower.includes(c.lower)) {
+            const score = 1000 + c.lower.length;
+            if (score > bestScore) { bestScore = score; bestName = c.name; }
+            continue;
+        }
+        if (c.tokenCount === 0) continue;
+
+        // 2. Kelime sınırlı token eşleşmesi (ilk token'lar daha ağır)
+        let hitCount = 0;
+        let firstTokenMatched = false;
+        let matchedWeight = 0;
+
+        for (const t of c.compiled) {
+            let matched = t.primary.test(textLower);
+            if (!matched) {
+                if (t.clean && t.clean.test(textLower)) matched = true;
+                else if (t.spaced && t.spaced.test(textLower)) matched = true;
+            }
+            if (matched) {
+                hitCount++;
+                matchedWeight += t.weight;
+                if (t.index === 0) firstTokenMatched = true;
+            }
+        }
+
+        // 3. Özel manuel kurallar
+        if (hitCount === 0) {
+            if (c.isEnyteks && RE_ENY.test(textLower)) {
+                hitCount = 10; matchedWeight = 10; firstTokenMatched = true;
+            }
+            if (c.isIberyarns && (RE_IBER_YARNS.test(textLower) || RE_IBER.test(textLower))) {
+                hitCount = 10; matchedWeight = 10; firstTokenMatched = true;
+            }
+        }
+
+        const ratio = matchedWeight / c.totalWeight;
+        let isValid = false;
+        if (c.tokenCount === 1) {
+            if (ratio === 1) isValid = true;   // tek kelimelik firma: tam eşleşme şart
+        } else if (firstTokenMatched && matchedWeight >= 2.0) {
+            isValid = true;                     // marka (ilk kelime) tuttu
+        } else if (ratio >= 0.5) {
+            isValid = true;                     // genel iyi eşleşme
+        }
+
+        if (isValid) {
+            const score = matchedWeight * 100 + hitCount * 10;
+            if (score > bestScore) { bestScore = score; bestName = c.name; }
+        }
+    }
+
+    return bestName;
+}
+
+// Konteyner no kalıbı: 4 harf + 6-7 rakam (örn. GAOU6046289)
+const RE_CONTAINER = /\b[A-Z]{4}\s*\d{6,7}\b/g;
+
+function extractContainerRefs(text: string | null | undefined): string[] {
+    if (!text) return [];
+    const matches = text.match(RE_CONTAINER);
+    if (!matches || matches.length === 0) return [];
+    return Array.from(new Set(matches));
+}
+
 export default function Nakliye() {
     const [uploading, setUploading] = useState(false);
     const [success, setSuccess] = useState(false);
@@ -20,6 +175,9 @@ export default function Nakliye() {
     const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
     const [customers, setCustomers] = useState<string[]>([]);
+
+    // Polling'in gereksiz yeniden render tetiklemesini engellemek için son veri imzası
+    const lastInvoiceSignature = useRef<string>("");
 
     // Date Filter State
     const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: "", end: "" });
@@ -58,189 +216,8 @@ export default function Nakliye() {
         }
     };
 
-    // Helper to extract Container or Reference number
-    const extractContainerRef = (text: string | null | undefined, returnAll: boolean = false) => {
-        if (!text) return returnAll ? [] : "-";
-        // Look for common patterns:
-        // 1. Container: 4 letters + 6 or 7 digits (e.g., GAOU6046289)
-
-        const containerRegex = /\b[A-Z]{4}\s*\d{6,7}\b/g;
-        const matches = text.match(containerRegex);
-
-        if (matches && matches.length > 0) {
-            const uniqueMatches = Array.from(new Set(matches)); // Remove duplicates
-            return returnAll ? uniqueMatches : uniqueMatches[0];
-        }
-
-        return returnAll ? [] : "-";
-    };
-
-    // Helper to find customer name in description
-    const extractCustomer = (text: string | null | undefined) => {
-        if (!text || customers.length === 0) return "-";
-
-        const textLower = text.toLocaleLowerCase('tr');
-
-        // Words to ignore in COMPANY NAMES (Suffixes & Locations)
-        // Ignoring cities prevents "BURSA İDEAL İSTİF" matching just because text contains "Bursa"
-        const ignoredCompanyWords = [
-            "ltd", "şti", "sti", "a.ş", "a.s", "as", "san", "tic", "ve", "iç", "dış",
-            "ic", "dis", "sanayi", "ticaret", "limitet", "anonim", "şirketi", "sirketi",
-            "gıda", "tekstil", "lojistik", "otomotiv", "inş", "ins", "yapı", "yapi",
-            "nakliyat", "nak", "tür", "tur", "petrol", "kimya", "plastik", "ambalaj",
-            "ith", "ihr", "tas", "taş", "group", "grup",
-            "bursa", "gemlik", "istanbul", "ankara", "izmir", "kocaeli", "yalova", "türkiye", "turkiye"
-        ];
-
-        let bestMatch = { name: "-", score: 0 };
-
-        customers.forEach(customer => {
-            const customerLower = customer.toLocaleLowerCase('tr');
-
-            // 1. Exact Substring Match (Highest priority if significant length)
-            // But be careful: "E" matches "Empo".
-            // So we skip really short exact matches to avoid noise, unless it's the whole text.
-            if (textLower.includes(customerLower) && customerLower.length > 4) {
-                // Base score 1000 + length
-                const score = 1000 + customerLower.length;
-                if (score > bestMatch.score) {
-                    bestMatch = { name: customer, score };
-                }
-                return;
-            }
-
-            // 2. Token-Based Match with Word Boundaries
-            // IMPORTANT: Do NOT split on hyphens here. Keep "DE-KA" as one token.
-            const tokens = customerLower.split(/[\s\.,()\[\]]+/)
-                .map(t => t.trim())
-                .filter(t => t.length > 1) // Allow 2 letter words
-                .filter(t => !ignoredCompanyWords.includes(t));
-
-            if (tokens.length === 0) return;
-
-            let hitCount = 0;
-            let firstTokenMatched = false;
-            let totalWeight = 0;
-            let matchedWeight = 0;
-
-            const escapeRegExp = (string: string) => {
-                return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            };
-
-            tokens.forEach((token, index) => {
-                // Give higher weight to earlier tokens
-                const weight = index === 0 ? 2.0 : (index === 1 ? 1.5 : 1.0);
-                totalWeight += weight;
-
-                const escapedToken = escapeRegExp(token);
-
-                // 1. Standard Match: \bTOKEN\b
-                const regex = new RegExp(`\\b${escapedToken}\\b`, 'i');
-                let matched = regex.test(textLower);
-
-                // 2. Hyphen Flexibility (Only if standard match failed)
-                // Scenario A: DB has "DE-KA", Text has "DEKA" or "DE KA"
-                // Scenario B: DB has "DEKA", Text has "DE-KA"
-                if (!matched) {
-                    const cleanToken = token.replace(/-/g, ''); // "DE-KA" -> "DEKA"
-                    const escapedCleanToken = escapeRegExp(cleanToken);
-
-                    // Check "DEKA" match
-                    if (cleanToken.length > 2 && new RegExp(`\\b${escapedCleanToken}\\b`, 'i').test(textLower)) {
-                        matched = true;
-                    }
-                    // Check "DE KA" match (Space instead of hyphen)
-                    else if (token.includes('-')) {
-                        // No need to escape spacedToken parts again if we trust replace, but safer to re-escape?
-                        // token "DE-KA" -> "DE KA".
-                        // If token had ".", it would be "DE.KA" -> "DE KA" which is regex safeish but let's be strict.
-                        // Actually better to just escape the raw parts.
-                        const parts = token.split('-').map(p => escapeRegExp(p));
-                        const pattern = parts.join('\\s+'); // Flexible whitespace instead of single space
-                        if (new RegExp(`\\b${pattern}\\b`, 'i').test(textLower)) {
-                            matched = true;
-                        }
-                    }
-                    // Reverse check: DB "DEKA", Text "DE-KA"
-                    // This is harder because 'token' is DEKA. We'd have to guess where to put hyphen or check all text words.
-                    // But usually DB name is the "official" one.
-                    // If DB is "DEKA KİMYA", and text has "DE-KA", it should match?
-                    // Let's defer this specific reverse case unless needed, as "DEKA" usually matches "DEKA".
-                    // If text is "DE-KA", \bDEKA\b generally fails.
-                    // A simple workaround if token has no hyphen: check if text has token-with-hyphen?
-                    // No, "D-EKA"? "DE-KA"? Too many permutations.
-                    // Instead, strip hyphens from TEXT temporarily for a check?
-                    else if (!token.includes('-')) {
-                        // As a fallback for high-importance tokens (first one)
-                        if (index === 0 && token.length > 3) {
-                            // Try matching against text with hyphens removed? Too aggressive globally.
-                            // Maybe checking if text contains "DE-KA" matching "DEKA"?
-                            // Let's skip for now to avoid false positives.
-                        }
-                    }
-                }
-
-                if (matched) {
-                    hitCount++;
-                    matchedWeight += weight;
-                    if (index === 0) firstTokenMatched = true;
-                }
-            });
-
-            // 3. Special Manual Rules (Overrides)
-            // Handle specific user-requested mappings
-            if (hitCount === 0) { // Only check if no normal match found to save perf? Or always boost?
-
-                // Rule 1: "Eny" in text -> "Enyteks" in DB
-                // DB Customer must contain "enyteks"
-                // Text must match "eny" word
-                if (customerLower.includes("enyteks") && /\beny\b/i.test(textLower)) {
-                    hitCount = 10; // High score force
-                    matchedWeight = 10;
-                    firstTokenMatched = true;
-                }
-
-                // Rule 2: "Iber Yarns" in text -> "Iberyarns" in DB
-                if (customerLower.includes("iberyarns")) {
-                    // Check "iber yarns" or "iber"
-                    if (/\biber\s*yarns\b/i.test(textLower) || /\biber\b/i.test(textLower)) {
-                        hitCount = 10;
-                        matchedWeight = 10;
-                        firstTokenMatched = true;
-                    }
-                }
-            }
-
-            const ratio = matchedWeight / totalWeight;
-
-            // Decision Logic
-            let isValid = false;
-
-            if (tokens.length === 1) {
-                // Single word company (e.g. "Borusan"). Must exact match.
-                if (ratio === 1) isValid = true;
-            } else {
-                // Multi word.
-                // If First Token Matched (Brand): Allow lower threshold (e.g. 0.4)
-                // "KOM-SER KOMPRESÖR..." -> KOM-SER matches. Weight 2. Total Weight ~5.5. Ratio ~0.36.
-                // Maybe 0.4 is still too high for long names.
-                // Let's use Hit Count logic combined.
-
-                if (firstTokenMatched && matchedWeight >= 2.0) isValid = true; // First word is key
-                else if (ratio >= 0.5) isValid = true; // General good match
-            }
-
-            if (isValid) {
-                // Score prioritization
-                const score = (matchedWeight * 100) + (hitCount * 10);
-                if (score > bestMatch.score) {
-                    bestMatch = { name: customer, score };
-                }
-            }
-        });
-
-        return bestMatch.name !== "-" ? bestMatch.name : "-";
-    };
+    // Firma listesi başına BİR KEZ derlenen eşleştirme indeksi
+    const customerIndex = useMemo(() => buildCustomerIndex(customers), [customers]);
 
     // Fetch saved invoices and customers on mount and setup polling
     useEffect(() => {
@@ -260,7 +237,14 @@ export default function Nakliye() {
             const response = await fetch("/api/nakliye");
             if (response.ok) {
                 const data = await response.json();
-                setSavedInvoices(data);
+                // 10 sn'de bir çalışan polling: veri gerçekten değişmediyse state'i
+                // güncelleme. Aksi halde her turda yeni referans üretilip tüm
+                // türetilmiş hesaplar (müşteri eşleştirme dahil) boşuna tekrarlanır.
+                const signature = JSON.stringify(data);
+                if (signature !== lastInvoiceSignature.current) {
+                    lastInvoiceSignature.current = signature;
+                    setSavedInvoices(data);
+                }
             }
         } catch (error) {
             console.error("Fetch saved invoices error:", error);
@@ -280,10 +264,13 @@ export default function Nakliye() {
     };
 
     // State management for Modal Fields
+    // Tek fatura için hesap; indeks ön-derlenmiş olduğundan maliyeti ihmal edilebilir.
+    // customerIndex bağımlılığı, firma listesi modal açıkken yüklenirse alanın
+    // yine dolmasını sağlar (eski `customers` bağımlılığının işlevi).
     useEffect(() => {
         if (selectedInvoice) {
             // Customer: Use stored value if available, else extract
-            const initialMusteri = selectedInvoice.musteri || extractCustomer(selectedInvoice.malHizmet);
+            const initialMusteri = selectedInvoice.musteri || matchCustomer(customerIndex, selectedInvoice.malHizmet);
             setEditMusteri(initialMusteri === "-" ? "" : initialMusteri);
 
             // Container: Use stored value if available, else extract all found
@@ -291,11 +278,10 @@ export default function Nakliye() {
             if (initialKont) {
                 setEditKonteynerler(initialKont);
             } else {
-                const extracted = extractContainerRef(selectedInvoice.malHizmet, true) as string[];
-                setEditKonteynerler(extracted.join(", "));
+                setEditKonteynerler(extractContainerRefs(selectedInvoice.malHizmet).join(", "));
             }
         }
-    }, [selectedInvoice, customers]); // Add customers to dept if extraction depends on it
+    }, [selectedInvoice, customerIndex]);
 
     const handleUpdate = async () => {
         if (!selectedInvoice) return;
@@ -506,38 +492,57 @@ export default function Nakliye() {
         setSortConfig({ key, direction });
     };
 
-    const filteredInvoices = savedInvoices.filter(invoice => {
-        if (!dateRange.start && !dateRange.end) return true;
+    // ===== Satır zenginleştirme: pahalı türetmeler burada BİR KEZ yapılır =====
+    // Müşteri eşleştirme ve konteyner çıkarımı yalnızca veri (savedInvoices) veya
+    // firma listesi değiştiğinde çalışır. Modal açma / sıralama / filtreleme gibi
+    // sıradan render'lar bu sonuçları önbellekten okur.
+    const enrichedInvoices = useMemo(() => {
+        return savedInvoices.map((inv) => {
+            const konteynerListe = extractContainerRefs(inv.malHizmet);
+            return {
+                ...inv,
+                _musteri: inv.musteri || matchCustomer(customerIndex, inv.malHizmet),
+                _konteynerListe: konteynerListe,
+                _konteynerIlk: konteynerListe[0] || "-",
+            };
+        });
+    }, [savedInvoices, customerIndex]);
 
-        const invoiceDate = new Date(invoice.faturaTarihi);
-        const start = dateRange.start ? new Date(dateRange.start) : null;
-        const end = dateRange.end ? new Date(dateRange.end) : null;
+    const filteredInvoices = useMemo(() => {
+        return enrichedInvoices.filter(invoice => {
+            if (!dateRange.start && !dateRange.end) return true;
 
-        if (start && invoiceDate < start) return false;
-        if (end && invoiceDate > end) return false;
+            const invoiceDate = new Date(invoice.faturaTarihi);
+            const start = dateRange.start ? new Date(dateRange.start) : null;
+            const end = dateRange.end ? new Date(dateRange.end) : null;
 
-        return true;
-    });
+            if (start && invoiceDate < start) return false;
+            if (end && invoiceDate > end) return false;
 
-    const sortedInvoices = [...filteredInvoices].sort((a, b) => {
-        if (!sortConfig) return 0;
+            return true;
+        });
+    }, [enrichedInvoices, dateRange.start, dateRange.end]);
 
-        const aValue = a[sortConfig.key];
-        const bValue = b[sortConfig.key];
+    const sortedInvoices = useMemo(() => {
+        if (!sortConfig) return filteredInvoices;
+        return [...filteredInvoices].sort((a, b) => {
+            const aValue = a[sortConfig.key];
+            const bValue = b[sortConfig.key];
 
-        if (aValue === null || aValue === undefined) return 1;
-        if (bValue === null || bValue === undefined) return -1;
+            if (aValue === null || aValue === undefined) return 1;
+            if (bValue === null || bValue === undefined) return -1;
 
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
+            if (typeof aValue === 'string' && typeof bValue === 'string') {
+                return sortConfig.direction === 'asc'
+                    ? aValue.localeCompare(bValue, 'tr')
+                    : bValue.localeCompare(aValue, 'tr');
+            }
+
             return sortConfig.direction === 'asc'
-                ? aValue.localeCompare(bValue, 'tr')
-                : bValue.localeCompare(aValue, 'tr');
-        }
-
-        return sortConfig.direction === 'asc'
-            ? (aValue > bValue ? 1 : -1)
-            : (aValue < bValue ? 1 : -1);
-    });
+                ? (aValue > bValue ? 1 : -1)
+                : (aValue < bValue ? 1 : -1);
+        });
+    }, [filteredInvoices, sortConfig]);
 
     const resetView = () => {
         setSuccess(false);
@@ -546,13 +551,12 @@ export default function Nakliye() {
     };
 
     // Bir faturanın konteyner adedi: kayıtlı konteynerler alanı varsa ondan, yoksa
-    // mal/hizmet metninden regex ile çıkarılan benzersiz konteyner sayısı.
+    // zenginleştirmede çıkarılmış benzersiz konteyner listesinden.
     const containerCount = (inv: any): number => {
         if (inv.konteynerler) {
             return String(inv.konteynerler).split(",").map((s: string) => s.trim()).filter(Boolean).length;
         }
-        const extracted = extractContainerRef(inv.malHizmet, true) as string[];
-        return extracted.length;
+        return (inv._konteynerListe || []).length;
     };
 
     // ===== Türetilmiş KPI'lar + müşteri ciro payı (filtreli kayıtlardan) =====
@@ -576,12 +580,12 @@ export default function Nakliye() {
             { label: "Ort. Fatura", value: formatCurrencyFull(ort), sub: "fatura başına", color: "#10b981" },
         ];
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filteredInvoices, customers]);
+    }, [filteredInvoices]);
 
     const topMusteri = useMemo(() => {
         const map = new Map<string, number>();
         filteredInvoices.forEach((inv) => {
-            const name = inv.musteri || extractCustomer(inv.malHizmet);
+            const name = inv._musteri;
             if (!name || name === "-") return;
             map.set(name, (map.get(name) || 0) + num(inv.odenecekTutar));
         });
@@ -591,7 +595,7 @@ export default function Nakliye() {
         const max = Math.max(...top.map((t) => t.value), 1);
         return top.map((t) => ({ ...t, w: Math.round((t.value / max) * 100) }));
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filteredInvoices, customers]);
+    }, [filteredInvoices]);
 
     // Sıralanabilir tablo başlığı yardımcı bileşeni
     const SortIcon = ({ column }: { column: string }) => {
@@ -752,9 +756,9 @@ export default function Nakliye() {
                                             <TableCell className="px-2.5 py-1.5 font-bold tabular-nums" style={{ color: "#0284c7" }}>{inv.faturaNo || "N/A"}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 tabular-nums text-muted-foreground">{formatDate(inv.faturaTarihi)}</TableCell>
                                             <TableCell className="max-w-[240px] truncate px-2.5 py-1.5 font-medium" title={inv.malHizmet || undefined}>{inv.malHizmet || "-"}</TableCell>
-                                            <TableCell className="max-w-[150px] truncate px-2.5 py-1.5 font-mono text-[12px] font-medium" style={{ color: "#0284c7" }} title={inv.konteynerler || undefined}>{inv.konteynerler || extractContainerRef(inv.malHizmet)}</TableCell>
+                                            <TableCell className="max-w-[150px] truncate px-2.5 py-1.5 font-mono text-[12px] font-medium" style={{ color: "#0284c7" }} title={inv.konteynerler || undefined}>{inv.konteynerler || inv._konteynerIlk}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 font-bold" style={{ color: "#7c3aed" }}>{inv.ilgiliDosyaNo || "-"}</TableCell>
-                                            <TableCell className="max-w-[170px] truncate px-2.5 py-1.5 font-medium" style={{ color: "#059669" }} title={inv.musteri || undefined}>{inv.musteri || extractCustomer(inv.malHizmet)}</TableCell>
+                                            <TableCell className="max-w-[170px] truncate px-2.5 py-1.5 font-medium" style={{ color: "#059669" }} title={inv._musteri !== "-" ? inv._musteri : undefined}>{inv._musteri}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 text-right font-mono tabular-nums">{formatCurrency(inv.miktar)}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 text-right font-mono tabular-nums text-muted-foreground">{formatCurrency(inv.birimFiyat)}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 text-right font-bold tabular-nums">{formatCurrency(inv.malHizmetToplamTutarı)}</TableCell>
