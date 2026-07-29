@@ -927,6 +927,12 @@ export async function registerRoutes(
         hataMesaji: dogrulama.gecerli ? null : dogrulama.hatalar.join(" | "),
       });
 
+      // Kayıt fatura no ile zaten vardı ama MD5'i yoktu (MD5 dedup'ından önce
+      // eklenmiş). Geriye yazılır; böylece bir sonraki turda analiz edilmez.
+      if (mevcut && !mevcut.pdfMd5) {
+        await storage.updateNakliyeFaturasi(mevcut.id, { pdfMd5 });
+      }
+
       // Nakliye ekranının (Navlun Faturaları) kullandığı tabloya da yaz.
       // Geçiş dönemi: nakliye_verileri ekranı besler, nakliye_faturalari
       // Paraşüt akışını yürütür; ikisi faturaNo üzerinden eşleşir.
