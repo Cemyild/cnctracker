@@ -1,6 +1,40 @@
+
 import type { NakliyeFaturasi } from "@shared/schema";
 import { parasutIstek, jsonApiCoz } from "../parasut/client";
 import { paraBirimiParasut } from "../parasut/hesap";
+
+/**
+ * Fatura kalemi için ürün oluşturur. Adı doğrudan fatura açıklamasıdır.
+ *
+ * Neden her fatura için yeni ürün: Paraşüt arayüzünde hizmet/ürün alanına
+ * yazılan metin ürün adı olur ve Paraşüt kaydı otomatik yaratır. Muhasebecinin
+ * elle yaptığı iş tam olarak budur — referans fatura 121916753'ün ürünü
+ * ("Gemlik Bursa Hasanağa Deka kimya konteyner taşıma UACU8613942") faturayla
+ * aynı saniyede oluşmuş ve yalnızca o faturada kullanılmış. Kalemin
+ * `description` alanı referansta null; görünen metin ürün adının kendisi.
+ *
+ * inventory_tracking: false — hizmet kalemi, stok girişi yapılmamalı.
+ */
+async function urunOlustur(ad: string, kdvOrani: number): Promise<string> {
+  const cevap = await parasutIstek<any>("/products", {
+    method: "POST",
+    body: {
+      data: {
+        type: "products",
+        attributes: {
+          name: ad.slice(0, 200),
+          vat_rate: kdvOrani,
+          unit: "Adet",
+          inventory_tracking: false,
+          currency: "TRL",
+        },
+      },
+    },
+  });
+  const id = cevap?.data?.id;
+  if (!id) throw new Error("Paraşüt cevabında product id yok");
+  return String(id);
+}
 
 /** VKN/TCKN ile Paraşüt cari kartını bulur. Bulamazsa undefined — cari YARATILMAZ. */
 async function tedarikciBul(vkn: string): Promise<string | undefined> {
@@ -81,16 +115,31 @@ export async function parasutaYaz(
   // Tevkifat oranı KDV tutarına göre hesaplanır (2/10 tevkifat → %20).
   const tevkifatOrani = kdv > 0 ? Math.round((tevkifat / kdv) * 100) : 0;
 
-  const pdfLink = fatura.pdfYolu
-    ? ` · PDF: ${(process.env.APP_BASE_URL || "http://localhost:5000").replace(/\/+$/, "")}/${fatura.pdfYolu}`
-    : "";
+  // Ürün adı = fatura açıklaması (muhasebecinin elle yaptığı işin aynısı)
+  const urunAdi = fatura.aciklama || `Nakliye bedeli ${fatura.faturaNo}`;
+  const productId = await urunOlustur(urunAdi, kdvOrani);
 
-  const govde = {
+  const kategoriId = process.env.PARASUT_GIDER_KATEGORI_ID;
+
+  // FİŞ GÖRSELİ (PDF) EKLENEMİYOR — `photo` alanı API'de salt-okunur.
+  // Canlıda denenen ve BAŞARISIZ olan yollar (2026-07-29):
+  //   photo: "data:application/pdf;base64,..."   → HTTP 500
+  //   photo: "<ham base64>"                      → HTTP 500
+  //   photo: { data, filename }                  → 200 ama photo.url null
+  //   remote_photo_url: "<erişilebilir URL>"     → 200 ama photo.url null
+  //     (URL'in HTTP 200 döndüğü doğrulandı; 10 sn sonra da null)
+  // Paraşüt arayüzü dosya yüklemeyi kendi ayrı mekanizmasıyla yapıyor.
+  // PDF CNC'de uploads/nakliye/ altında arşivleniyor ve
+  // /nakliye-faturalari ekranından erişiliyor.
+
+  const govde: any = {
     data: {
       type: "purchase_bills",
       attributes: {
         item_type: "purchase_bill",
-        description: `${fatura.aciklama || "Nakliye bedeli"}${pdfLink}`.slice(0, 500),
+        // KAYIT İSMİ boş bırakılır — referans faturada description null.
+        // Açıklama ürün adına gider.
+        description: null,
         issue_date: fatura.faturaTarihi,
         due_date: fatura.faturaTarihi,
         invoice_no: fatura.faturaNo,
@@ -100,6 +149,9 @@ export async function parasutaYaz(
       },
       relationships: {
         supplier: { data: { id: supplierId, type: "contacts" } },
+        ...(kategoriId
+          ? { category: { data: { id: kategoriId, type: "item_categories" } } }
+          : {}),
         details: {
           data: [
             {
@@ -109,12 +161,11 @@ export async function parasutaYaz(
                 unit_price: matrah,
                 vat_rate: kdvOrani,
                 vat_withholding_rate: tevkifatOrani,
-                description: (fatura.aciklama || "Nakliye bedeli").slice(0, 200),
+                // description null — metin ürün adında (referans davranışı)
+                description: null,
               },
               relationships: {
-                product: {
-                  data: { id: process.env.PARASUT_NAKLIYE_URUN_ID!, type: "products" },
-                },
+                product: { data: { id: productId, type: "products" } },
               },
             },
           ],
