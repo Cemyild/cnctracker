@@ -697,17 +697,11 @@ export default function Nakliye() {
                     </div>
                 )}
 
-                {/* ===== Faturalar (sol) + En Çok Navlun · Müşteri (sağ) ===== */}
-                <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.7fr_1fr]">
-                    {/* Navlun Faturaları */}
-                    <div className="overflow-hidden rounded-[14px] border bg-card">
-                        <div className="flex items-center justify-between border-b px-5 py-4">
-                            <h3 className="text-[15px] font-bold">Navlun Faturaları</h3>
-                            <span className="text-xs text-muted-foreground">{sortedInvoices.length} kayıt</span>
-                        </div>
-
-                        {/* Tarih filtresi */}
-                        <div className="flex flex-wrap items-center gap-4 border-b bg-slate-50/60 px-5 py-3 dark:bg-background/40">
+                {/* ===== Navlun Faturaları (tam genişlik) ===== */}
+                <div className="mt-4 overflow-hidden rounded-[14px] border bg-card">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
+                        <h3 className="text-[15px] font-bold">Navlun Faturaları</h3>
+                        <div className="flex flex-wrap items-center gap-3">
                             <div className="flex items-center gap-2">
                                 <Label htmlFor="startDate" className="whitespace-nowrap text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Başlangıç</Label>
                                 <Input id="startDate" type="date" className="h-8 w-[140px] text-xs" value={dateRange.start} onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))} />
@@ -721,91 +715,96 @@ export default function Nakliye() {
                                     <X className="mr-1 h-3 w-3" /> Filtreyi Temizle
                                 </Button>
                             )}
-                        </div>
-
-                        <div className="overflow-x-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow className="hover:bg-transparent">
-                                        <TableHead className="cursor-pointer text-[10.5px] font-bold uppercase tracking-wide text-slate-500 transition-colors hover:text-foreground" onClick={() => handleSort('faturaNo')}>
-                                            <div className="flex items-center gap-1.5">Fatura No <SortIcon column="faturaNo" /></div>
-                                        </TableHead>
-                                        <TableHead className="cursor-pointer text-[10.5px] font-bold uppercase tracking-wide text-slate-500 transition-colors hover:text-foreground" onClick={() => handleSort('faturaTarihi')}>
-                                            <div className="flex items-center gap-1.5">Tarih <SortIcon column="faturaTarihi" /></div>
-                                        </TableHead>
-                                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Mal/Hizmet</TableHead>
-                                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "#0284c7" }}>Konteyner/Referans</TableHead>
-                                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "#7c3aed" }}>Dosya No</TableHead>
-                                        <TableHead className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "#059669" }}>Müşteri</TableHead>
-                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Miktar</TableHead>
-                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Birim Fiyat</TableHead>
-                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tutar</TableHead>
-                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">KDV</TableHead>
-                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">KDV Tevkifat</TableHead>
-                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Vergili Toplam</TableHead>
-                                        <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Genel Toplam</TableHead>
-                                        <TableHead className="w-[50px]"></TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {sortedInvoices.length > 0 ? (
-                                        sortedInvoices.map((inv) => (
-                                            <TableRow key={inv.id} className="cursor-pointer" onClick={() => setSelectedInvoice(inv)}>
-                                                <TableCell className="font-bold tabular-nums" style={{ color: "#0284c7" }}>{inv.faturaNo || "N/A"}</TableCell>
-                                                <TableCell className="text-sm text-muted-foreground tabular-nums">{formatDate(inv.faturaTarihi)}</TableCell>
-                                                <TableCell className="max-w-[200px] truncate font-medium">{inv.malHizmet || "-"}</TableCell>
-                                                <TableCell className="font-mono text-[12.5px] font-medium" style={{ color: "#0284c7" }}>{inv.konteynerler || extractContainerRef(inv.malHizmet)}</TableCell>
-                                                <TableCell className="font-bold" style={{ color: "#7c3aed" }}>{inv.ilgiliDosyaNo || "-"}</TableCell>
-                                                <TableCell className="max-w-[150px] truncate font-medium" style={{ color: "#059669" }}>{inv.musteri || extractCustomer(inv.malHizmet)}</TableCell>
-                                                <TableCell className="text-right font-mono tabular-nums">{formatCurrency(inv.miktar)}</TableCell>
-                                                <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{formatCurrency(inv.birimFiyat)}</TableCell>
-                                                <TableCell className="text-right font-bold tabular-nums">{formatCurrency(inv.malHizmetToplamTutarı)}</TableCell>
-                                                <TableCell className="text-right tabular-nums text-muted-foreground">{formatCurrency(inv.kdvTutarı)}</TableCell>
-                                                <TableCell className="text-right tabular-nums" style={{ color: "#d97706" }}>{formatCurrency(inv.hesaplananKdvTevkifat20)}</TableCell>
-                                                <TableCell className="text-right tabular-nums text-muted-foreground">{formatCurrency(inv.vergilerDahilToplamTutar)}</TableCell>
-                                                <TableCell className="text-right font-black tabular-nums text-foreground">{formatCurrency(inv.odenecekTutar)}</TableCell>
-                                                <TableCell className="text-center">
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={(e) => handleDeleteInvoice(inv.id, e)}>
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={14} className="h-40 text-center text-muted-foreground">
-                                                <div className="flex flex-col items-center gap-2">
-                                                    <AlertCircle className="h-10 w-10 opacity-20" />
-                                                    <p>Henüz kayıtlı fatura bulunamadı.</p>
-                                                </div>
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
+                            <span className="text-xs text-muted-foreground">{sortedInvoices.length} kayıt</span>
                         </div>
                     </div>
 
-                    {/* En Çok Navlun · Müşteri */}
-                    <div className="rounded-[14px] border bg-card p-5">
+                    {/* Kaydırma kabı dış div; iç Table sarmalayıcısı overflow-visible olmalı,
+                        aksi halde sticky başlık iç (hiç kaymayan) kaba göre çözülür ve yapışmaz. */}
+                    <div className="max-h-[calc(100vh-320px)] overflow-auto [&>div]:overflow-visible">
+                        <Table className="w-full whitespace-nowrap text-[12.5px]">
+                            <TableHeader className="sticky top-0 z-[5] bg-slate-50 dark:bg-muted">
+                                <TableRow className="hover:bg-transparent">
+                                    <TableHead className="h-9 cursor-pointer select-none px-2.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 transition-colors hover:text-foreground" onClick={() => handleSort('faturaNo')}>
+                                        <div className="flex items-center gap-1.5">Fatura No <SortIcon column="faturaNo" /></div>
+                                    </TableHead>
+                                    <TableHead className="h-9 cursor-pointer select-none px-2.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 transition-colors hover:text-foreground" onClick={() => handleSort('faturaTarihi')}>
+                                        <div className="flex items-center gap-1.5">Tarih <SortIcon column="faturaTarihi" /></div>
+                                    </TableHead>
+                                    <TableHead className="h-9 px-2.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Mal/Hizmet</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: "#0284c7" }}>Konteyner/Ref.</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: "#7c3aed" }}>Dosya No</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: "#059669" }}>Müşteri</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Miktar</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Birim Fiyat</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Tutar</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">KDV</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Tevkifat</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Vergili Top.</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Genel Toplam</TableHead>
+                                    <TableHead className="h-9 w-[40px] px-1.5"></TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {sortedInvoices.length > 0 ? (
+                                    sortedInvoices.map((inv) => (
+                                        <TableRow key={inv.id} className="cursor-pointer" onClick={() => setSelectedInvoice(inv)}>
+                                            <TableCell className="px-2.5 py-1.5 font-bold tabular-nums" style={{ color: "#0284c7" }}>{inv.faturaNo || "N/A"}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 tabular-nums text-muted-foreground">{formatDate(inv.faturaTarihi)}</TableCell>
+                                            <TableCell className="max-w-[240px] truncate px-2.5 py-1.5 font-medium" title={inv.malHizmet || undefined}>{inv.malHizmet || "-"}</TableCell>
+                                            <TableCell className="max-w-[150px] truncate px-2.5 py-1.5 font-mono text-[12px] font-medium" style={{ color: "#0284c7" }} title={inv.konteynerler || undefined}>{inv.konteynerler || extractContainerRef(inv.malHizmet)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 font-bold" style={{ color: "#7c3aed" }}>{inv.ilgiliDosyaNo || "-"}</TableCell>
+                                            <TableCell className="max-w-[170px] truncate px-2.5 py-1.5 font-medium" style={{ color: "#059669" }} title={inv.musteri || undefined}>{inv.musteri || extractCustomer(inv.malHizmet)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right font-mono tabular-nums">{formatCurrency(inv.miktar)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right font-mono tabular-nums text-muted-foreground">{formatCurrency(inv.birimFiyat)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right font-bold tabular-nums">{formatCurrency(inv.malHizmetToplamTutarı)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right tabular-nums text-muted-foreground">{formatCurrency(inv.kdvTutarı)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right tabular-nums" style={{ color: "#d97706" }}>{formatCurrency(inv.hesaplananKdvTevkifat20)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right tabular-nums text-muted-foreground">{formatCurrency(inv.vergilerDahilToplamTutar)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5 text-right font-black tabular-nums text-foreground">{formatCurrency(inv.odenecekTutar)}</TableCell>
+                                            <TableCell className="px-1.5 py-1 text-center">
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={(e) => handleDeleteInvoice(inv.id, e)}>
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                ) : (
+                                    <TableRow>
+                                        <TableCell colSpan={14} className="h-40 text-center text-muted-foreground">
+                                            <div className="flex flex-col items-center gap-2">
+                                                <AlertCircle className="h-10 w-10 opacity-20" />
+                                                <p>Henüz kayıtlı fatura bulunamadı.</p>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </div>
+
+                {/* ===== En Çok Navlun · Müşteri (tablonun altında, tam genişlik) ===== */}
+                <div className="mt-4 rounded-[14px] border bg-card p-5">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
                         <h3 className="text-[15px] font-bold">En Çok Navlun · Müşteri</h3>
-                        <p className="mb-4 mt-1 text-xs text-muted-foreground">{yil} toplam ciro payı</p>
-                        <div className="flex flex-col gap-3.5">
-                            {topMusteri.length === 0 && (
-                                <div className="py-6 text-center text-sm text-muted-foreground">Henüz veri yok</div>
-                            )}
-                            {topMusteri.map((m) => (
-                                <div key={m.name}>
-                                    <div className="mb-1.5 flex items-center justify-between gap-2">
-                                        <span className="truncate text-[12.5px] font-semibold text-slate-700" title={m.name}>{m.name}</span>
-                                        <span className="flex-shrink-0 text-[12.5px] font-bold tabular-nums">{formatCurrencyFull(m.value)}</span>
-                                    </div>
-                                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                                        <span className="block h-full rounded-full bg-sky-500" style={{ width: `${m.w}%` }} />
-                                    </div>
+                        <p className="text-xs text-muted-foreground">{yil} toplam ciro payı</p>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                        {topMusteri.length === 0 && (
+                            <div className="py-6 text-center text-sm text-muted-foreground">Henüz veri yok</div>
+                        )}
+                        {topMusteri.map((m) => (
+                            <div key={m.name} className="min-w-0">
+                                <div className="mb-1.5 flex items-center justify-between gap-2">
+                                    <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground/80" title={m.name}>{m.name}</span>
+                                    <span className="flex-shrink-0 text-[12.5px] font-bold tabular-nums">{formatCurrencyFull(m.value)}</span>
                                 </div>
-                            ))}
-                        </div>
+                                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-muted">
+                                    <span className="block h-full rounded-full bg-sky-500" style={{ width: `${m.w}%` }} />
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>
