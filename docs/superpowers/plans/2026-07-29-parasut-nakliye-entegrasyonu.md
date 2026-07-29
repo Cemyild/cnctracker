@@ -31,6 +31,9 @@ Bu bölüm **her görevin** gereksinimlerine dahildir.
   `matrah = net_total − total_vat + total_vat_withholding`
 - **Giden faturada tevkifat asla yoktur.** `withholding_rate: 0` ve `vat_withholding_rate: 0` **kodda sabittir**, gelen faturadan türetilmez.
 - **Paraşüt rate limit:** 10 istek / 10 saniye.
+- **Paraşüt tarih filtresi Ransack sözdizimidir:** `filter[issue_date][gteq]` / `filter[issue_date][lteq]`. Virgüllü aralık (`"2026-06-01,2026-06-30"`) `400 "'issue_date' is not a date"` döndürür. Kabul edilen operatörler: `eq, lt, gt, gteq, lteq, not_eq` (canlıda doğrulandı).
+- **Firma adı eşiği 70** (50 değil): gerçek eşleşmeler kapsama metriğiyle 100 veriyor; 50 civarı skorlar (`DEKA KIMYA` vs `DEKA OTOMOTIV`) farklı firmalar olabilir, tarih kırıcısına düşüp kuyrukta onay beklemeli.
+- **`gumruk_verileri.tescil_tarihi` Excel seri numarası tutabilir** (örn. `46223`). Tarih karşılaştırmaları bu formatı desteklemeli, yoksa sessizce yanlış aday seçilir.
 - Paraşüt kimlik bilgisi yoksa entegrasyon **fail-closed**: zamanlayıcı çalışmaz, log'a tek satır yazar, mevcut hiçbir akış bozulmaz.
 
 ---
@@ -1208,7 +1211,8 @@ async function parasuttaVarMi(faturaNo: string, faturaTarihi: string): Promise<s
   for (let sayfa = 1; sayfa <= 10; sayfa++) {
     const cevap = await parasutIstek<any>("/purchase_bills", {
       query: {
-        "filter[issue_date]": `${bas},${bit}`,
+        "filter[issue_date][gteq]": bas,
+        "filter[issue_date][lteq]": bit,
         "page[size]": "25",
         "page[number]": String(sayfa),
       },
@@ -1320,7 +1324,11 @@ import { parasutIstek, jsonApiCoz } from "./server/parasut/client";
 (async () => {
   // Bilinen bir faturayi ara: GIB2026000000075, tarih 2026-06-26
   const cevap = await parasutIstek<any>("/purchase_bills", {
-    query: { "filter[issue_date]": "2026-06-19,2026-07-03", "page[size]": "25" },
+    query: {
+      "filter[issue_date][gteq]": "2026-06-19",
+      "filter[issue_date][lteq]": "2026-07-03",
+      "page[size]": "25",
+    },
   });
   const { veri } = jsonApiCoz(cevap);
   const bulunan = veri.find((d: any) => d.attributes?.invoice_no === "GIB2026000000075");
@@ -1421,7 +1429,8 @@ export async function parasuttanCek(
   for (let sayfa = 1; sayfa <= 40; sayfa++) {
     const cevap = await parasutIstek<any>("/purchase_bills", {
       query: {
-        "filter[issue_date]": `${bas},${bit}`,
+        "filter[issue_date][gteq]": bas,
+        "filter[issue_date][lteq]": bit,
         "page[size]": "25",
         "page[number]": String(sayfa),
         include: "details,supplier,active_e_document",
