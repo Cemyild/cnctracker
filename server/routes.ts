@@ -3677,8 +3677,12 @@ export async function registerRoutes(
            kullanici: g("KULLANICI"),
            araKonsNo: g("ARA KONS. NO"),
            accountNo: g("ACCOUNT NO"),
-           vd: g("V.D") || g("VERGİ DAİRESİ"),
-           vn: g("V.N") || g("VERGİ NO"),
+           // Satışlar Excel'inde başlıklar noktasız: "VD" / "VN".
+           // Yalnızca "V.D"/"V.N" arandığı için bu iki alan yıllarca boş
+           // kaldı (2026'daki 17.869 satırın tamamında null). Noktasız
+           // varyantlar önce denenir.
+           vd: g("VD") || g("V.D") || g("VERGİ DAİRESİ"),
+           vn: g("VN") || g("V.N") || g("VERGİ NO"),
            odemeSekli: g("ÖDEME ŞEKLİ"),
            musFatura: g("MÜŞ. FATURA"),
            komisyonHesap: g("KOMİSYON HESAP"),
