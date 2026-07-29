@@ -82,6 +82,7 @@ import {
   Pie
 } from "recharts";
 import { ExcelUploadModal } from "@/components/ExcelUploadModal";
+import { TransitUploadButton } from "@/components/TransitUploadButton";
 import { FinancialOverview } from "@/components/FinancialOverview";
 import { AdvancedChart } from "@/components/AdvancedChart";
 import { AnalysisTab } from "@/components/AnalysisTab";
@@ -980,6 +981,7 @@ type Arac = {
                                       ))}
                                     </SelectContent>
                                   </Select>
+                                  <TransitUploadButton onSuccess={handleUploadSuccess} />
                                   <button
                                     type="button"
                                     onClick={() => setIsUploadModalOpen(true)}

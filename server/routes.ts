@@ -3889,6 +3889,127 @@ export async function registerRoutes(
     }
   });
 
+  // ==========================================================================
+  // TRANSİT LİSTESİ YÜKLEME
+  // ==========================================================================
+  // Transit (TR rejim) işleri beyanname listesinde yer almaz; ayrı bir dökümle
+  // gelir ve kolon başlıkları tamamen farklıdır. Bu uç o dökümü aynı
+  // gumruk_verileri tablosuna rejim="TR" olarak yazar; böylece nakliye
+  // eşleştirme motoru transit işlerini de kendiliğinden kapsar.
+  //
+  // Neden ayrı uç: başlıklar ("Dosya No", "Fatura Firma", "Konteyner No")
+  // beyanname Excel'iyle hiç örtüşmüyor, ortak bir eşleme tablosu kurmak
+  // iki formatı da kırılgan hale getirirdi.
+  app.post("/api/gumruk/transit-yukle", uploadMizanMemory.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Dosya yüklenmedi" });
+
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sheetName = workbook.SheetNames[0];
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: null }) as any[];
+      if (rows.length === 0) return res.status(400).json({ error: "Excel boş" });
+
+      // Başlık doğrulaması — yanlış dosya yüklenirse sessizce çöp üretmesin
+      const zorunlu = ["Dosya No", "Fatura Firma"];
+      const eksik = zorunlu.filter((k) => !(k in rows[0]));
+      if (eksik.length > 0) {
+        return res.status(400).json({
+          error: `Bu bir transit listesi değil gibi görünüyor. Eksik kolonlar: ${eksik.join(", ")}`,
+          bulunanKolonlar: Object.keys(rows[0]).slice(0, 20),
+        });
+      }
+
+      const md5Hash = createHash("md5").update(req.file.buffer).digest("hex");
+      const archiveDir = path.join("uploads", "gumruk");
+      if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+      const filepath = path.join(archiveDir, `transit-${Date.now()}-${req.file.originalname}`);
+      await fs.promises.writeFile(filepath, req.file.buffer);
+
+      const dosyaKaydi = await storage.createGumrukDosya({
+        filename: req.file.originalname,
+        filepath,
+        sizeBytes: req.file.size,
+        recordCount: 0,
+        md5Hash,
+        tip: "transit",
+      });
+
+      const veriler: InsertGumrukVerisi[] = [];
+      let tarihsiz = 0;
+      let konteynersiz = 0;
+
+      for (const row of rows) {
+        const dosyaNo = String(row["Dosya No"] ?? "").trim();
+        if (!dosyaNo) continue;
+
+        // Ay/yıl transit kayıt tarihinden. Excel serisi de destekli.
+        const parsed = tarihiAyYilCikar(row["Kayıt Tarihi"]);
+        if (!parsed) { tarihsiz++; continue; }
+
+        const konteyner = String(row["Konteyner No"] ?? "").trim();
+        if (!konteyner) konteynersiz++;
+
+        // Alıcı Vergi No bazı satırlarda 11111111 gibi yer tutucu olabilir;
+        // 10-11 haneli gerçek VKN dışındakiler alınmaz.
+        const vknHam = String(row["Alıcı Vergi No"] ?? "").replace(/\D/g, "");
+        const vkn = /^\d{10,11}$/.test(vknHam) && !/^1+$/.test(vknHam) ? vknHam : null;
+
+        veriler.push({
+          ay: parsed.ay,
+          yil: parsed.yil,
+          rejim: "TR",
+          dosyaNo,
+          firmaUnvan: String(row["Fatura Firma"] ?? row["Alıcı"] ?? "").trim() || null,
+          houseNo: konteyner || null,
+          konteynerSayisi: konteyner ? "1" : null,
+          gumruk: String(row["Varış Gümrük"] ?? "").trim() || null,
+          tescilNo: String(row["MRN"] ?? "").trim() || null,
+          tescilTarihi: String(row["Kayıt Tarihi"] ?? "").trim() || null,
+          vn: vkn,
+          malinCinsi: String(row["Kap Marka"] ?? "").trim() || null,
+          ydFirma: String(row["Gönderen"] ?? "").trim() || null,
+          tasimaCinsi: String(row["Dahili Taşıma Şekli"] ?? "").trim() || null,
+          kapAdedi: row["Toplam Kap Adedi"] != null ? String(row["Toplam Kap Adedi"]) : null,
+          kullanici: String(row["Kullanıcı"] ?? "").trim() || null,
+          referansNo: String(row["Müş Ref No"] ?? "").trim() || null,
+          dosyaId: dosyaKaydi.id,
+          rawData: JSON.stringify(row),
+          rowHash: createRowHash(Object.values(row)),
+        });
+      }
+
+      // Dedup: (ay, yil, rowHash) üzerindeki unique index'e güveniyoruz.
+      let eklenen = 0;
+      let atlanan = 0;
+      for (const v of veriler) {
+        try {
+          const sonuc = await storage.insertGumrukVerileri([v]);
+          if (sonuc.length > 0) eklenen++; else atlanan++;
+        } catch {
+          atlanan++; // unique index çakışması → aynı satır daha önce yüklenmiş
+        }
+      }
+
+      await storage.updateGumrukDosyaRecordCount(dosyaKaydi.id, eklenen);
+
+      res.json({
+        success: true,
+        message: `${eklenen} transit kaydı eklendi` +
+          (atlanan > 0 ? ` (${atlanan} mükerrer atlandı)` : "") +
+          (tarihsiz > 0 ? ` (${tarihsiz} tarihsiz satır atlandı)` : ""),
+        eklenen,
+        atlanan,
+        tarihsiz,
+        konteynersiz,
+        toplam: rows.length,
+      });
+    } catch (error) {
+      console.error("Transit listesi yükleme hatası:", error);
+      const mesaj = error instanceof Error ? error.message : "Bilinmeyen hata";
+      res.status(500).json({ error: `Transit listesi yüklenemedi: ${mesaj}` });
+    }
+  });
+
   // n8n Proxy Upload (Bypassing CORS) supporting multiple files
   app.post("/api/proxy/nakliye-upload", upload.any(), async (req, res) => {
     console.log("--- N8N MULTI-PROXY UPLOAD START ---");
