@@ -1214,3 +1214,105 @@ export const otomatikYuklemeLog = pgTable("otomatik_yukleme_log", {
 export const insertOtomatikYuklemeLogSchema = createInsertSchema(otomatikYuklemeLog).omit({ id: true });
 export type InsertOtomatikYuklemeLog = z.infer<typeof insertOtomatikYuklemeLogSchema>;
 export type OtomatikYuklemeLog = typeof otomatikYuklemeLog.$inferSelect;
+
+// ============================================================================
+// PARAŞÜT NAKLİYE ENTEGRASYONU
+// ============================================================================
+
+// Paraşüt OAuth2 jetonu — TEK SATIR (id sabit 'default').
+// refresh_token rotasyonlu: her yenilemede yenisi gelir, eskisi ölür.
+// Bu yüzden yalnızca tek bir yazıcı olmalı (bkz. server/parasut/client.ts).
+export const parasutToken = pgTable("parasut_token", {
+  id: varchar("id").primaryKey(), // her zaman 'default'
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  guncellemeTarihi: timestamp("guncelleme_tarihi").defaultNow(),
+});
+
+export type ParasutToken = typeof parasutToken.$inferSelect;
+
+// Gelen nakliye faturaları — e-Arşiv (mail) ve e-Fatura (Paraşüt) kanallarının
+// ortak deposu. faturaNo unique olduğu için iki kanaldan aynı fatura girmez.
+export const nakliyeFaturalari = pgTable("nakliye_faturalari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kaynak: text("kaynak").notNull(), // 'earsiv' | 'efatura'
+  faturaNo: text("fatura_no").notNull(),
+  faturaTarihi: text("fatura_tarihi"), // YYYY-MM-DD
+  tedarikciUnvan: text("tedarikci_unvan"),
+  tedarikciVkn: text("tedarikci_vkn"),
+  musteriFirmaAdi: text("musteri_firma_adi"), // PDF'ten çıkarılan; eşleşme sinyali
+  paraBirimi: text("para_birimi").default("TRY"),
+  kur: decimal("kur", { precision: 10, scale: 4 }).default("1"),
+  matrah: decimal("matrah", { precision: 15, scale: 2 }), // KDV hariç
+  kdvOrani: integer("kdv_orani"),
+  kdvTutari: decimal("kdv_tutari", { precision: 15, scale: 2 }),
+  tevkifatTutari: decimal("tevkifat_tutari", { precision: 15, scale: 2 }),
+  odenecekTutar: decimal("odenecek_tutar", { precision: 15, scale: 2 }),
+  konteynerler: text("konteynerler"), // virgülle ayrılmış, normalize
+  aciklama: text("aciklama"),
+  pdfYolu: text("pdf_yolu"),
+  parasutPurchaseBillId: varchar("parasut_purchase_bill_id"),
+  parasutEttn: text("parasut_ettn"),
+  hamMetin: text("ham_metin"), // pdf-parse çıktısı — doğrulama + denetim
+  llmJson: text("llm_json"),
+  // ayristirildi | dogrulama_hatasi | parasutta | eslesti | faturalandi
+  // | revizyon_gerekli | hata
+  durum: text("durum").notNull().default("ayristirildi"),
+  hataMesaji: text("hata_mesaji"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  uniqueIndex("nakliye_faturalari_fatura_no_idx").on(table.faturaNo),
+]);
+
+export const insertNakliyeFaturasiSchema = createInsertSchema(nakliyeFaturalari).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertNakliyeFaturasi = z.infer<typeof insertNakliyeFaturasiSchema>;
+export type NakliyeFaturasi = typeof nakliyeFaturalari.$inferSelect;
+
+// Fatura ↔ beyanname eşleşmesi (n:n)
+export const nakliyeFaturaEslesme = pgTable("nakliye_fatura_eslesme", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  faturaId: varchar("fatura_id").references(() => nakliyeFaturalari.id),
+  gumrukVerisiId: varchar("gumruk_verisi_id").references(() => gumrukVerileri.id),
+  konteyner: text("konteyner"),
+  skor: integer("skor").notNull().default(0),
+  kaynak: text("kaynak").notNull(), // konteyner | konteyner+firma | manuel
+  durum: text("durum").notNull().default("otomatik"), // otomatik | onaylandi | reddedildi
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  uniqueIndex("nakliye_eslesme_fatura_gumruk_idx")
+    .on(table.faturaId, table.gumrukVerisiId, table.konteyner),
+]);
+
+export const insertNakliyeFaturaEslesmeSchema = createInsertSchema(nakliyeFaturaEslesme).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertNakliyeFaturaEslesme = z.infer<typeof insertNakliyeFaturaEslesmeSchema>;
+export type NakliyeFaturaEslesme = typeof nakliyeFaturaEslesme.$inferSelect;
+
+// Paraşüt'e yazılan satış faturası taslakları — beyanname başına TEK
+export const parasutSatisFaturalari = pgTable("parasut_satis_faturalari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  gumrukDosyaNo: text("gumruk_dosya_no").notNull(),
+  parasutSalesInvoiceId: varchar("parasut_sales_invoice_id"),
+  contactId: varchar("contact_id"),
+  netToplam: decimal("net_toplam", { precision: 15, scale: 2 }),
+  paraBirimi: text("para_birimi").default("TRY"),
+  kalemSayisi: integer("kalem_sayisi"),
+  durum: text("durum").notNull().default("taslak"), // taslak | hata
+  hataMesaji: text("hata_mesaji"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  uniqueIndex("parasut_satis_dosya_no_idx").on(table.gumrukDosyaNo),
+]);
+
+export const insertParasutSatisFaturasiSchema = createInsertSchema(parasutSatisFaturalari).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertParasutSatisFaturasi = z.infer<typeof insertParasutSatisFaturasiSchema>;
+export type ParasutSatisFaturasi = typeof parasutSatisFaturalari.$inferSelect;

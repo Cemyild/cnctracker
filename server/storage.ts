@@ -33,6 +33,10 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   firmaIbanlari, type FirmaIban, type OdemeSirketiDetay,
   operasyonAvanslar, operasyonMasraflar, operasyonGunKapanis, type OperasyonAvans, type OperasyonMasraf, type OperasyonGunKapanis,
   type SubeGiderRaporu, type SubeGiderBloku,
+  parasutToken, type ParasutToken,
+  nakliyeFaturalari, type NakliyeFaturasi, type InsertNakliyeFaturasi,
+  nakliyeFaturaEslesme, type NakliyeFaturaEslesme, type InsertNakliyeFaturaEslesme,
+  parasutSatisFaturalari, type ParasutSatisFaturasi, type InsertParasutSatisFaturasi,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
@@ -434,6 +438,27 @@ export interface IStorage {
   geriAc(kapanisId: string, geriAcanId: string): Promise<OperasyonGunKapanis | null>;
   getSubeGiderRaporu(baslangic: string, bitis: string): Promise<SubeGiderRaporu>;
   subeGiderRaporuExcel(baslangic: string, bitis: string): Promise<Buffer>;
+
+  // --- Paraşüt nakliye entegrasyonu ---
+  getParasutToken(): Promise<ParasutToken | undefined>;
+  upsertParasutToken(t: { accessToken: string; refreshToken: string; expiresAt: Date }): Promise<ParasutToken>;
+
+  getNakliyeFaturalari(durum?: string): Promise<NakliyeFaturasi[]>;
+  getNakliyeFaturasiByNo(faturaNo: string): Promise<NakliyeFaturasi | undefined>;
+  insertNakliyeFaturasi(f: InsertNakliyeFaturasi): Promise<NakliyeFaturasi>;
+  updateNakliyeFaturasi(id: string, f: Partial<InsertNakliyeFaturasi>): Promise<NakliyeFaturasi | undefined>;
+
+  getEslesmelerByFatura(faturaIds: string[]): Promise<NakliyeFaturaEslesme[]>;
+  insertEslesme(e: InsertNakliyeFaturaEslesme): Promise<NakliyeFaturaEslesme>;
+  updateEslesme(id: string, e: Partial<InsertNakliyeFaturaEslesme>): Promise<NakliyeFaturaEslesme | undefined>;
+  deleteEslesmelerByFatura(faturaId: string): Promise<void>;
+
+  getGumrukVerileriByIds(ids: string[]): Promise<GumrukVerisi[]>;
+
+  getSatisFaturasiByDosyaNo(dosyaNo: string): Promise<ParasutSatisFaturasi | undefined>;
+  getSatisFaturalari(): Promise<ParasutSatisFaturasi[]>;
+  insertSatisFaturasi(s: InsertParasutSatisFaturasi): Promise<ParasutSatisFaturasi>;
+  updateSatisFaturasi(id: string, s: Partial<InsertParasutSatisFaturasi>): Promise<ParasutSatisFaturasi | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4038,6 +4063,101 @@ export class DatabaseStorage implements IStorage {
     await db.update(operasyonAvanslar).set({ kapanisId: null }).where(eq(operasyonAvanslar.kapanisId, kapanisId));
     await db.update(operasyonMasraflar).set({ kapanisId: null }).where(eq(operasyonMasraflar.kapanisId, kapanisId));
     return k;
+  }
+
+  // ==========================================================================
+  // PARAŞÜT NAKLİYE ENTEGRASYONU
+  // ==========================================================================
+
+  async getParasutToken(): Promise<ParasutToken | undefined> {
+    const [row] = await db.select().from(parasutToken).where(eq(parasutToken.id, "default"));
+    return row;
+  }
+
+  async upsertParasutToken(t: { accessToken: string; refreshToken: string; expiresAt: Date }): Promise<ParasutToken> {
+    const [row] = await db
+      .insert(parasutToken)
+      .values({ id: "default", ...t, guncellemeTarihi: new Date() })
+      .onConflictDoUpdate({
+        target: parasutToken.id,
+        set: { ...t, guncellemeTarihi: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
+  async getNakliyeFaturalari(durum?: string): Promise<NakliyeFaturasi[]> {
+    if (durum) {
+      return await db.select().from(nakliyeFaturalari).where(eq(nakliyeFaturalari.durum, durum));
+    }
+    return await db.select().from(nakliyeFaturalari);
+  }
+
+  async getNakliyeFaturasiByNo(faturaNo: string): Promise<NakliyeFaturasi | undefined> {
+    const [row] = await db.select().from(nakliyeFaturalari).where(eq(nakliyeFaturalari.faturaNo, faturaNo));
+    return row;
+  }
+
+  async insertNakliyeFaturasi(f: InsertNakliyeFaturasi): Promise<NakliyeFaturasi> {
+    const [row] = await db.insert(nakliyeFaturalari).values(f).returning();
+    return row;
+  }
+
+  async updateNakliyeFaturasi(id: string, f: Partial<InsertNakliyeFaturasi>): Promise<NakliyeFaturasi | undefined> {
+    const [row] = await db.update(nakliyeFaturalari).set(f).where(eq(nakliyeFaturalari.id, id)).returning();
+    return row;
+  }
+
+  async getEslesmelerByFatura(faturaIds: string[]): Promise<NakliyeFaturaEslesme[]> {
+    if (faturaIds.length === 0) return [];
+    return await db.select().from(nakliyeFaturaEslesme).where(inArray(nakliyeFaturaEslesme.faturaId, faturaIds));
+  }
+
+  async insertEslesme(e: InsertNakliyeFaturaEslesme): Promise<NakliyeFaturaEslesme> {
+    const [row] = await db.insert(nakliyeFaturaEslesme).values(e).onConflictDoNothing().returning();
+    if (row) return row;
+    // Çakışma olduysa mevcut kaydı döndür (idempotans)
+    const [mevcut] = await db.select().from(nakliyeFaturaEslesme).where(
+      and(
+        eq(nakliyeFaturaEslesme.faturaId, e.faturaId!),
+        eq(nakliyeFaturaEslesme.gumrukVerisiId, e.gumrukVerisiId!),
+      ),
+    );
+    return mevcut;
+  }
+
+  async updateEslesme(id: string, e: Partial<InsertNakliyeFaturaEslesme>): Promise<NakliyeFaturaEslesme | undefined> {
+    const [row] = await db.update(nakliyeFaturaEslesme).set(e).where(eq(nakliyeFaturaEslesme.id, id)).returning();
+    return row;
+  }
+
+  async deleteEslesmelerByFatura(faturaId: string): Promise<void> {
+    await db.delete(nakliyeFaturaEslesme).where(eq(nakliyeFaturaEslesme.faturaId, faturaId));
+  }
+
+  async getGumrukVerileriByIds(ids: string[]): Promise<GumrukVerisi[]> {
+    if (ids.length === 0) return [];
+    return await db.select().from(gumrukVerileri).where(inArray(gumrukVerileri.id, ids));
+  }
+
+  async getSatisFaturasiByDosyaNo(dosyaNo: string): Promise<ParasutSatisFaturasi | undefined> {
+    const [row] = await db.select().from(parasutSatisFaturalari)
+      .where(eq(parasutSatisFaturalari.gumrukDosyaNo, dosyaNo));
+    return row;
+  }
+
+  async getSatisFaturalari(): Promise<ParasutSatisFaturasi[]> {
+    return await db.select().from(parasutSatisFaturalari);
+  }
+
+  async insertSatisFaturasi(s: InsertParasutSatisFaturasi): Promise<ParasutSatisFaturasi> {
+    const [row] = await db.insert(parasutSatisFaturalari).values(s).returning();
+    return row;
+  }
+
+  async updateSatisFaturasi(id: string, s: Partial<InsertParasutSatisFaturasi>): Promise<ParasutSatisFaturasi | undefined> {
+    const [row] = await db.update(parasutSatisFaturalari).set(s).where(eq(parasutSatisFaturalari.id, id)).returning();
+    return row;
   }
 }
 
