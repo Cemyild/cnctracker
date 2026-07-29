@@ -1,0 +1,132 @@
+import Anthropic from "@anthropic-ai/sdk";
+import type { FaturaAlanlari } from "./dogrulama";
+import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
+
+// pdf-parse 2.x'te DEFAULT EXPORT YOKTUR. v1'deki `pdfParse(buffer)` fonksiyonu
+// kaldırılmış, yerine PDFParse sınıfı gelmiştir. Doğrulandı (2.4.5):
+//   new PDFParse({ data: buf }) → await p.getText() → r.text → await p.destroy()
+import { PDFParse } from "pdf-parse";
+
+export function analizAktifMi(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * PDF'in ham metnini çıkarır. Doğrulamanın referans kaynağıdır.
+ * Çıktıya sayfa ayracı eklenir ("-- 1 of 1 --") — doğrulamayı etkilemez.
+ */
+export async function pdfMetniCikar(buf: Buffer): Promise<string> {
+  let p: PDFParse | null = null;
+  try {
+    p = new PDFParse({ data: new Uint8Array(buf) });
+    const sonuc = await p.getText();
+    return sonuc.text || "";
+  } catch (e) {
+    console.error("pdf-parse hatası:", e);
+    return "";
+  } finally {
+    if (p) {
+      try { await p.destroy(); } catch { /* yoksay */ }
+    }
+  }
+}
+
+// Elle yazılmış JSON Schema.
+// zodOutputFormat KULLANILMAZ: SDK 0.110.0'ın helpers/zod'u zod v4 API'si
+// bekler, repoda zod 3.25.76 kurulu ve çağrı TypeError ile patlar.
+const FATURA_SEMASI = {
+  type: "object",
+  properties: {
+    fatura_no: { type: ["string", "null"], description: "Fatura numarası, örn. GIB2026000000075" },
+    fatura_tarihi: { type: ["string", "null"], description: "YYYY-MM-DD biçiminde düzenleme tarihi" },
+    tedarikci_unvan: { type: ["string", "null"], description: "Faturayı kesen firmanın tam unvanı" },
+    tedarikci_vkn: { type: ["string", "null"], description: "Faturayı kesenin vergi kimlik numarası" },
+    musteri_firma_adi: {
+      type: ["string", "null"],
+      description:
+        "Fatura açıklamasında/kaleminde adı geçen NİHAİ MÜŞTERİ firma adı. " +
+        "Faturayı kesen ya da faturanın kesildiği firma DEĞİL; taşımanın kime " +
+        "ait olduğunu belirten firma. Yoksa null.",
+    },
+    konteynerler: {
+      type: "array",
+      items: { type: "string" },
+      description: "Metinde geçen konteyner numaraları, örn. MSBU4529335. Yoksa boş dizi.",
+    },
+    para_birimi: { type: ["string", "null"], description: "TRY, USD, EUR veya GBP" },
+    matrah: { type: ["number", "null"], description: "KDV hariç mal/hizmet toplam tutarı" },
+    kdv_orani: { type: ["number", "null"], description: "KDV yüzdesi, örn. 20 veya 0" },
+    kdv_tutari: { type: ["number", "null"], description: "Hesaplanan KDV tutarı" },
+    tevkifat_tutari: { type: ["number", "null"], description: "KDV tevkifat tutarı. Yoksa 0." },
+    odenecek_tutar: { type: ["number", "null"], description: "Ödenecek toplam tutar" },
+    aciklama: { type: ["string", "null"], description: "Mal/hizmet açıklaması, tek satır" },
+  },
+  required: [
+    "fatura_no", "fatura_tarihi", "tedarikci_unvan", "tedarikci_vkn",
+    "musteri_firma_adi", "konteynerler", "para_birimi", "matrah",
+    "kdv_orani", "kdv_tutari", "tevkifat_tutari", "odenecek_tutar", "aciklama",
+  ],
+  additionalProperties: false,
+} as const;
+
+const SISTEM_TALIMATI = `Sen bir Türk e-Arşiv/e-Fatura belgesini okuyan bir çıkarım motorusun.
+Yalnızca belgede AÇIKÇA yazan bilgiyi döndür.
+
+KURALLAR:
+- Emin olmadığın alan için null döndür. ASLA tahmin etme, ASLA hesaplama uydurma.
+- Tutarlar sayı olarak döner (1.234,56 → 1234.56). Para birimi sembolü ekleme.
+- tevkifat_tutari belgede yoksa 0 döndür.
+- konteynerler: 4 harf + 7 rakam biçimindeki numaralar (örn. MSBU4529335).
+  Belgede yoksa boş dizi döndür.
+- musteri_firma_adi: taşımanın kime ait olduğunu belirten firma. Faturayı
+  kesen firma ya da faturanın kesildiği firma DEĞİL. Emin değilsen null.`;
+
+/**
+ * PDF'i Claude ile ayrıştırır. Doğrulama YAPMAZ — çağıran taraf
+ * faturaDogrula() ile kontrol etmelidir.
+ */
+export async function faturaAnalizEt(buf: Buffer): Promise<FaturaAlanlari> {
+  if (!analizAktifMi()) {
+    throw new Error("ANTHROPIC_API_KEY tanımlı değil");
+  }
+
+  const client = new Anthropic({ maxRetries: 2, timeout: 120_000 });
+
+  const mesaj = await client.messages.create({
+    model: "claude-opus-5",
+    max_tokens: 4096,
+    system: SISTEM_TALIMATI,
+    output_config: { format: { type: "json_schema", schema: FATURA_SEMASI } },
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: buf.toString("base64"),
+            },
+          },
+          { type: "text", text: "Bu nakliye faturasındaki alanları çıkar." },
+        ],
+      },
+    ],
+  } as any); // output_config SDK 0.110.0 tiplerinde henüz dar tanımlı
+
+  const metinBlok = (mesaj as any).content.find(
+    (b: any) => b.type === "text",
+  );
+  if (!metinBlok) throw new Error("Claude cevabında metin bloğu yok");
+
+  const ham = JSON.parse(metinBlok.text) as FaturaAlanlari;
+
+  // Konteynerleri normalize et ve geçersizleri at
+  ham.konteynerler = (ham.konteynerler || [])
+    .map(normalizeKonteyner)
+    .filter(konteynerGecerliMi)
+    .filter((k, i, arr) => arr.indexOf(k) === i);
+
+  return ham;
+}
