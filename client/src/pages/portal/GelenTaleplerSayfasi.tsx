@@ -21,10 +21,6 @@ import BelgeLinkleri from "./BelgeLinkleri";
 
 const TH = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
 
-function bas2(s: string | null | undefined) {
-  return (s ?? "?").trim().slice(0, 2).toUpperCase();
-}
-
 function DurumRozeti({ durum }: { durum: string }) {
   const stil = durum === "odendi"
     ? "border-transparent bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
@@ -159,14 +155,7 @@ export default function GelenTaleplerSayfasi() {
           {list.map((t) => (
             <TableRow key={t.id} className="hover:bg-muted/30" data-testid={`row-muhasebe-talep-${t.id}`}>
               <TableCell className="tabular-nums">{formatTarih(t.talepTarihi)}</TableCell>
-              <TableCell>
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-[11px] font-bold text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
-                    {bas2(t.talepEdenAd)}
-                  </span>
-                  <span className="truncate font-medium">{t.talepEdenAd}</span>
-                </div>
-              </TableCell>
+              <TableCell className="font-medium">{t.talepEdenAd}</TableCell>
               <TableCell className="font-medium tabular-nums">
                 {t.beyanname?.dosyaNo ?? <Badge variant="outline">Dosyasız</Badge>}
               </TableCell>
