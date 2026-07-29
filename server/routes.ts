@@ -10,6 +10,7 @@ import path from "path";
 import express from "express";
 import { pdfMetniCikar, faturaAnalizEt } from "./nakliye/faturaAnaliz";
 import { faturaDogrula } from "./nakliye/dogrulama";
+import { parasuttanCek } from "./nakliye/parasutOkuma";
 
 const ruhsatStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -954,7 +955,24 @@ export async function registerRoutes(
     }
   });
 
-  // N8N Webhook Receiver (Gelen otomatik verileri dinler) - EN USTTE OLMALI
+  // Paraşüt'teki alış faturalarını çek (e-Fatura kanalı).
+  // Konteyner numarası geçen faturalar nakliye sayılır; e-belge PDF'i
+  // Paraşüt'ten indirilip uploads/nakliye altına arşivlenir.
+  app.post("/api/nakliye/parasut-cek", async (req, res) => {
+    try {
+      const gun = Number(req.body?.gun) > 0 ? Number(req.body.gun) : 60;
+      const sonuc = await parasuttanCek(gun);
+      res.json({ success: true, ...sonuc });
+    } catch (error) {
+      console.error("Paraşüt'ten çekme hatası:", error);
+      const mesaj = error instanceof Error ? error.message : "Bilinmeyen hata";
+      res.status(500).json({ error: mesaj });
+    }
+  });
+
+  // ESKİ n8n/poller alıcısı. Poller artık PDF'i /api/nakliye/fatura-yukle'ye
+  // gönderiyor (ayrıştırma sunucuda, Claude ile). Bu uç yalnızca geriye dönük
+  // uyumluluk için duruyor; yeni bir istemci bağlanmamalı.
   app.post("/api/nakliye/webhook-receiver", async (req, res) => {
     console.log("--- N8N AUTOMATED RECEIVER START ---");
     try {
@@ -4010,63 +4028,9 @@ export async function registerRoutes(
     }
   });
 
-  // n8n Proxy Upload (Bypassing CORS) supporting multiple files
-  app.post("/api/proxy/nakliye-upload", upload.any(), async (req, res) => {
-    console.log("--- N8N MULTI-PROXY UPLOAD START ---");
-    try {
-      const files = req.files as Express.Multer.File[];
-      if (!files || files.length === 0) {
-        console.error("DEBUG: No files found in request. Body keys:", Object.keys(req.body || {}));
-        return res.status(400).json({ error: "Dosya yüklenmedi" });
-      }
-
-      console.log(`DEBUG: Total files received: ${files.length}`);
-      files.forEach((f, i) => console.log(`  File ${i + 1}: field=${f.fieldname}, name=${f.originalname}`));
-
-      const N8N_WEBHOOK_URL = "https://cnccem.app.n8n.cloud/webhook-test/aeb369ba-de90-4ee2-805c-26dd12693f90";
-
-      // Create a new FormData for the server-to-server request
-      const formData = new FormData();
-
-      files.forEach((file, index) => {
-        const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype });
-        formData.append("file", blob, file.originalname);
-        console.log(`DEBUG: Appending file ${index + 1}: ${file.originalname}`);
-      });
-
-      console.log(`DEBUG: Forwarding to n8n: ${N8N_WEBHOOK_URL}`);
-
-      const response = await fetch(N8N_WEBHOOK_URL, {
-        method: "POST",
-        body: formData,
-      });
-
-      console.log(`DEBUG: n8n response status: ${response.status} ${response.statusText}`);
-
-      if (response.ok) {
-        const contentType = response.headers.get("content-type") || "";
-
-        if (contentType.includes("spreadsheetml") || contentType.includes("excel")) {
-          const arrayBuffer = await response.arrayBuffer();
-          const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
-          const sheetName = workbook.SheetNames[0];
-          const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-          return res.json({ success: true, dataType: "xlsx_parsed", data: jsonData });
-        }
-
-        const data = await response.json().catch(() => ({ success: true }));
-        res.json(data);
-      } else {
-        const errorText = await response.text();
-        res.status(response.status).json({ error: "n8n hatası", details: errorText });
-      }
-    } catch (error) {
-      console.error("DEBUG: Proxy system error:", error);
-      res.status(500).json({ error: "Sunucu hatası" });
-    } finally {
-      console.log("--- N8N MULTI-PROXY UPLOAD END ---");
-    }
-  });
+  // NOT: n8n proxy ucu (/api/proxy/nakliye-upload) kaldirildi. n8n devre disi;
+  // PDF fatura yuklemesi artik /api/nakliye/fatura-yukle uzerinden yapiliyor
+  // (analiz + dogrulama + kayit tek adimda, sunucuda).
 
   // Nakliye Verilerini Getir
   app.get("/api/nakliye", async (_req, res) => {

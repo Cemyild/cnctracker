@@ -2,6 +2,7 @@ import { storage } from "../storage";
 import { parasutIstek, jsonApiCoz, iliskiId } from "../parasut/client";
 import { parasutMatrahTuret, paraBirimiCnc } from "../parasut/hesap";
 import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
+import { eBelgePdfIndir } from "./parasutPdf";
 
 /** Serbest metinden konteyner numaralarını çıkarır (4 harf + 7 rakam). */
 function konteynerCikar(metin: string): string[] {
@@ -111,6 +112,13 @@ export async function parasuttanCek(
       const aciklama = (ilkUrunId ? iliskili.get(`products:${ilkUrunId}`)?.attributes?.name : null)
         || a.description || null;
 
+      // e-Belge PDF'ini Paraşüt'ten indirip arşive al. Kullanıcının istediği
+      // "Paraşüt'ten de PDF olarak alınsın" adımı budur.
+      let pdfYolu: string | null = null;
+      if (eBelgeId) {
+        pdfYolu = await eBelgePdfIndir(eBelgeId, faturaNo);
+      }
+
       await storage.insertNakliyeFaturasi({
         kaynak: "efatura",
         faturaNo,
@@ -127,7 +135,7 @@ export async function parasuttanCek(
         odenecekTutar: String(netTotal),
         konteynerler: konteynerler.join(", "),
         aciklama: aciklama ? String(aciklama).slice(0, 500) : null,
-        pdfYolu: null,
+        pdfYolu,
         parasutPurchaseBillId: String(d.id),
         parasutEttn: eBelge?.attributes?.uuid || null,
         hamMetin: null,
@@ -135,6 +143,32 @@ export async function parasuttanCek(
         durum: "parasutta",
         hataMesaji: null,
       });
+
+      // Nakliye ekranının (Navlun Faturaları) kullandığı tabloya da yaz —
+      // aksi halde Paraşüt'ten çekilen e-faturalar ekranda görünmez.
+      const ekranKaydi = (await storage.getNakliyeVerileri())
+        .find((v) => v.faturaNo === faturaNo);
+      if (!ekranKaydi) {
+        await storage.insertNakliyeVerileri([{
+          faturaNo,
+          faturaTarihi: a.issue_date || null,
+          malHizmet: aciklama ? String(aciklama).slice(0, 500) : null,
+          miktar: "1",
+          birimFiyat: String(matrah),
+          kdvOranı: kdvOrani,
+          kdvTutarı: String(totalVat),
+          malHizmetToplamTutarı: String(matrah),
+          hesaplananKdv20: String(totalVat),
+          hesaplananKdvTevkifat20: String(tevkifat),
+          vergilerDahilToplamTutar: String(Math.round((matrah + totalVat) * 100) / 100),
+          odenecekTutar: String(netTotal),
+          konteynerler: konteynerler.join(", "),
+          tedarikciUnvan: supplier?.attributes?.name || null,
+          tedarikciVkn: supplier?.attributes?.tax_number || null,
+          pdfYolu,
+          rawJson: JSON.stringify({ kaynak: "parasut", purchaseBillId: d.id, attributes: a }),
+        }]);
+      }
       yeni++;
     }
 

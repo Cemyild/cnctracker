@@ -319,8 +319,9 @@ export default function Nakliye() {
         }
     };
 
-    // Local Proxy URL (handles the n8n request server-side to bypass CORS)
-    const PROXY_URL = "/api/proxy/nakliye-upload";
+    // PDF fatura yükleme ucu. Analiz (Claude), doğrulama ve kayıt tek adımda
+    // sunucuda yapılır — eskiden n8n'e giden iki adımlı akışın yerini aldı.
+    const UPLOAD_URL = "/api/nakliye/fatura-yukle";
 
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
@@ -330,59 +331,55 @@ export default function Nakliye() {
         setSuccess(false);
         setExtractedData([]);
 
-        const formData = new FormData();
+        // Uç tek dosya alıyor (analiz PDF başına yapılıyor), bu yüzden sırayla
+        // gönderilir. Sıralı olması kasıtlı: her PDF bir LLM çağrısı demek.
+        const basarili: string[] = [];
+        const dogrulamaHatasi: string[] = [];
+        const mevcut: string[] = [];
+        const hatali: string[] = [];
+
         for (let i = 0; i < files.length; i++) {
-            formData.append("file", files[i]);
-        }
+            const dosya = files[i];
+            try {
+                const fd = new FormData();
+                fd.append("file", dosya);
+                const r = await fetch(UPLOAD_URL, { method: "POST", body: fd });
+                const j = await r.json().catch(() => ({}));
 
-        try {
-            console.log(`CLIENT: Sending ${files.length} files in a single batch to proxy...`);
-            const response = await fetch(PROXY_URL, {
-                method: "POST",
-                body: formData,
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                console.log("CLIENT: Batch upload success data:", result);
-
-                let processedData = [];
-                if (result.dataType === "xlsx_parsed") {
-                    processedData = result.data || [];
-                } else if (Array.isArray(result)) {
-                    processedData = result.map(item => {
-                        if (item.output && typeof item.output === 'object' && !Array.isArray(item.output)) return item.output;
-                        if (item.data && typeof item.data === 'object' && !Array.isArray(item.data)) return item.data;
-                        return item;
-                    });
-                } else if (result.data && Array.isArray(result.data)) {
-                    processedData = result.data;
-                } else if (result.output && typeof result.output === 'object') {
-                    processedData = [result.output];
+                if (!r.ok) {
+                    hatali.push(`${dosya.name}: ${j.error || r.status}`);
+                } else if (j.already_exists) {
+                    mevcut.push(j.faturaNo || dosya.name);
+                } else if (j.durum === "dogrulama_hatasi") {
+                    dogrulamaHatasi.push(`${j.faturaNo || dosya.name}: ${(j.hatalar || []).join(" | ")}`);
                 } else {
-                    processedData = [result];
+                    basarili.push(j.faturaNo || dosya.name);
                 }
-
-                setExtractedData(processedData);
-                setSuccess(true);
-                toast({
-                    title: "İşlem Tamamlandı",
-                    description: `${files.length} belge tek bir paket olarak işlendi.`,
-                });
-            } else {
-                console.error("CLIENT: Batch upload failed");
-                throw new Error("Batch request failed");
+            } catch (error) {
+                hatali.push(`${dosya.name}: ${error instanceof Error ? error.message : "bilinmeyen hata"}`);
             }
-        } catch (error) {
-            console.error("CLIENT: Critical error during batch upload:", error);
-            toast({
-                variant: "destructive",
-                title: "Hata",
-                description: "Belgeler gönderilirken bir hata oluştu.",
-            });
-        } finally {
-            setUploading(false);
         }
+
+        const parcalar: string[] = [];
+        if (basarili.length) parcalar.push(`${basarili.length} yeni fatura işlendi`);
+        if (mevcut.length) parcalar.push(`${mevcut.length} zaten kayıtlı`);
+        if (dogrulamaHatasi.length) parcalar.push(`${dogrulamaHatasi.length} doğrulama hatası`);
+        if (hatali.length) parcalar.push(`${hatali.length} başarısız`);
+
+        toast({
+            title: hatali.length || dogrulamaHatasi.length ? "İşlem tamamlandı (uyarılı)" : "İşlem tamamlandı",
+            description: parcalar.join(" · ") || "Değişiklik yok",
+            variant: hatali.length ? "destructive" : "default",
+        });
+
+        if (dogrulamaHatasi.length) console.warn("Doğrulama hataları:", dogrulamaHatasi);
+        if (hatali.length) console.error("Başarısız yüklemeler:", hatali);
+
+        // Kayıtlar sunucuda oluştu; listeyi tazele. Ayrı "Sisteme Kaydet"
+        // adımına gerek yok.
+        await fetchSavedInvoices();
+        setUploading(false);
+        if (event.target) event.target.value = "";
     };
 
     const handleSaveToSystem = async () => {
