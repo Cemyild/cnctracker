@@ -856,6 +856,23 @@ export async function registerRoutes(
       if (!req.file) return res.status(400).json({ error: "Dosya yüklenmedi" });
 
       const buf = fs.readFileSync(req.file.path);
+
+      // Dedup katman 0 — ANALİZDEN ÖNCE. Poller 30 gün geriye baktığı için
+      // aynı mail her turda tekrar gelir; MD5 kontrolü olmadan her saat
+      // onlarca gereksiz LLM çağrısı yapılır.
+      const pdfMd5 = createHash("md5").update(buf).digest("hex");
+      const md5Mevcut = await storage.getNakliyeFaturasiByMd5(pdfMd5);
+      if (md5Mevcut) {
+        fs.unlinkSync(req.file.path);
+        return res.json({
+          success: true,
+          already_exists: true,
+          id: md5Mevcut.id,
+          faturaNo: md5Mevcut.faturaNo,
+          durum: md5Mevcut.durum,
+        });
+      }
+
       const hamMetin = await pdfMetniCikar(buf);
       const alanlar = await faturaAnalizEt(buf);
       const dogrulama = faturaDogrula(alanlar, hamMetin);
@@ -905,6 +922,7 @@ export async function registerRoutes(
         parasutEttn: ettnEslesme ? ettnEslesme[0].toLowerCase() : null,
         hamMetin,
         llmJson: JSON.stringify(alanlar),
+        pdfMd5,
         durum: dogrulama.gecerli ? "ayristirildi" : "dogrulama_hatasi",
         hataMesaji: dogrulama.gecerli ? null : dogrulama.hatalar.join(" | "),
       });
@@ -942,6 +960,8 @@ export async function registerRoutes(
 
       res.json({
         success: true,
+        // Fatura numarası bazında zaten kayıtlıydı (farklı PDF, aynı fatura)
+        already_exists: Boolean(mevcut),
         id: kayit.id,
         faturaNo: kayit.faturaNo,
         durum: kayit.durum,

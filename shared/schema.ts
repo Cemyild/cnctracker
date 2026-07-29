@@ -1261,6 +1261,10 @@ export const nakliyeFaturalari = pgTable("nakliye_faturalari", {
   parasutEttn: text("parasut_ettn"),
   hamMetin: text("ham_metin"), // pdf-parse çıktısı — doğrulama + denetim
   llmJson: text("llm_json"),
+  // Kaynak PDF'in MD5'i. Poller 30 gün geriye baktığı için aynı mail her
+  // turda tekrar gelir; bu alan sayesinde ayrıştırma YAPILMADAN atlanır
+  // (aksi halde her saat onlarca gereksiz LLM çağrısı olur).
+  pdfMd5: text("pdf_md5"),
   // ayristirildi | dogrulama_hatasi | parasutta | eslesti | faturalandi
   // | revizyon_gerekli | hata
   durum: text("durum").notNull().default("ayristirildi"),

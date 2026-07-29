@@ -445,6 +445,7 @@ export interface IStorage {
 
   getNakliyeFaturalari(durum?: string): Promise<NakliyeFaturasi[]>;
   getNakliyeFaturasiByNo(faturaNo: string): Promise<NakliyeFaturasi | undefined>;
+  getNakliyeFaturasiByMd5(md5: string): Promise<NakliyeFaturasi | undefined>;
   insertNakliyeFaturasi(f: InsertNakliyeFaturasi): Promise<NakliyeFaturasi>;
   updateNakliyeFaturasi(id: string, f: Partial<InsertNakliyeFaturasi>): Promise<NakliyeFaturasi | undefined>;
 
@@ -4095,6 +4096,11 @@ export class DatabaseStorage implements IStorage {
 
   async getNakliyeFaturasiByNo(faturaNo: string): Promise<NakliyeFaturasi | undefined> {
     const [row] = await db.select().from(nakliyeFaturalari).where(eq(nakliyeFaturalari.faturaNo, faturaNo));
+    return row;
+  }
+
+  async getNakliyeFaturasiByMd5(md5: string): Promise<NakliyeFaturasi | undefined> {
+    const [row] = await db.select().from(nakliyeFaturalari).where(eq(nakliyeFaturalari.pdfMd5, md5));
     return row;
   }
 
