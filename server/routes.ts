@@ -11,6 +11,8 @@ import express from "express";
 import { pdfMetniCikar, faturaAnalizEt } from "./nakliye/faturaAnaliz";
 import { faturaDogrula } from "./nakliye/dogrulama";
 import { parasuttanCek } from "./nakliye/parasutOkuma";
+import { senkronCalistir, senkronHazirMi } from "./nakliye/senkron";
+import { faturaOnizleme } from "./nakliye/satisFaturasi";
 
 const ruhsatStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -978,6 +980,33 @@ export async function registerRoutes(
       console.error("Nakliye fatura yükleme hatası:", error);
       const mesaj = error instanceof Error ? error.message : "Bilinmeyen hata";
       res.status(500).json({ error: `Fatura işlenemedi: ${mesaj}` });
+    }
+  });
+
+  // Nakliye boru hattının tamamı: Paraşüt'ten çek → e-Arşiv'leri Paraşüt'e
+  // yaz → eşleştir → satış faturası taslağı. Resmileştirme YAPILMAZ.
+  app.post("/api/nakliye/senkron", async (_req, res) => {
+    try {
+      if (!senkronHazirMi()) {
+        return res.status(503).json({ error: "Paraşüt kimlik bilgileri eksik (.env)" });
+      }
+      const sonuc = await senkronCalistir();
+      res.json({ success: true, ...sonuc });
+    } catch (error) {
+      console.error("Nakliye senkron hatası:", error);
+      const mesaj = error instanceof Error ? error.message : "Bilinmeyen hata";
+      res.status(500).json({ error: mesaj });
+    }
+  });
+
+  // Satış faturası önizlemesi — Paraşüt'e hiçbir şey yazmadan hangi dosyaların
+  // hazır olduğunu, kalemleri, tutarları ve fatura notunu döndürür.
+  app.get("/api/nakliye/satis-onizleme", async (_req, res) => {
+    try {
+      res.json(await faturaOnizleme());
+    } catch (error) {
+      console.error("Satış önizleme hatası:", error);
+      res.status(500).json({ error: "Önizleme alınamadı" });
     }
   });
 

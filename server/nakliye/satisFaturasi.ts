@@ -31,7 +31,59 @@ export type DosyaOnizleme = {
   netToplam: number;
   kdvToplam: number;
   genelToplam: number;
+  /** Paraşüt "Fatura Notu" alanına yazılacak beyanname bilgi satırı. */
+  faturaNotu: string;
 };
+
+/**
+ * Tarihi gg.aa.yyyy biçimine çevirir.
+ * Üç girdi biçimi: YYYY-MM-DD, DD.MM.YYYY ve EXCEL SERİ NUMARASI (örn. 46223 —
+ * gumruk_verileri.tescil_tarihi Excel import'undan böyle gelebiliyor).
+ * new Date() ile parse EDİLMEZ (timezone kayması, commit c897dff).
+ */
+function tarihGoster(t: string | null | undefined): string {
+  const s = String(t ?? "").trim();
+  if (!s) return "";
+  if (/^\d{2}\.\d{2}\.\d{4}/.test(s)) return s.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const [y, a, g] = s.slice(0, 10).split("-");
+    return `${g}.${a}.${y}`;
+  }
+  if (/^\d{4,6}$/.test(s)) {
+    const seri = Number(s);
+    if (seri >= 20000 && seri <= 60000) {
+      const d = new Date((seri - 25569) * 86400_000);
+      const g = String(d.getUTCDate()).padStart(2, "0");
+      const a = String(d.getUTCMonth() + 1).padStart(2, "0");
+      return `${g}.${a}.${d.getUTCFullYear()}`;
+    }
+  }
+  return s;
+}
+
+/**
+ * Paraşüt "Fatura Notu" alanına yazılacak beyanname bilgi satırını üretir.
+ *
+ * Biçim, CNC ekranındaki eşleşme kutusuyla aynı sırayı izler:
+ *   dosya no - firma unvanı - gümrük - kıymet - döviz - tescil no - tescil tarihi - konteyner(ler)
+ *
+ * Amaç: müşteriye kesilen faturada hangi beyannameye ait olduğunu okumak;
+ * muhasebede ve müşteri tarafında mutabakatı kolaylaştırır.
+ */
+function faturaNotuUret(g: GumrukVerisi, konteynerler: string[]): string {
+  const parcalar = [
+    g.dosyaNo,
+    g.firmaUnvan,
+    g.gumruk,
+    g.dovizKiymeti != null ? String(g.dovizKiymeti) : "",
+    g.doviz,
+    g.tescilNo,
+    tarihGoster(g.tescilTarihi),
+    konteynerler.join(", "),
+  ].map((p) => String(p ?? "").trim());
+
+  return parcalar.filter((p) => p.length > 0).join(" - ");
+}
 
 /**
  * Beyanname bazında gruplanmış faturaların önizlemesini üretir.
@@ -113,6 +165,7 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
       netToplam,
       kdvToplam,
       genelToplam: Math.round((netToplam + kdvToplam) * 100) / 100,
+      faturaNotu: faturaNotuUret(grup.gumruk, Array.from(grup.konteynerler)),
     });
   }
 
@@ -298,6 +351,8 @@ export async function tamamlananDosyalariFaturala(
             currency: paraBirimiParasut(d.paraBirimi),
             exchange_rate: 1,
             withholding_rate: 0, // SABİT — gidende tevkifat yok
+            // Beyanname bilgi satırı; müşteri ve muhasebe mutabakatı için
+            invoice_note: d.faturaNotu || null,
           },
           relationships: {
             contact: { data: { id: contactId, type: "contacts" } },
