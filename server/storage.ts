@@ -153,6 +153,7 @@ export interface IStorage {
   insertSigortaPoliceleri(veriler: InsertSigortaPolice[]): Promise<SigortaPolice[]>;
   deleteSigortaPoliceleri(sirket: string, ay?: string, yil?: number): Promise<void>;
   getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; toplamBedel: number; evetSayisi: number; tutarFarkiSayisi: number }[]>;
+  getSigortaSirketler(yil: number): Promise<string[]>;
   getSigortaFirmaOzet(yil: number, ay?: string, sirket?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]>;
   updateSigortaPoliceDekontDurumu(id: string, durum: string): Promise<SigortaPolice | null>;
   updateSigortaPoliceleriDekontDurumuBulk(ids: string[], durum: string): Promise<number>;
@@ -1666,6 +1667,26 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
+
+  // O yıl için gerçekten verisi olan acenteler. Poliçe VE muhasebe tabloları
+  // birlikte taranır: bir yılda poliçesi silinmiş ama muhasebe kaydı duran
+  // acente de listede kalsın (arayüz sekmeleri buna göre gösteriliyor).
+  async getSigortaSirketler(yil: number): Promise<string[]> {
+    const [policeSirketleri, muhasebeSirketleri] = await Promise.all([
+      db.selectDistinct({ sirket: sigortaPoliceleri.sirket })
+        .from(sigortaPoliceleri)
+        .where(eq(sigortaPoliceleri.yil, yil)),
+      db.selectDistinct({ sirket: sigortaMuhasebeKayitlari.sirket })
+        .from(sigortaMuhasebeKayitlari)
+        .where(eq(sigortaMuhasebeKayitlari.yil, yil)),
+    ]);
+
+    const benzersiz = new Set<string>();
+    for (const satir of [...policeSirketleri, ...muhasebeSirketleri]) {
+      if (satir.sirket) benzersiz.add(satir.sirket);
+    }
+    return Array.from(benzersiz).sort();
+  }
 
   async getSigortaFirmaOzet(yil: number, ay?: string, sirket?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]> {
     const filters = [eq(sigortaPoliceleri.yil, yil)];

@@ -1475,6 +1475,20 @@ export async function registerRoutes(
     }
   });
 
+  // Seçili yılda verisi bulunan acenteler — arayüzdeki acente filtresi ve
+  // alt sekmeler bu listeden üretilir, sabit liste tutulmaz.
+  app.get("/api/sigorta/sirketler/:yil", async (req, res) => {
+    try {
+      const yil = parseInt(req.params.yil);
+      if (isNaN(yil)) return res.status(400).json({ error: "Geçersiz yıl" });
+      const sirketler = await storage.getSigortaSirketler(yil);
+      res.json(sirketler);
+    } catch (err) {
+      console.error("Sigorta şirket listesi alınırken hata:", err);
+      res.status(500).json({ error: "Şirket listesi alınırken hata oluştu" });
+    }
+  });
+
   app.get("/api/sigorta/ozet/:yil", async (req, res) => {
     try {
       const { yil } = req.params;

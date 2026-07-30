@@ -50,6 +50,25 @@ const COMPANIES = {
     RAY: 'Ray Sigorta'
 };
 
+// Mapfre ile çalışma bitti; ancak geçmiş yıl kayıtları duruyor. Bu yüzden
+// acente sekmeleri sabit değil: seçili yılda gerçekten verisi olan acenteler
+// sunucudan sorulur. 2026 ve sonrasında Mapfre hiç çizilmez, 2025'e bakıldığında
+// geçmiş eksiksiz görünür. Yeni veri yükleme ise Mapfre'ye tamamen kapalıdır.
+function useSigortaSirketler(yil: number) {
+    const { data } = useQuery<string[]>({
+        queryKey: ['sigorta-sirketler', yil],
+        queryFn: async () => {
+            const res = await apiRequest("GET", `/api/sigorta/sirketler/${yil}`);
+            return res.json();
+        },
+    });
+    const sirketler = data || [];
+    return {
+        sirketler,
+        mapfreVarMi: sirketler.includes(COMPANIES.MAPFRE),
+    };
+}
+
 // Bu firmalar için kesilen poliçeler 0-değerli olduğundan muhasebede hiç
 // görünmez; otomatik "EVET" sayılırlar. Yeni firma eklemek için sadece
 // alt-kase, TR karaktersiz bir anahtar kelime ekle — substring eşleşir.
@@ -91,14 +110,21 @@ export default function Sigorta() {
     
     const [selectedYear, setSelectedYear] = useState<number>(2025);
     const [selectedMonth, setSelectedMonth] = useState<string>("toplam");
-    // Acente filtresi — Tümü / Mapfre / Ray; tüm KPI ve listeleri o acenteye indirger
+    // Acente filtresi — Tümü / (Mapfre) / Ray; tüm KPI ve listeleri o acenteye indirger
     const [acente, setAcente] = useState<"tum" | "mapfre" | "ray">("tum");
+    const { mapfreVarMi } = useSigortaSirketler(selectedYear);
 
-    const FIRMS: { id: "tum" | "mapfre" | "ray"; label: string }[] = [
+    const FIRMS = useMemo<{ id: "tum" | "mapfre" | "ray"; label: string }[]>(() => [
         { id: "tum", label: "Tümü" },
-        { id: "mapfre", label: "Mapfre" },
+        ...(mapfreVarMi ? [{ id: "mapfre" as const, label: "Mapfre" }] : []),
         { id: "ray", label: "Ray" },
-    ];
+    ], [mapfreVarMi]);
+
+    // Mapfre seçiliyken Mapfre verisi olmayan bir yıla geçilirse filtre kilitli
+    // kalır ve her ekran boş görünürdü; bu durumda "Tümü"ne geri dönülür.
+    useEffect(() => {
+        if (!mapfreVarMi && acente === "mapfre") setAcente("tum");
+    }, [mapfreVarMi, acente]);
     const TABS: { id: string; label: string }[] = [
         { id: "ozet", label: "Özet" },
         { id: "liste", label: "Poliçe Listesi" },
@@ -197,6 +223,7 @@ export default function Sigorta() {
 function SigortaOzet({ yil, ay, acente = "tum" }: { yil: number, ay: string, acente?: "tum" | "mapfre" | "ray" }) {
     // Acente filtresi → şirket adı eşlemesi (Mapfre / Ray Sigorta)
     const acenteCompany = acente === "mapfre" ? COMPANIES.MAPFRE : acente === "ray" ? COMPANIES.RAY : null;
+    const { mapfreVarMi } = useSigortaSirketler(yil);
 
     const { data: ozet } = useQuery({
         queryKey: ['sigorta-ozet', yil],
@@ -231,7 +258,7 @@ function SigortaOzet({ yil, ay, acente = "tum" }: { yil: number, ay: string, ace
             const res = await apiRequest("GET", url);
             return res.json();
         },
-        enabled: acente !== "ray",
+        enabled: acente !== "ray" && mapfreVarMi,
     });
     const { data: rayPol } = useQuery({
         queryKey: ['sigorta-ozet', 'pol', COMPANIES.RAY, yil, ay],
@@ -494,7 +521,8 @@ function SigortaOzet({ yil, ay, acente = "tum" }: { yil: number, ay: string, ace
 // 2. POLİÇE LİSTESİ TAB COMPONENT
 // ---------------------------------------------------------------------------
 function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, acente?: "tum" | "mapfre" | "ray" }) {
-    const [subTab, setSubTab] = useState("mapfre");
+    const { mapfreVarMi } = useSigortaSirketler(yil);
+    const [subTab, setSubTab] = useState("ray");
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'policeNo', direction: 'asc' });
 
     // Filters
@@ -513,6 +541,11 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
         },
         enabled: !!selectedPolicy?.id,
     });
+
+    // Mapfre verisi olmayan bir yıla geçildiğinde alt sekme Mapfre'de takılı kalmasın.
+    useEffect(() => {
+        if (!mapfreVarMi && subTab === "mapfre") setSubTab("ray");
+    }, [mapfreVarMi, subTab]);
 
     // Acente filtresi seçiliyse şirketi ona kilitle; değilse iç subTab toggle'ı sürer.
     const effectiveTab = acente === "tum" ? subTab : acente;
@@ -826,7 +859,8 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
                     />
                 </div>
 
-                {acente === "tum" && (
+                {/* Tek acente kaldıysa toggle anlamsız; yalnızca Mapfre verisi olan yıllarda çizilir. */}
+                {acente === "tum" && mapfreVarMi && (
                     <div className="inline-flex items-center rounded-[9px] border bg-slate-50 p-0.5">
                         {(["mapfre", "ray"] as const).map((t) => (
                             <button
@@ -1062,7 +1096,8 @@ function PoliceMuhasebeDialog({ policy, muhasebe, loading, onClose }: {
 function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
-    const [subTab, setSubTab] = useState("mapfre");
+    // Mapfre'ye yeni veri yüklenmiyor — varsayılan ve tek seçenek Ray Sigorta.
+    const [subTab, setSubTab] = useState("ray");
     // "auto" → Excel tarih sütunundan tespit (default davranış).
     // Belirli bir ay seçilirse, tarih kolonu okunamayan satırlar için fallback olarak kullanılır.
     const [ayOverride, setAyOverride] = useState<string>(globalAy === "toplam" ? "auto" : globalAy);
@@ -1942,9 +1977,8 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
 
 
     return (
-        <Tabs defaultValue="mapfre" value={subTab} onValueChange={setSubTab} className="w-full">
+        <Tabs defaultValue="ray" value={subTab} onValueChange={setSubTab} className="w-full">
             <TabsList>
-                <TabsTrigger value="mapfre">Mapfre Sigorta</TabsTrigger>
                 <TabsTrigger value="ray">Ray Sigorta</TabsTrigger>
             </TabsList>
             
@@ -2393,9 +2427,10 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
 // gün sayısına göre kovalara (0-30, 31-60, 61-90, 90+) ayırır.
 // dd.MM.yyyy formatını parse eder; geçersiz tarih = bilinmeyen kovaya gider.
 function SigortaAging({ yil, ay, acente = "tum" }: { yil: number; ay: string; acente?: "tum" | "mapfre" | "ray" }) {
+    const { mapfreVarMi } = useSigortaSirketler(yil);
     const { data: mapfre, isLoading: mapfreLoading } = useQuery({
         queryKey: ['sigorta-policeler-aging', COMPANIES.MAPFRE, yil, ay],
-        enabled: acente !== 'ray',
+        enabled: acente !== 'ray' && mapfreVarMi,
         queryFn: async () => {
             let url = `/api/sigorta/policeler?sirket=${encodeURIComponent(COMPANIES.MAPFRE)}&yil=${yil}`;
             if (ay !== 'toplam') url += `&ay=${ay}`;
@@ -2414,7 +2449,7 @@ function SigortaAging({ yil, ay, acente = "tum" }: { yil: number; ay: string; ac
         },
     });
 
-    const isLoading = (acente !== 'ray' && mapfreLoading) || (acente !== 'mapfre' && rayLoading);
+    const isLoading = (acente !== 'ray' && mapfreVarMi && mapfreLoading) || (acente !== 'mapfre' && rayLoading);
 
     const parseDDMMYYYY = (s: string): Date | null => {
         if (!s) return null;
