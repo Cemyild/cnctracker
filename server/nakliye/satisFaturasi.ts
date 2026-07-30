@@ -13,6 +13,12 @@ export type FaturaKalemi = {
   faturaNo: string;
   tedarikci: string | null;
   konteynerler: string;
+  /**
+   * Tedarikçi faturasındaki mal/hizmet tanımı — HARFİ HARFİNE.
+   * Müşteriye kesilen faturanın kalem adı bu olur; büyük/küçük harf düzeni
+   * dahil hiçbir şey değiştirilmez.
+   */
+  aciklama: string | null;
   gelenMatrah: number;
   kesilecekMatrah: number;
   kdvOrani: number;
@@ -228,6 +234,7 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
         faturaNo: f.faturaNo,
         tedarikci: f.tedarikciUnvan,
         konteynerler: f.konteynerler || "",
+        aciklama: f.aciklama,
         gelenMatrah: gelen,
         kesilecekMatrah: Math.round(gelen * MARJ * 100) / 100,
         kdvOrani: f.kdvOrani ?? 0,
@@ -409,7 +416,12 @@ export async function tamamlananDosyalariFaturala(
     try {
       const kalemler = [];
       for (const k of d.kalemler) {
-        const urunAdi = `${k.tedarikci || "Nakliye"} · ${k.faturaNo} · ${k.konteynerler}`;
+        // KALEM ADI = TEDARİKÇİ FATURASINDAKİ MAL/HİZMET TANIMI, HARFİ HARFİNE.
+        // Büyük/küçük harfe dokunulmaz, tedarikçi adı / fatura no EKLENMEZ —
+        // müşteri faturasında kendi tedarikçimizin bilgisi görünmemeli.
+        // Yalnızca açıklama boşsa (nadiren) izlenebilirlik için yedek ad üretilir.
+        const urunAdi = k.aciklama?.trim()
+          || `${k.konteynerler || "Nakliye"} konteyner taşıma bedeli`.trim();
         const productId = await urunOlustur(urunAdi, k.kdvOrani);
         kalemler.push({
           type: "sales_invoice_details",
