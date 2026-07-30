@@ -4240,7 +4240,13 @@ export async function registerRoutes(
     try {
       const { id } = req.params;
       const { ilgiliDosyaNo: istenenDosyaNo, ...veri } = req.body ?? {};
-      const updated = await storage.updateNakliyeVerisi(id, veri);
+
+      // Gövdede yalnız ilgiliDosyaNo varsa `veri` boş kalır; Drizzle boş SET ile
+      // patlar. Mevcut kaydı okuyup geçmek yeterli.
+      const updated = Object.keys(veri).length > 0
+        ? await storage.updateNakliyeVerisi(id, veri)
+        : await storage.getNakliyeVerisi(id);
+      if (!updated) return res.status(404).json({ error: "Bulunamadı" });
 
       // KONTEYNER DÜZELTMESİNİ BORU HATTI TABLOSUNA DA YAZ.
       //

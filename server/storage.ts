@@ -105,6 +105,7 @@ export interface IStorage {
 
   // Nakliye verileri
   getNakliyeVerileri(): Promise<NakliyeVerisi[]>;
+  getNakliyeVerisi(id: string): Promise<NakliyeVerisi | undefined>;
   insertNakliyeVerileri(veriler: InsertNakliyeVerisi[]): Promise<NakliyeVerisi[]>;
   deleteNakliyeVerisi(id: string): Promise<void>;
   updateNakliyeVerisi(id: string, veri: Partial<InsertNakliyeVerisi>): Promise<NakliyeVerisi>;
@@ -1152,6 +1153,11 @@ export class DatabaseStorage implements IStorage {
 
   async getNakliyeVerileri(): Promise<NakliyeVerisi[]> {
     return await db.select().from(nakliyeVerileri).orderBy(sql`${nakliyeVerileri.olusturmaTarihi} DESC`);
+  }
+
+  async getNakliyeVerisi(id: string): Promise<NakliyeVerisi | undefined> {
+    const [v] = await db.select().from(nakliyeVerileri).where(eq(nakliyeVerileri.id, id));
+    return v;
   }
 
   async insertNakliyeVerileri(veriler: InsertNakliyeVerisi[]): Promise<NakliyeVerisi[]> {
