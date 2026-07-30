@@ -3,7 +3,8 @@ import { parasutIstek, jsonApiCoz, iliskiId } from "../parasut/client";
 import { paraBirimiParasut } from "../parasut/hesap";
 import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
 import { firmaAdiBenzerligi } from "@shared/turkceNormalize";
-import type { NakliyeFaturasi, GumrukVerisi } from "@shared/schema";
+import { konteynerAnahtarlari } from "@shared/konteyner";
+import type { NakliyeFaturasi, GumrukVerisi, NakliyeVerisi } from "@shared/schema";
 
 /** Gelen matrahın üzerine eklenen marj. 10.000 → 12.000 (+ KDV). */
 const MARJ = 1.20;
@@ -32,6 +33,12 @@ export type DosyaOnizleme = {
   eslesenKonteyner: number;
   hazir: boolean;
   engel: string | null;
+  /**
+   * Engel, kullanıcı onayıyla aşılabilir mi? Yalnızca "beklemek bir iş kararı"
+   * olan engeller için true (eksik konteyner, boş konteyner sayısı).
+   * Mükerrer fatura ve müşterisiz fatura engelleri ASLA aşılamaz.
+   */
+  zorlanabilir: boolean;
   paraBirimi: string;
   kalemler: FaturaKalemi[];
   netToplam: number;
@@ -70,21 +77,23 @@ function tarihGoster(t: string | null | undefined): string {
 /**
  * Paraşüt "Fatura Notu" alanına yazılacak beyanname bilgi satırını üretir.
  *
- * Biçim, CNC ekranındaki eşleşme kutusuyla aynı sırayı izler:
- *   dosya no - firma unvanı - gümrük - kıymet - döviz - tescil no - tescil tarihi - konteyner(ler)
+ * Kaynak, EKRANDAKİ eşleşme kutusunun ta kendisidir (nakliye_verileri'nin
+ * gumruk* alanları). Böylece Paraşüt'teki not ile kullanıcının ekranda gördüğü
+ * mor satır birebir aynı olur — ayrı bir türetme yolu olsaydı ikisi zamanla
+ * ayrışırdı.
  *
- * Amaç: müşteriye kesilen faturada hangi beyannameye ait olduğunu okumak;
- * muhasebede ve müşteri tarafında mutabakatı kolaylaştırır.
+ * Biçim:
+ *   dosya no - firma unvanı - gümrük - kıymet - döviz - tescil no - tescil tarihi - konteyner(ler)
  */
-function faturaNotuUret(g: GumrukVerisi, konteynerler: string[]): string {
+function faturaNotuUret(v: NakliyeVerisi, konteynerler: string[]): string {
   const parcalar = [
-    g.dosyaNo,
-    g.firmaUnvan,
-    g.gumruk,
-    g.dovizKiymeti != null ? String(g.dovizKiymeti) : "",
-    g.doviz,
-    g.tescilNo,
-    tarihGoster(g.tescilTarihi),
+    v.ilgiliDosyaNo,
+    v.gumrukFirmaUnvan,
+    v.gumrukAdi,
+    v.gumrukDovizKiymeti,
+    v.gumrukDovizCinsi,
+    v.gumrukTescilNo,
+    tarihGoster(v.gumrukTescilTarihi),
     konteynerler.join(", "),
   ].map((p) => String(p ?? "").trim());
 
@@ -158,36 +167,94 @@ export function kesilmisOnbellegiTemizle(): void {
   kesilmisOnbellek = null;
 }
 
+/** Fatura kesilemeyecek durumdaki (doğrulaması düşmüş) kayıtlar. */
+const KESILEMEZ_DURUMLAR = new Set(["dogrulama_hatasi", "hata", "revizyon_gerekli"]);
+
 /**
  * Beyanname bazında gruplanmış faturaların önizlemesini üretir.
  * Paraşüt'e HİÇBİR ŞEY YAZMAZ — hem UI hem kuru çalıştırma için.
+ *
+ * EŞLEŞMENİN TEK DOĞRULUK KAYNAĞI EKRANDIR (nakliye_verileri.ilgiliDosyaNo).
+ *
+ * Neden: iki ayrı eşleştirici vardı ve sessizce ayrıştılar (canlıda ölçüldü:
+ * ekranda eşleşmiş 11 fatura boru hattında eşleşmemiş görünüyordu). İki neden:
+ *   1) Kullanıcı ekranda konteyner numarasını düzeltince nakliye_faturalari
+ *      tablosundaki eski numara olduğu gibi kalıyordu.
+ *   2) Beyannamede tek hücrede birden fazla numara olabiliyor
+ *      ("SEGU5603686,HAMU49"); ekran eşleştiricisi hücreyi desenle parçalıyor,
+ *      boru hattındaki parçalamıyordu.
+ * Ekran, kullanıcının GÖRDÜĞÜ ve DÜZELTEBİLDİĞİ yer olduğu için doğruluk
+ * kaynağı olmaya tek adaydır. Böylece bir düzeltme anında faturaya yansır.
+ *
+ * İŞ BÖLÜMÜ: eşleşme ekrandan, PARA ise doğrulanmış fatura kaydından
+ * (nakliye_faturalari) gelir — tutarlar aritmetik doğrulamadan geçmiş tek yer
+ * orasıdır. Ekran satırının kendi tutar alanları faturalamada KULLANILMAZ.
  */
 export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
-  const faturalar = (await storage.getNakliyeFaturalari()).filter((f) => f.durum === "eslesti");
-  if (faturalar.length === 0) return [];
+  const ekranKayitlari = (await storage.getNakliyeVerileri()).filter(
+    (v) => v.ilgiliDosyaNo && v.faturaNo,
+  );
+  if (ekranKayitlari.length === 0) return [];
 
-  const eslesmeler = await storage.getEslesmelerByFatura(faturalar.map((f) => f.id));
-  if (eslesmeler.length === 0) return [];
+  const faturalar = await storage.getNakliyeFaturalari();
+  const faturaMap = new Map<string, NakliyeFaturasi>(faturalar.map((f) => [f.faturaNo, f]));
 
-  // N+1 önleme: gümrük kayıtları tek sorguda + Map join
-  const gumrukIdler = Array.from(new Set(eslesmeler.map((e) => e.gumrukVerisiId!).filter(Boolean)));
-  const gumrukKayitlari = await storage.getGumrukVerileriByIds(gumrukIdler);
-  const gumrukMap = new Map<string, GumrukVerisi>(gumrukKayitlari.map((g) => [g.id, g]));
-  const faturaMap = new Map<string, NakliyeFaturasi>(faturalar.map((f) => [f.id, f]));
+  // (dosya no | konteyner) → gümrük kaydı. VKN ve beklenen konteyner sayısı
+  // buradan okunur. Aynı dosyada birden çok firma satırı olabildiği için
+  // (canlıda görüldü: 26-10359 → ENYTEKS + FEKA) anahtar dosya no ile
+  // YETİNMEZ, eşleşmeyi kuran konteyneri de içerir.
+  const gumrukIndeks = new Map<string, GumrukVerisi>();
+  for (const g of (await storage.getGumrukHouseNoVerileri()) as GumrukVerisi[]) {
+    if (!g.dosyaNo) continue;
+    for (const k of konteynerAnahtarlari(g.houseNo)) {
+      const anahtar = `${g.dosyaNo}|${k}`;
+      if (!gumrukIndeks.has(anahtar)) gumrukIndeks.set(anahtar, g);
+    }
+  }
 
   const gruplar = new Map<string, {
-    gumruk: GumrukVerisi; faturaIdler: Set<string>; konteynerler: Set<string>;
+    dosyaNo: string;
+    ekran: NakliyeVerisi;           // fatura notunun kaynağı (ilk satır)
+    gumruk: GumrukVerisi | null;    // VKN + beklenen konteyner sayısı
+    faturaNolar: Set<string>;
+    konteynerler: Set<string>;
+    faturaKaydiOlmayan: string[];
   }>();
 
-  for (const e of eslesmeler) {
-    const g = gumrukMap.get(e.gumrukVerisiId!);
-    if (!g || !g.dosyaNo) continue;
-    if (!gruplar.has(g.dosyaNo)) {
-      gruplar.set(g.dosyaNo, { gumruk: g, faturaIdler: new Set(), konteynerler: new Set() });
+  for (const v of ekranKayitlari) {
+    const dosyaNo = v.ilgiliDosyaNo!;
+    const kendiKonteynerleri = konteynerAnahtarlari(v.konteynerler);
+
+    if (!gruplar.has(dosyaNo)) {
+      gruplar.set(dosyaNo, {
+        dosyaNo, ekran: v, gumruk: null,
+        faturaNolar: new Set(), konteynerler: new Set(), faturaKaydiOlmayan: [],
+      });
     }
-    const grup = gruplar.get(g.dosyaNo)!;
-    grup.faturaIdler.add(e.faturaId!);
-    if (e.konteyner) grup.konteynerler.add(normalizeKonteyner(e.konteyner));
+    const grup = gruplar.get(dosyaNo)!;
+
+    // Gümrük kaydı: önce eşleşmeyi kuran house_no, olmazsa satırın konteynerleri
+    if (!grup.gumruk) {
+      const adaylar = [
+        ...(v.eslesenHouseNo ? konteynerAnahtarlari(v.eslesenHouseNo) : []),
+        ...kendiKonteynerleri,
+      ];
+      for (const k of adaylar) {
+        const g = gumrukIndeks.get(`${dosyaNo}|${k}`);
+        if (g) { grup.gumruk = g; break; }
+      }
+    }
+
+    for (const k of kendiKonteynerleri) grup.konteynerler.add(k);
+
+    const f = faturaMap.get(v.faturaNo!);
+    if (!f) {
+      // Ekranda var ama doğrulanmış fatura kaydı yok (PDF akışından önceki
+      // tarihsel kayıtlar). Tutarına güvenilemez — faturalanmaz.
+      grup.faturaKaydiOlmayan.push(v.faturaNo!);
+    } else if (!KESILEMEZ_DURUMLAR.has(f.durum)) {
+      grup.faturaNolar.add(f.faturaNo);
+    }
   }
 
   const sonuc: DosyaOnizleme[] = [];
@@ -205,26 +272,43 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
   const taramaBasarisiz = kesilmis.has("__TARAMA_BASARISIZ__");
 
   for (const [dosyaNo, grup] of Array.from(gruplar.entries())) {
-    const beklenen = parseInt(String(grup.gumruk.konteynerSayisi || "0"), 10) || 0;
+    const beklenen = parseInt(String(grup.gumruk?.konteynerSayisi || "0"), 10) || 0;
     const eslesen = grup.konteynerler.size;
-    const vkn = String(grup.gumruk.vn || "").replace(/\D/g, "") || null;
+    const vkn = String(grup.gumruk?.vn || "").replace(/\D/g, "") || null;
+    const firmaUnvan = grup.ekran.gumrukFirmaUnvan || grup.gumruk?.firmaUnvan || null;
 
     // Bu dosyanın konteynerlerinden biri Paraşüt'teki bir satış faturasında
     // geçiyorsa fatura zaten kesilmiş demektir.
     const zatenKesilmis = Array.from(grup.konteynerler).find((k) => kesilmis.has(k));
 
+    // ENGELLER İKİ SINIFA AYRILIR:
+    //   aşılamaz → mükerrer fatura / müşterisiz fatura riski taşır, `zorla` bunu ASLA geçmez
+    //   aşılabilir → beklemek bir iş kararıdır; kullanıcı ekranda görüp butonla geçebilir
     let engel: string | null = null;
+    let zorlanabilir = false;
+
     if (taramaBasarisiz) engel = "Mükerrer taraması yapılamadı — güvenlik gereği bekletiliyor";
     else if (await storage.getSatisFaturasiByDosyaNo(dosyaNo)) engel = "Bu dosya için taslak zaten var";
     else if (zatenKesilmis) {
       engel = `Paraşüt'te zaten faturalanmış (${zatenKesilmis} → ${kesilmis.get(zatenKesilmis)})`;
     }
-    else if (!beklenen) engel = "Beyannamede konteyner sayısı boş — otomatik tetiklenemez";
-    else if (eslesen < beklenen) engel = `${beklenen} konteynerin ${eslesen}'i eşleşti — bekliyor`;
-    else if (!vkn && !grup.gumruk.firmaUnvan) engel = "Beyannamede ne VKN ne firma unvanı var";
+    else if (!vkn && !firmaUnvan) engel = "Beyannamede ne VKN ne firma unvanı var";
+    else if (grup.faturaNolar.size === 0) {
+      engel = grup.faturaKaydiOlmayan.length
+        ? `Doğrulanmış fatura kaydı yok (${grup.faturaKaydiOlmayan.join(", ")}) — tutara güvenilemez`
+        : "Faturalanabilir kalem yok";
+    }
+    else if (!beklenen) {
+      engel = "Beyannamede konteyner sayısı boş — otomatik tetiklenemez";
+      zorlanabilir = true;
+    }
+    else if (eslesen < beklenen) {
+      engel = `${beklenen} konteynerin ${eslesen}'i eşleşti — bekliyor`;
+      zorlanabilir = true;
+    }
 
-    const grupFaturalari = Array.from(grup.faturaIdler)
-      .map((id) => faturaMap.get(id))
+    const grupFaturalari = Array.from(grup.faturaNolar)
+      .map((no) => faturaMap.get(no))
       .filter((f): f is NakliyeFaturasi => Boolean(f));
 
     const kalemler: FaturaKalemi[] = grupFaturalari.map((f) => {
@@ -248,18 +332,19 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
 
     sonuc.push({
       dosyaNo,
-      firmaUnvan: grup.gumruk.firmaUnvan,
+      firmaUnvan,
       vkn,
       beklenenKonteyner: beklenen,
       eslesenKonteyner: eslesen,
       hazir: engel === null,
       engel,
+      zorlanabilir,
       paraBirimi: grupFaturalari[0]?.paraBirimi || "TRY",
       kalemler,
       netToplam,
       kdvToplam,
       genelToplam: Math.round((netToplam + kdvToplam) * 100) / 100,
-      faturaNotu: faturaNotuUret(grup.gumruk, Array.from(grup.konteynerler)),
+      faturaNotu: faturaNotuUret(grup.ekran, Array.from(grup.konteynerler)),
     });
   }
 
@@ -380,18 +465,34 @@ async function etiketBulVeyaOlustur(dosyaNo: string): Promise<string | undefined
  *
  * TEVKİFAT GİDEN FATURADA ASLA YOKTUR — withholding_rate ve
  * vat_withholding_rate kodda sabit 0'dır, gelen faturadan TÜRETİLMEZ.
+ *
+ * `zorla` YALNIZCA elle tetiklemede ve YALNIZCA tek dosya için anlamlıdır:
+ * "aşılabilir" engelleri (eksik konteyner) geçer. Mükerrer fatura ve
+ * müşterisiz fatura engellerini GEÇMEZ — o engeller para hatasıdır, iş kararı
+ * değil. Otomatik turda (sadeceDosyaNo yok) zorla kullanılmaz.
  */
 export async function tamamlananDosyalariFaturala(
   sadeceDosyaNo?: string,
-): Promise<{ olusturulan: number; kuyruk: number; hatalar: string[] }> {
+  zorla = false,
+): Promise<{ olusturulan: number; kuyruk: number; hatalar: string[]; engel?: string | null }> {
   const onizleme = await faturaOnizleme();
-  const hedefler = onizleme.filter(
-    (d) => d.hazir && (!sadeceDosyaNo || d.dosyaNo === sadeceDosyaNo),
+  const kapsam = onizleme.filter((d) => !sadeceDosyaNo || d.dosyaNo === sadeceDosyaNo);
+  const hedefler = kapsam.filter(
+    (d) => d.hazir || (zorla && Boolean(sadeceDosyaNo) && d.zorlanabilir),
   );
 
   let olusturulan = 0;
   let kuyruk = onizleme.length - hedefler.length;
   const hatalar: string[] = [];
+
+  // Tek dosya istendi ve hiç hedef yoksa engeli çağırana bildir; UI bunu
+  // gösterip gerekiyorsa "yine de kes" seçeneği sunar.
+  if (sadeceDosyaNo && hedefler.length === 0) {
+    return {
+      olusturulan: 0, kuyruk, hatalar,
+      engel: kapsam[0]?.engel ?? "Bu dosya için faturalanabilir eşleşme bulunamadı",
+    };
+  }
 
   for (const d of hedefler) {
     let contactId: string | undefined;

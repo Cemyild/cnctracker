@@ -174,9 +174,19 @@ function extractContainerRefs(text: string | null | undefined): string[] {
  * Amaç: beyanname beklerken hangi faturanın nerede takıldığını gözden
  * kaçırmamak. Durumlar sunucuda hesaplanıyor (bkz. GET /api/nakliye).
  */
-function DurumRozetleri({ inv }: { inv: any }) {
+function DurumRozetleri({
+    inv,
+    onFaturaKes,
+    kesiliyor,
+}: {
+    inv: any;
+    onFaturaKes?: (dosyaNo: string, e: React.MouseEvent) => void;
+    kesiliyor?: boolean;
+}) {
     const alisIslendi = inv.parasutAlisDurum === "islendi";
     const satis = inv.parasutSatisDurum as string | undefined;
+    // Eşleşme kurulmuş ama müşteri faturası yoksa elle kesme düğmesi gösterilir.
+    const kesilebilir = Boolean(inv.ilgiliDosyaNo) && (satis === "bekliyor" || satis === "hata");
 
     const rozet = (
         etiket: string,
@@ -218,6 +228,20 @@ function DurumRozetleri({ inv }: { inv: any }) {
                     : satis === "eslesme_yok"
                         ? rozet("Satış", false, "gri", "Beyanname eşleşmesi bekleniyor")
                         : rozet("Satış", false, "sari", "Beyanname eşleşti, müşteri faturası bekliyor")}
+
+            {kesilebilir && onFaturaKes && (
+                <button
+                    type="button"
+                    onClick={(e) => onFaturaKes(inv.ilgiliDosyaNo, e)}
+                    disabled={kesiliyor}
+                    title={`${inv.ilgiliDosyaNo} için Paraşüt'te satış faturası taslağı oluştur`}
+                    className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                >
+                    {kesiliyor
+                        ? <><Loader2 className="h-2.5 w-2.5 animate-spin" /> Kesiliyor</>
+                        : <><FileText className="h-2.5 w-2.5" /> Fatura Kes</>}
+                </button>
+            )}
         </div>
     );
 }
@@ -244,6 +268,8 @@ export default function Nakliye() {
     const [editKonteynerler, setEditKonteynerler] = useState("");
     const [openCombobox, setOpenCombobox] = useState(false);
     const [updating, setUpdating] = useState(false);
+    // Fatura kesme işlemi süren dosya no ("__TUMU__" = toplu işlem)
+    const [kesilenDosya, setKesilenDosya] = useState<string | null>(null);
 
     const { toast } = useToast();
 
@@ -509,6 +535,96 @@ export default function Nakliye() {
         }
     };
 
+    /**
+     * Bekleyen satış faturasını ELLE kes.
+     *
+     * Boru hattı günde bir kez (06:45) çalışıyor. Kullanıcı gün içinde bir
+     * konteyner numarasını düzeltip eşleşmeyi kurduğunda faturanın ertesi
+     * sabaha kalmaması için bu düğme var.
+     *
+     * Engel "aşılabilir" ise (beyannamenin konteynerlerinin bir kısmı henüz
+     * eşleşmemiş) onay istenip `zorla` ile tekrar denenir. Mükerrer fatura ve
+     * müşterisiz fatura engelleri sunucuda aşılamaz — burada onay sorulmaz.
+     */
+    const handleFaturaKes = async (dosyaNo: string, e: React.MouseEvent, zorla = false) => {
+        e.stopPropagation();
+        if (!dosyaNo) return;
+
+        setKesilenDosya(dosyaNo);
+        try {
+            const response = await fetch("/api/nakliye/satis-faturasi-kes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dosyaNo, zorla }),
+            });
+            const sonuc = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(sonuc?.error || "Fatura kesilemedi");
+            }
+
+            if (sonuc.olusturulan > 0) {
+                toast({
+                    title: "Fatura oluşturuldu",
+                    description: `${dosyaNo} için Paraşüt'te satış faturası taslağı hazır. Resmileştirme sizde.`,
+                });
+                fetchSavedInvoices();
+                return;
+            }
+
+            const engel = sonuc.engel || sonuc.hatalar?.[0] || "Bilinmeyen engel";
+
+            if (sonuc.zorlanabilir && !zorla) {
+                if (confirm(`${dosyaNo}\n\n${engel}\n\nYine de fatura kesilsin mi?`)) {
+                    await handleFaturaKes(dosyaNo, e, true);
+                }
+                return;
+            }
+
+            toast({ variant: "destructive", title: "Fatura kesilemedi", description: engel });
+        } catch (error) {
+            console.error("Fatura kesme hatası:", error);
+            toast({
+                variant: "destructive",
+                title: "Hata",
+                description: error instanceof Error ? error.message : "Fatura kesilemedi.",
+            });
+        } finally {
+            setKesilenDosya(null);
+        }
+    };
+
+    /** Hazır olan TÜM dosyalar için taslak oluştur (üst çubuk düğmesi). */
+    const handleTumunuFaturala = async () => {
+        setKesilenDosya("__TUMU__");
+        try {
+            const response = await fetch("/api/nakliye/satis-faturasi-kes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({}),
+            });
+            const sonuc = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(sonuc?.error || "İşlem başarısız");
+
+            toast({
+                title: "Faturalama tamamlandı",
+                description:
+                    `${sonuc.olusturulan} taslak oluşturuldu, ${sonuc.kuyruk} dosya bekliyor.` +
+                    (sonuc.hatalar?.length ? ` ${sonuc.hatalar.length} hata.` : ""),
+            });
+            fetchSavedInvoices();
+        } catch (error) {
+            console.error("Toplu faturalama hatası:", error);
+            toast({
+                variant: "destructive",
+                title: "Hata",
+                description: error instanceof Error ? error.message : "İşlem başarısız.",
+            });
+        } finally {
+            setKesilenDosya(null);
+        }
+    };
+
     const handleDeleteInvoice = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         if (!confirm("Bu faturayı silmek istediğinize emin misiniz?")) return;
@@ -707,6 +823,21 @@ export default function Nakliye() {
                                 {matching ? "Eşleşiyor..." : "Gümrük ile Eşleştir"}
                             </Button>
 
+                            {/* Hazır olan tüm dosyalar için Paraşüt'te taslak oluşturur.
+                                Resmileştirme YAPILMAZ — o adım kullanıcıda. */}
+                            <Button
+                                variant="outline"
+                                className="h-[38px] gap-2 font-semibold"
+                                onClick={handleTumunuFaturala}
+                                disabled={kesilenDosya !== null || matching || uploading}
+                                title="Beyanname eşleşmesi tamamlanmış dosyalar için Paraşüt'te satış faturası taslağı oluştur"
+                            >
+                                {kesilenDosya === "__TUMU__"
+                                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                                    : <FileText className="h-4 w-4" />}
+                                {kesilenDosya === "__TUMU__" ? "Kesiliyor..." : "Bekleyenleri Faturala"}
+                            </Button>
+
                             <input
                                 type="file"
                                 id="nakliye-upload-compact"
@@ -862,7 +993,11 @@ export default function Nakliye() {
                                             <TableCell className="px-2.5 py-1.5 text-right tabular-nums text-muted-foreground">{formatCurrency(inv.vergilerDahilToplamTutar)}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 text-right font-black tabular-nums text-foreground">{formatCurrency(inv.odenecekTutar)}</TableCell>
                                             <TableCell className="px-2.5 py-1.5">
-                                                <DurumRozetleri inv={inv} />
+                                                <DurumRozetleri
+                                                    inv={inv}
+                                                    onFaturaKes={handleFaturaKes}
+                                                    kesiliyor={kesilenDosya === inv.ilgiliDosyaNo}
+                                                />
                                             </TableCell>
                                             <TableCell className="px-1.5 py-1 text-center">
                                                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={(e) => handleDeleteInvoice(inv.id, e)}>

@@ -12,7 +12,7 @@ import { pdfMetniCikar, faturaAnalizEt } from "./nakliye/faturaAnaliz";
 import { faturaDogrula } from "./nakliye/dogrulama";
 import { parasuttanCek } from "./nakliye/parasutOkuma";
 import { senkronCalistir, senkronHazirMi } from "./nakliye/senkron";
-import { faturaOnizleme } from "./nakliye/satisFaturasi";
+import { faturaOnizleme, tamamlananDosyalariFaturala } from "./nakliye/satisFaturasi";
 
 const ruhsatStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -178,7 +178,7 @@ function fixUploadFilename(name: string): string {
 }
 
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar } from "@shared/schema";
-import { konteynerAnahtarlari } from "@shared/konteyner";
+import { konteynerAnahtarlari, konteynerMetni } from "@shared/konteyner";
 import { createHash, timingSafeEqual } from "crypto";
 import { z } from "zod";
 import {
@@ -1007,6 +1007,46 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Satış önizleme hatası:", error);
       res.status(500).json({ error: "Önizleme alınamadı" });
+    }
+  });
+
+  // Satış faturası taslağını ELLE kes.
+  //
+  // Neden gerekli: boru hattı günde bir kez (06:45) çalışıyor. Kullanıcı gün
+  // içinde bir konteyner numarasını düzeltip eşleşmeyi kurduğunda faturanın
+  // ertesi sabaha kalmaması için bu uç var.
+  //
+  //   { }                        → hazır olan TÜM dosyalar
+  //   { dosyaNo }                → yalnızca o dosya
+  //   { dosyaNo, zorla: true }   → aşılabilir engeli (eksik konteyner) geç
+  //
+  // `zorla` mükerrer fatura ve müşterisiz fatura engellerini GEÇMEZ; o kontroller
+  // satisFaturasi.ts içinde aşılamaz sınıfındadır.
+  app.post("/api/nakliye/satis-faturasi-kes", async (req, res) => {
+    try {
+      if (!senkronHazirMi()) {
+        return res.status(503).json({ error: "Paraşüt kimlik bilgileri eksik (.env)" });
+      }
+      const dosyaNo = typeof req.body?.dosyaNo === "string" && req.body.dosyaNo.trim()
+        ? req.body.dosyaNo.trim()
+        : undefined;
+      const zorla = req.body?.zorla === true || req.body?.zorla === "true";
+
+      const sonuc = await tamamlananDosyalariFaturala(dosyaNo, zorla);
+
+      // Tek dosya istendi, kesilemedi: UI'ın "yine de kes" sunabilmesi için
+      // engelin aşılabilir olup olmadığını da bildir.
+      let zorlanabilir = false;
+      if (dosyaNo && sonuc.olusturulan === 0) {
+        const onizleme = await faturaOnizleme();
+        zorlanabilir = onizleme.find((d) => d.dosyaNo === dosyaNo)?.zorlanabilir ?? false;
+      }
+
+      res.json({ success: true, ...sonuc, zorlanabilir });
+    } catch (error) {
+      console.error("Satış faturası kesme hatası:", error);
+      const mesaj = error instanceof Error ? error.message : "Bilinmeyen hata";
+      res.status(500).json({ error: mesaj });
     }
   });
 
@@ -4195,6 +4235,33 @@ export async function registerRoutes(
       const { id } = req.params;
       const veri = req.body;
       const updated = await storage.updateNakliyeVerisi(id, veri);
+
+      // KONTEYNER DÜZELTMESİNİ BORU HATTI TABLOSUNA DA YAZ.
+      //
+      // Ekran (nakliye_verileri) ile fatura boru hattı (nakliye_faturalari) aynı
+      // faturayı iki tabloda tutuyor. Kullanıcı ekranda bir rakam düzelttiğinde
+      // eskiden yalnız ekran güncelleniyordu; boru hattı tablosunda YANLIŞ numara
+      // kaldığı için o fatura hiç eşleşmiyordu (canlıda görüldü: GIB2026000000079,
+      // CAAU2380390 → CAAU2280390). Faturalama artık ekranı okuduğu için bu yazma
+      // faturayı KESMEK için şart değil; iki tablonun sessizce ayrışmasını
+      // engellemek ve denetim izini (nakliye_fatura_eslesme) doğru tutmak için var.
+      if (typeof veri?.konteynerler === "string" && updated?.faturaNo) {
+        try {
+          const normalize = konteynerMetni(veri.konteynerler);
+          const boruKaydi = await storage.getNakliyeFaturasiByNo(updated.faturaNo);
+          if (boruKaydi && normalize && boruKaydi.konteynerler !== normalize) {
+            await storage.updateNakliyeFaturasi(boruKaydi.id, { konteynerler: normalize });
+            console.log(
+              `Konteyner düzeltmesi boru hattına yazıldı (${updated.faturaNo}): ` +
+              `${boruKaydi.konteynerler} → ${normalize}`,
+            );
+          }
+        } catch (senkErr) {
+          // Ekran güncellemesi başarılı; bu yazma başarısız olsa da isteği düşürme.
+          console.error("Konteyner boru hattına yazılamadı:", senkErr);
+        }
+      }
+
       res.json({ success: true, message: "Kayıt güncellendi", data: updated });
     } catch (error) {
       console.error("Nakliye güncelleme hatası:", error);

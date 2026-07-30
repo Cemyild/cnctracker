@@ -40,11 +40,22 @@ export async function senkronCalistir(): Promise<SenkronSonuc> {
     const cekilen = await parasuttanCek(60);
 
     // 2) e-Arşiv faturalarını Paraşüt'e yaz.
-    // Yalnızca doğrulamayı geçmiş (durum='ayristirildi') ve henüz Paraşüt'e
-    // yazılmamış olanlar. Doğrulama hatası olanlar kasıtlı olarak atlanır —
-    // yanlış tutarlı fatura muhasebeye girmemeli.
-    const yazilacaklar = (await storage.getNakliyeFaturalari("ayristirildi"))
-      .filter((f) => f.kaynak === "earsiv" && !f.parasutPurchaseBillId);
+    //
+    // Ölçüt PARAŞÜT KAYDI YOKLUĞU'dur, durum değil: durum eşleştirme/faturalama
+    // adımlarında da değişiyor ('eslesti', 'faturalandi'), bu yüzden
+    // durum='ayristirildi' şartı Paraşüt'e yazılamamış bir faturayı sonsuza
+    // kadar atlanır hale getirebiliyordu.
+    //
+    // Doğrulaması düşmüş faturalar KASITLI olarak atlanır — yanlış tutarlı
+    // fatura muhasebeye girmemeli. Buna karşılık durum='hata' (teknik hata,
+    // örn. Paraşüt erişilemedi) YENİDEN DENENİR; parasuttaVarMi() mükerrer
+    // yazmayı zaten engelliyor.
+    const yazilacaklar = (await storage.getNakliyeFaturalari()).filter(
+      (f) => f.kaynak === "earsiv"
+        && !f.parasutPurchaseBillId
+        && f.durum !== "dogrulama_hatasi"
+        && f.durum !== "revizyon_gerekli",
+    );
 
     let basarili = 0;
     let mevcuttu = 0;
