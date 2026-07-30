@@ -171,8 +171,8 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
     // elle kesildi. Aday listesine girselerdi mükerrer fatura riski yalnızca
     // Paraşüt taramasına kalırdı — tarama bir kez başarısız olsa 269 kayıt
     // yeniden faturalanabilir hale gelirdi. Tarih eşiği bunu yapısal olarak
-    // imkânsız kılar.
-    (v) => v.ilgiliDosyaNo && v.faturaNo && !sistemOncesiMi(v.faturaTarihi),
+    // imkânsız kılar. elleIslendi ise tarihsiz eski kayıtlar için istisna yolu.
+    (v) => v.ilgiliDosyaNo && v.faturaNo && !v.elleIslendi && !sistemOncesiMi(v.faturaTarihi),
   );
   if (ekranKayitlari.length === 0) return [];
 

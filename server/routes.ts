@@ -4170,7 +4170,10 @@ export async function registerRoutes(
         // faturaları Paraşüt'te elle kesildi. Bu kayıtlar "bekliyor"
         // görünmemeli; bekleyen iş listesini 269 tamamlanmış kayıtla kirletir
         // ve gerçekten bekleyen faturaların gözden kaçmasına yol açar.
-        if (sistemOncesiMi(v.faturaTarihi)) {
+        //
+        // elleIslendi bayrağı, tarihi hiç olmayan eski kayıtlar için istisna
+        // yoludur — tarih kuralı onları sınıflayamıyor.
+        if (v.elleIslendi || sistemOncesiMi(v.faturaTarihi)) {
           return {
             ...v,
             parasutAlisDurum: "elle",

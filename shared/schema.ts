@@ -307,7 +307,16 @@ export const nakliyeVerileri = pgTable("nakliye_verileri", {
   pdfYolu: text("pdf_yolu"),
   tedarikciUnvan: text("tedarikci_unvan"),
   tedarikciVkn: text("tedarikci_vkn"),
-  
+  // Sistem dışında elle işlendi: alış faturası muhasebeye elle girildi ve
+  // müşteri faturası Paraşüt'te elle kesildi. Rozetler yeşil gösterilir,
+  // kayıt faturalamaya aday SAYILMAZ.
+  //
+  // Genel kural tarihtir (bkz. SISTEM_BASLANGIC, server/nakliye/tarih.ts):
+  // Temmuz 2026 öncesi her fatura elle işlendi. Bu alan İSTİSNALAR içindir —
+  // fatura tarihi hiç olmayan eski kayıtlar tarih kuralıyla sınıflanamıyor
+  // (canlıda 1 kayıt: MRT2026000000060).
+  elleIslendi: boolean("elle_islendi").default(false),
+
   // Gümrük Eşleşme Verileri
   ilgiliDosyaNo: text("ilgili_dosya_no"),
   gumrukFirmaUnvan: text("gumruk_firma_unvan"),
