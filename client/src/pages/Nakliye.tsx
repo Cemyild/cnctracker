@@ -8,6 +8,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn, formatCurrencyFull } from "@/lib/utils";
 
 // ============================================================================
@@ -281,6 +282,8 @@ export default function Nakliye() {
     const [editKonteynerler, setEditKonteynerler] = useState("");
     // Elle dosya no eşleştirmesi (konteyner numarası olmayan faturalar için)
     const [editDosyaNo, setEditDosyaNo] = useState("");
+    // Paraşüt'e girilmeyen, tamamen elle hallolan işler
+    const [editElleIslendi, setEditElleIslendi] = useState(false);
     const [openCombobox, setOpenCombobox] = useState(false);
     const [updating, setUpdating] = useState(false);
     // Fatura kesme işlemi süren dosya no ("__TUMU__" = toplu işlem)
@@ -380,6 +383,7 @@ export default function Nakliye() {
             }
 
             setEditDosyaNo(selectedInvoice.ilgiliDosyaNo || "");
+            setEditElleIslendi(selectedInvoice.elleIslendi === true);
         }
     }, [selectedInvoice, customerIndex]);
 
@@ -398,6 +402,7 @@ export default function Nakliye() {
                 body: JSON.stringify({
                     musteri: editMusteri,
                     konteynerler: editKonteynerler,
+                    elleIslendi: editElleIslendi,
                     ...(dosyaNoDegisti ? { ilgiliDosyaNo: editDosyaNo.trim() } : {}),
                 })
             });
@@ -414,6 +419,11 @@ export default function Nakliye() {
                 inv.id === selectedInvoice.id ? { ...inv, ...guncel } : inv
             ));
             setSelectedInvoice((prev: any) => ({ ...prev, ...guncel }));
+
+            // Rozet durumları (parasutAlisDurum/parasutSatisDurum) SUNUCUDA
+            // hesaplanıyor; PUT cevabında yoklar. Elle işlendi işaretlendiğinde
+            // rozetlerin anında yeşile dönmesi için listeyi tazele.
+            fetchSavedInvoices();
 
             const eslesme = sonuc?.eslesme;
             if (eslesme && !eslesme.ok) {
@@ -1206,6 +1216,42 @@ export default function Nakliye() {
                                         </span>
                                     </p>
                                 </div>
+
+                                {/* ELLE İŞLENDİ.
+                                    Paraşüt'e girilmeyen işler için (parça sevkiyat vb.).
+                                    İşaretlenince iki rozet de yeşile döner ve kayıt otomatik
+                                    faturalamaya aday sayılmaz. Temmuz 2026 öncesi kayıtlar
+                                    zaten tarih kuralıyla bu durumda — burası istisna yolu. */}
+                                {(() => {
+                                    // Temmuz 2026 öncesi kayıtlarda durum TARİH KURALINDAN geliyor;
+                                    // kutucuk orada bir şey değiştirmez. Aktif bırakmak yerine
+                                    // kilitleyip nedenini yazmak, tıklayıp hiçbir şey olmamasından iyi.
+                                    const tarihKuraliyleElle =
+                                        selectedInvoice.parasutAlisDurum === "elle" && selectedInvoice.elleIslendi !== true;
+                                    return (
+                                        <div className="min-w-0 md:col-span-2">
+                                            <label className={cn(
+                                                "flex items-start gap-2.5 rounded-lg border bg-background p-3 transition-colors",
+                                                tarihKuraliyleElle ? "cursor-default opacity-70" : "cursor-pointer hover:bg-muted/40",
+                                            )}>
+                                                <Checkbox
+                                                    checked={editElleIslendi || tarihKuraliyleElle}
+                                                    disabled={tarihKuraliyleElle}
+                                                    onCheckedChange={(v) => setEditElleIslendi(v === true)}
+                                                    className="mt-0.5 shrink-0"
+                                                />
+                                                <span className="min-w-0">
+                                                    <span className="block text-[13px] font-semibold">Elle işlendi</span>
+                                                    <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+                                                        {tarihKuraliyleElle
+                                                            ? "Temmuz 2026 öncesi olduğu için zaten elle işlenmiş sayılıyor; bu kayıtta değiştirilemez."
+                                                            : "Bu fatura Paraşüt'e girilmeyecek; alış ve satış tarafı sistem dışında hallediliyor. İşaretlenince iki rozet de yeşile döner ve otomatik faturalama bu kaydı atlar."}
+                                                    </span>
+                                                </span>
+                                            </label>
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             {/* Full Description */}
