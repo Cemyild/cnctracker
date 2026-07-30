@@ -35,3 +35,56 @@ export function tarihGoster(t: string | null | undefined): string {
   }
   return s;
 }
+
+/**
+ * Tarihi epoch gününe çevirir (karşılaştırma için). Üç biçim tanınır:
+ *   YYYY-MM-DD, DD.MM.YYYY ve EXCEL SERİ NUMARASI.
+ *
+ * Excel serisi kritik: gumruk_verileri.tescil_tarihi Excel import'undan
+ * "46223" gibi ham seri numarası tutabiliyor (canlıda doğrulandı). Bu biçim
+ * tanınmazsa tarih kırıcısı sessizce devre dışı kalır.
+ *
+ * new Date(...) ile parse EDİLMEZ — timezone kayması hatası (commit c897dff).
+ */
+export function gunSayisi(tarih: string | null | undefined): number | null {
+  if (!tarih) return null;
+  const t = String(tarih).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) {
+    const [y, a, g] = t.slice(0, 10).split("-").map(Number);
+    if (!y || !a || !g) return null;
+    return Math.floor(Date.UTC(y, a - 1, g) / 86400_000);
+  }
+  if (/^\d{2}\.\d{2}\.\d{4}/.test(t)) {
+    const [g, a, y] = t.slice(0, 10).split(".").map(Number);
+    if (!y || !a || !g) return null;
+    return Math.floor(Date.UTC(y, a - 1, g) / 86400_000);
+  }
+  // Excel seri numarası: 1899-12-30 tabanlı. Epoch (1970-01-01) = 25569.
+  if (/^\d{4,6}$/.test(t)) {
+    const seri = Number(t);
+    if (seri >= 20000 && seri <= 60000) return seri - 25569;
+  }
+  return null;
+}
+
+/**
+ * Paraşüt otomasyonunun devreye girdiği tarih.
+ *
+ * Bu tarihten ÖNCEKİ navlun faturalarının tamamı elle işlendi: alış faturaları
+ * muhasebeye elle girildi, müşteri faturaları Paraşüt'te elle kesildi
+ * (kullanıcı 2026-07-30'da doğruladı). Sistem onları "bekliyor" göstermemeli
+ * ve faturalamaya aday saymamalı — 269 kayıt bu durumda.
+ */
+export const SISTEM_BASLANGIC = "2026-07-01";
+const SISTEM_BASLANGIC_GUN = gunSayisi(SISTEM_BASLANGIC)!;
+
+/**
+ * Fatura, sistem devreye girmeden önceki döneme mi ait?
+ * Tarihi çözülemeyen kayıt için false döner — bilinmeyeni "elle işlendi"
+ * saymak, gerçekten bekleyen bir faturayı gizlerdi.
+ */
+export function sistemOncesiMi(faturaTarihi: string | null | undefined): boolean {
+  const gun = gunSayisi(faturaTarihi);
+  return gun !== null && gun < SISTEM_BASLANGIC_GUN;
+}

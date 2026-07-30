@@ -4,7 +4,7 @@ import { paraBirimiParasut } from "../parasut/hesap";
 import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
 import { firmaAdiBenzerligi } from "@shared/turkceNormalize";
 import { konteynerAnahtarlari } from "@shared/konteyner";
-import { tarihGoster } from "./tarih";
+import { tarihGoster, sistemOncesiMi } from "./tarih";
 import type { NakliyeFaturasi, GumrukVerisi, NakliyeVerisi } from "@shared/schema";
 
 /** Gelen matrahın üzerine eklenen marj. 10.000 → 12.000 (+ KDV). */
@@ -167,7 +167,12 @@ const KESILEMEZ_DURUMLAR = new Set(["dogrulama_hatasi", "hata", "revizyon_gerekl
  */
 export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
   const ekranKayitlari = (await storage.getNakliyeVerileri()).filter(
-    (v) => v.ilgiliDosyaNo && v.faturaNo,
+    // SİSTEM ÖNCESİ DÖNEM DIŞLANIR: Temmuz 2026'dan önceki faturaların tamamı
+    // elle kesildi. Aday listesine girselerdi mükerrer fatura riski yalnızca
+    // Paraşüt taramasına kalırdı — tarama bir kez başarısız olsa 269 kayıt
+    // yeniden faturalanabilir hale gelirdi. Tarih eşiği bunu yapısal olarak
+    // imkânsız kılar.
+    (v) => v.ilgiliDosyaNo && v.faturaNo && !sistemOncesiMi(v.faturaTarihi),
   );
   if (ekranKayitlari.length === 0) return [];
 

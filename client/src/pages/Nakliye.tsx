@@ -183,10 +183,13 @@ function DurumRozetleri({
     onFaturaKes?: (dosyaNo: string, e: React.MouseEvent) => void;
     kesiliyor?: boolean;
 }) {
-    const alisIslendi = inv.parasutAlisDurum === "islendi";
+    const alis = inv.parasutAlisDurum as string | undefined;
     const satis = inv.parasutSatisDurum as string | undefined;
+    // Temmuz 2026 öncesi: alış da satış da elle yapıldı, iş bitmiş sayılır.
+    const elleDonem = alis === "elle";
+    const alisIslendi = alis === "islendi";
     // Eşleşme kurulmuş ama müşteri faturası yoksa elle kesme düğmesi gösterilir.
-    const kesilebilir = Boolean(inv.ilgiliDosyaNo) && (satis === "bekliyor" || satis === "hata");
+    const kesilebilir = !elleDonem && Boolean(inv.ilgiliDosyaNo) && (satis === "bekliyor" || satis === "hata");
 
     const rozet = (
         etiket: string,
@@ -210,6 +213,16 @@ function DurumRozetleri({
             </span>
         );
     };
+
+    // Sistem devreye girmeden önceki dönem: her iki taraf da tamamlanmış.
+    if (elleDonem) {
+        return (
+            <div className="flex flex-col gap-1">
+                {rozet("Alış", true, "yesil", "Temmuz 2026 öncesi — muhasebeye elle işlendi")}
+                {rozet("Satış", true, "yesil", "Temmuz 2026 öncesi — müşteri faturası elle kesildi")}
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col gap-1">

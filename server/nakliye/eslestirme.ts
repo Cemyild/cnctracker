@@ -1,6 +1,7 @@
 import { storage } from "../storage";
 import { firmaAdiBenzerligi } from "@shared/turkceNormalize";
 import { normalizeKonteyner } from "./dogrulama";
+import { gunSayisi } from "./tarih";
 import type { GumrukVerisi } from "@shared/schema";
 
 /**
@@ -12,39 +13,6 @@ import type { GumrukVerisi } from "@shared/schema";
  * Eşik 50 olsaydı iki farklı firma sınırda eşleşirdi.
  */
 const FIRMA_ESIK = 70;
-
-/**
- * Tarihi epoch gününe çevirir. Üç format desteklenir:
- *   YYYY-MM-DD, DD.MM.YYYY ve EXCEL SERİ NUMARASI.
- *
- * Excel serisi kritik: gumruk_verileri.tescil_tarihi alanı Excel import'undan
- * geldiği için "46223" gibi ham seri numarası tutabiliyor (canlıda doğrulandı).
- * Bu format tanınmazsa tarih kırıcısı sessizce devre dışı kalır ve çoklu
- * adayda hep ilk kayıt seçilir.
- *
- * new Date(...) ile parse EDİLMEZ — timezone kayması hatası (commit c897dff).
- */
-function gunSayisi(tarih: string | null | undefined): number | null {
-  if (!tarih) return null;
-  const t = String(tarih).trim();
-
-  if (/^\d{4}-\d{2}-\d{2}/.test(t)) {
-    const [y, a, g] = t.slice(0, 10).split("-").map(Number);
-    if (!y || !a || !g) return null;
-    return Math.floor(Date.UTC(y, a - 1, g) / 86400_000);
-  }
-  if (/^\d{2}\.\d{2}\.\d{4}/.test(t)) {
-    const [g, a, y] = t.slice(0, 10).split(".").map(Number);
-    if (!y || !a || !g) return null;
-    return Math.floor(Date.UTC(y, a - 1, g) / 86400_000);
-  }
-  // Excel seri numarası: 1899-12-30 tabanlı. Epoch (1970-01-01) = 25569.
-  if (/^\d{4,6}$/.test(t)) {
-    const seri = Number(t);
-    if (seri >= 20000 && seri <= 60000) return seri - 25569;
-  }
-  return null;
-}
 
 /** Fatura tarihine en yakın tescil tarihli gümrük kaydını seçer. */
 function tarihEnYakin(adaylar: GumrukVerisi[], faturaTarihi: string | null): GumrukVerisi {

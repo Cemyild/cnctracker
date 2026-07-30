@@ -14,6 +14,7 @@ import { parasuttanCek } from "./nakliye/parasutOkuma";
 import { senkronCalistir, senkronHazirMi } from "./nakliye/senkron";
 import { faturaOnizleme, tamamlananDosyalariFaturala } from "./nakliye/satisFaturasi";
 import { dosyaNoIleEslestir } from "./nakliye/dosyaEslestirme";
+import { sistemOncesiMi } from "./nakliye/tarih";
 
 const ruhsatStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -4163,6 +4164,22 @@ export async function registerRoutes(
       const zenginlestirilmis = veriler.map((v) => {
         const alis = v.faturaNo ? alisMap.get(v.faturaNo) : undefined;
         const satis = v.ilgiliDosyaNo ? satisMap.get(v.ilgiliDosyaNo) : undefined;
+
+        // SİSTEM ÖNCESİ DÖNEM (Temmuz 2026'dan önce): hem alış hem satış tarafı
+        // elle yapıldı — alış faturaları muhasebeye elle girildi, müşteri
+        // faturaları Paraşüt'te elle kesildi. Bu kayıtlar "bekliyor"
+        // görünmemeli; bekleyen iş listesini 269 tamamlanmış kayıtla kirletir
+        // ve gerçekten bekleyen faturaların gözden kaçmasına yol açar.
+        if (sistemOncesiMi(v.faturaTarihi)) {
+          return {
+            ...v,
+            parasutAlisDurum: "elle",
+            parasutPurchaseBillId: alis?.parasutPurchaseBillId ?? null,
+            parasutSatisDurum: "elle",
+            parasutSalesInvoiceId: satis?.parasutSalesInvoiceId ?? null,
+            parasutSatisHata: null,
+          };
+        }
 
         return {
           ...v,
