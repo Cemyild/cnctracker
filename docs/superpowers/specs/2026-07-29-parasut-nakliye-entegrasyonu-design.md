@@ -408,7 +408,7 @@ Her eşleşen gelen fatura → bir kalem:
 | Alan | Değer |
 |---|---|
 | `quantity` | 1 |
-| `unit_price` | gelen faturanın `matrah` × **1,20** |
+| `unit_price` | gelen faturanın `matrah` × **1,20** — KDV **hariç** bedel üzerinden %20. Kullanıcı tarafından teyit edildi (2026-07-30). Paraşüt'teki geçmiş faturalarda eklenen tutarların +1.500/+2.000/+2.500 çıkması muhasebecinin elle yuvarlamasından; kural %20'dir ve yuvarlama yapılmaz. |
 | `vat_rate` | gelen faturanın `kdvOrani` (20 veya 0) |
 | `vat_withholding_rate` | **0 — kodda sabit** |
 | `description` | `<tedarikçi> · <fatura no> · <konteyner>` |
