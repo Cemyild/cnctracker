@@ -39,14 +39,18 @@ export function bugunYmd(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-// Bugüne uzaklık (gün) — YYYY-MM-DD, UTC aritmetiği (kayma yok)
-export function gunFarki(ymd: string | null | undefined): number | null {
+// Bugüne uzaklık (gün) — YYYY-MM-DD, UTC aritmetiği (kayma yok).
+// referans: "bugün" sayılacak gün; verilmezse gerçek takvim günü. Sanal tarih
+// (test modu) açıkken çağıranlar useSanalTarih().bugun'u buraya geçirir.
+export function gunFarki(ymd: string | null | undefined, referans?: string): number | null {
   if (!ymd) return null;
   const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
   const o = Date.UTC(+m[1], +m[2] - 1, +m[3]);
-  const simdi = new Date();
-  const bugun = Date.UTC(simdi.getFullYear(), simdi.getMonth(), simdi.getDate());
+  const r = referans?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const bugun = r
+    ? Date.UTC(+r[1], +r[2] - 1, +r[3])
+    : (() => { const s = new Date(); return Date.UTC(s.getFullYear(), s.getMonth(), s.getDate()); })();
   return Math.round((bugun - o) / 86400000);
 }
 

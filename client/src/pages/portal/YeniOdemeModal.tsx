@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import type { Beyanname, MasrafTuru, OdemeSirketi } from "@shared/schema";
@@ -9,7 +9,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatPara, formatTarih, bugunYmd } from "./portalUtils";
+import { formatPara, formatTarih } from "./portalUtils";
+import { useSanalTarih } from "./sanalTarih";
 import MasrafTuruSecici from "./MasrafTuruSecici";
 import BeyannameSecici from "./BeyannameSecici";
 
@@ -28,8 +29,9 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
   const sabitlendi = dosyaYok || !!beyannameId;
   const seciliBeyanname = beyannameler.find((b) => b.id === beyannameId);
 
-  // Masraf formu
-  const bugun = bugunYmd();
+  // Masraf formu — "bugün" sağ üstteki gün kutusundan gelir (test için geçmiş bir
+  // gün seçilmişse masraf varsayılanı da o güne düşer).
+  const { bugun } = useSanalTarih();
   // Masraf tarihi = fişin/faturanın TARİHİ, giriş günü değil. Geç eline geçen belge
   // önceki güne işlenebilir. Ard arda giriş için sıfırlanmaz (bkz. masrafFormuSifirla).
   const [tarih, setTarih] = useState(bugun);
@@ -44,6 +46,10 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
 
   // Bu modal oturumunda eklenenler (kolaylık listesi; gerçek kayıt landing açık hareketlerdedir)
   const [eklenenler, setEklenenler] = useState<Eklenen[]>([]);
+
+  // Modal her açıldığında tarih güncel "bugün"e çekilir — kutudan gün değiştirilip
+  // modal yeniden açıldığında eski gün formda kalmasın.
+  useEffect(() => { if (open) setTarih(bugun); }, [open, bugun]);
 
   // Sunucudaki getMasrafTuruByAd ile AYNI normalizasyon (asimetri olursa istemci "opsiyonel" der, sunucu 400).
   const seciliTur = useMemo(() => {

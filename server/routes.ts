@@ -5150,6 +5150,17 @@ export async function registerRoutes(
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
 
+  // TEST ARACI — portalın sağ üstündeki gün kutusu, geriye dönük bir günü canlandırmak
+  // için isteklere X-Sanal-Tarih başlığı ekler. Damga atan portal uçları bugunYmd()
+  // yerine BUNU çağırır. Sunucu saati değişmez; yalnız "bugün nedir" cevabı değişir.
+  // GÜVENLİK SINIRI: yalnız GEÇMİŞ kabul edilir — ileri tarihli başlık yok sayılır,
+  // böylece hiçbir kayıt geleceğe damgalanamaz.
+  function istemBugunu(req: { headers?: Record<string, unknown> }): string {
+    const bugun = bugunYmd();
+    const h = req.headers?.["x-sanal-tarih"];
+    return typeof h === "string" && /^\d{4}-\d{2}-\d{2}$/.test(h) && h <= bugun ? h : bugun;
+  }
+
   // Tutar ayrıştırma: "1.500,50" | "1500,50" | "1500.50" → 1500.5; geçersiz → null.
   // Hem nokta hem virgül varsa nokta binlik ayracı sayılır.
   function parseTutar(v: unknown): number | null {
@@ -5528,7 +5539,7 @@ export async function registerRoutes(
         iban: iban ? String(iban).trim() : null,
         aciklama: aciklama ? String(aciklama) : null,
         durum: "bekliyor",
-        talepTarihi: bugunYmd(),
+        talepTarihi: istemBugunu(req),
         konsimentoNo: odemeTipi === "depo_teminat" ? konsimentoNoStr : null,
         tasiyici: odemeTipi === "depo_teminat" && String(tasiyici ?? "").trim() ? String(tasiyici).trim() : null,
         iadeDurumu: odemeTipi === "depo_teminat" ? "beklemede" : null,
@@ -5630,7 +5641,7 @@ export async function registerRoutes(
         }
         const guncel = await storage.updateOdemeTalep(talep.id, {
           durum: "odendi",
-          odemeTarihi: bugunYmd(),
+          odemeTarihi: istemBugunu(req),
           odeyenId: ben.id,
         });
         res.json(guncel);
@@ -5666,7 +5677,7 @@ export async function registerRoutes(
       const tamamlandi = req.body?.tamamlandi === true || req.body?.tamamlandi === "true";
       const guncel = await storage.updateOdemeTalep(talep.id, {
         iadeDurumu: tamamlandi ? "islem_tamam" : "beklemede",
-        islemBitisTarihi: tamamlandi ? bugunYmd() : null,
+        islemBitisTarihi: tamamlandi ? istemBugunu(req) : null,
         islemBitirenId: tamamlandi ? ben.id : null,
       });
       if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
@@ -5838,7 +5849,7 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Dekont dosyası zorunlu" });
         }
 
-        const bugun = bugunYmd();
+        const bugun = istemBugunu(req);
         // BİLİNEN RİSK (Faz 2'de db.transaction ile çözülecek): talep "odendi" olarak
         // önce yazılır; ardından dekont belgesi eklenir. Aradaki nadir bir DB hatası
         // dekontsuz "odendi" kaydı bırakabilir (belge FK talepId gerektirdiğinden
@@ -5916,7 +5927,7 @@ export async function registerRoutes(
       // geriye dönük giriş serbesttir (avans endpoint'iyle aynı kalıp). Kapanış bunu
       // değiştirmez: gün kapatıldığında tarihi ne olursa olsun tüm AÇIK hareketler
       // kapatıldığı günün kapanışına yazılır. Geçersiz/boş → bugün.
-      const bugun = bugunYmd();
+      const bugun = istemBugunu(req);
       const masrafTarih = typeof tarih === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tarih) ? tarih : bugun;
       // İleri tarih REDDEDİLİR: henüz yapılmamış ödeme kasadan düşemez.
       if (masrafTarih > bugun) { sil(); return res.status(400).json({ error: "İleri tarihli masraf kaydedilemez" }); }
@@ -5966,7 +5977,13 @@ export async function registerRoutes(
     try {
       const ben = await portalKullanici(req);
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
-      const kapanis = await storage.gunuKapat(ben.id, bugunYmd());
+      // Kapanış günü gövdeden gelebilir (istemcideki gün kutusu — geriye dönük gün
+      // kapatma). Geçersiz/boş → bugün. İleri tarihli kapanış REDDEDİLİR.
+      const bugun = istemBugunu(req);
+      const istenen = req.body?.gunTarihi;
+      const gunTarihi = typeof istenen === "string" && /^\d{4}-\d{2}-\d{2}$/.test(istenen) ? istenen : bugun;
+      if (gunTarihi > bugun) return res.status(400).json({ error: "İleri tarihli gün kapatılamaz" });
+      const kapanis = await storage.gunuKapat(ben.id, gunTarihi);
       if (!kapanis) return res.status(400).json({ error: "Kapatılacak açık hareket yok" });
       res.json(kapanis);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -6044,7 +6061,7 @@ export async function registerRoutes(
       const tutarNum = parseTutar(tutar);
       if (tutarNum === null || tutarNum <= 0) { sil(); return res.status(400).json({ error: "Geçerli tutar girin" }); }
       // Tarih opsiyonel — geriye dönük avans için. Verilmez/geçersizse bugün (YYYY-MM-DD doğrula).
-      const avansTarih = typeof tarih === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tarih) ? tarih : bugunYmd();
+      const avansTarih = typeof tarih === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tarih) ? tarih : istemBugunu(req);
       const avans = await storage.avansYukle({
         operasyonId: req.params.operasyonId, tutar: tutarNum,
         aciklama: aciklama ? String(aciklama) : null, tarih: avansTarih, gonderenId: ben.id,

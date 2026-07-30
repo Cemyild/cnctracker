@@ -6,9 +6,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useToast } from "@/hooks/use-toast";
 import { Hourglass, CheckCircle2, Undo2, PackageCheck } from "lucide-react";
 import {
-  type TalepDetay, formatPara, formatTarih, gunFarki, bugunYmd,
+  type TalepDetay, formatPara, formatTarih, gunFarki,
   gunAciliyetSinifi, devamEdenTeminatlar, iadeEdilebilirTeminatlar,
 } from "./portalUtils";
+import { useSanalTarih } from "./sanalTarih";
 import type { PortalMe } from "./PortalApp";
 
 // Depo teminatı = gümrük işlemi bitmeden geri istenemeyen para. İşlemin bittiğini
@@ -48,7 +49,10 @@ function TeminatKimligi({ talep }: { talep: TalepDetay }) {
 }
 
 function GunSayaci({ odemeTarihi }: { odemeTarihi: string | null }) {
-  const gun = gunFarki(odemeTarihi);
+  // Sayaç, gün kutusundaki güne göre hesaplanır — test için geçmiş bir gün seçildiğinde
+  // "kaç gündür açık" da o güne göre geriye kayar.
+  const { bugun } = useSanalTarih();
+  const gun = gunFarki(odemeTarihi, bugun);
   if (gun == null) return <span className="text-xs text-muted-foreground">—</span>;
   return (
     <span className={`whitespace-nowrap text-xs tabular-nums ${gunAciliyetSinifi(gun)}`}>
@@ -158,6 +162,8 @@ function hatirlatmaAnahtari(meId: string) {
 /** TEMSİLCİ — günün ilk girişinde açık teminatları tek tek sorar. */
 export function DepoHatirlatmaPenceresi({ me, talepler }: { me: PortalMe; talepler: TalepDetay[] }) {
   const { toast } = useToast();
+  // Damga da gün kutusundan: test için gün değiştirildiğinde hatırlatma yeniden çıkar.
+  const { bugun } = useSanalTarih();
   const [acik, setAcik] = useState(false);
   const [gonderilen, setGonderilen] = useState<string | null>(null);
   // "Devam ediyor" denenler YALNIZ bu oturumda gizlenir — sunucuya hiçbir şey yazılmaz.
@@ -171,13 +177,13 @@ export function DepoHatirlatmaPenceresi({ me, talepler }: { me: PortalMe; talepl
     if (me.rol !== "temsilci" || liste.length === 0) return;
     let sonGosterim: string | null = null;
     try { sonGosterim = localStorage.getItem(hatirlatmaAnahtari(me.id)); } catch { /* storage kapalı */ }
-    if (sonGosterim === bugunYmd()) return;
+    if (sonGosterim === bugun) return;
     setAcik(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me.id, me.rol, liste.length]);
+  }, [me.id, me.rol, liste.length, bugun]);
 
   const kapat = () => {
-    try { localStorage.setItem(hatirlatmaAnahtari(me.id), bugunYmd()); } catch { /* storage kapalı */ }
+    try { localStorage.setItem(hatirlatmaAnahtari(me.id), bugun); } catch { /* storage kapalı */ }
     setAcik(false);
   };
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Wallet, ArrowDownToLine, ArrowUpFromLine, Calendar, RotateCcw, Download } from "lucide-react";
 import { formatPara } from "./portalUtils";
+import { useSanalTarih, tarihParcala } from "./sanalTarih";
 
 // rejim kodu (IM/EX/TR/AN) + dosyaYok → görsel anahtar. AN (antrepo) İthalat kanalı.
 export function rejimAnahtar(rejim: string | null | undefined, dosyaYok?: boolean): "im" | "ex" | "tr" | "of" {
@@ -41,16 +42,53 @@ export function KpiKart({ ikon, label, deger, renk = "text-foreground", alt }: {
   );
 }
 
+// Artık sadece tarih göstermez, SEÇTİRİR: seçilen gün sistem günü gibi davranır
+// (masraf tarihi varsayılanı, gün kapanışı, depo gün sayaçları). Geriye dönük gün
+// canlandırıp sistemi denemek için — bkz. sanalTarih.tsx.
 export function GunKutusu() {
-  const d = new Date();
-  const gun = `${d.getDate()} ${["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"][d.getMonth()]} ${d.getFullYear()}`;
-  const haftaGun = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"][d.getDay()];
+  const { bugun, gercekBugun, sanal, ayarla, sifirla } = useSanalTarih();
+  const { gun, haftaGun } = tarihParcala(bugun);
   return (
-    <div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2 shadow-sm">
-      <Calendar className="h-4 w-4 text-indigo-600" />
+    <div
+      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 shadow-sm ${
+        sanal
+          ? "border-amber-400 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30"
+          : "bg-card"
+      }`}
+      data-testid="kutu-gun"
+    >
+      <Calendar className={`h-4 w-4 ${sanal ? "text-amber-600 dark:text-amber-400" : "text-indigo-600"}`} />
       <div className="leading-tight">
-        <div className="text-[13px] font-semibold">{gun}</div>
-        <div className="text-[10.5px] text-muted-foreground">{haftaGun} · bugün açık</div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[13px] font-semibold">{gun}</span>
+          {/* Görünmez ama tıklanabilir: kutunun kendisi takvimi açar. */}
+          <input
+            type="date"
+            value={bugun}
+            max={gercekBugun}
+            onChange={(e) => e.target.value && ayarla(e.target.value)}
+            className="w-[18px] cursor-pointer border-0 bg-transparent p-0 text-transparent focus:outline-none"
+            title="Sistem gününü değiştir (test)"
+            data-testid="input-sanal-tarih"
+          />
+        </div>
+        <div className={`text-[10.5px] ${sanal ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
+          {sanal ? (
+            <>
+              {haftaGun} · TEST GÜNÜ
+              <button
+                type="button"
+                onClick={sifirla}
+                className="ml-1.5 underline hover:no-underline"
+                data-testid="button-sanal-tarih-sifirla"
+              >
+                bugüne dön
+              </button>
+            </>
+          ) : (
+            `${haftaGun} · bugün açık`
+          )}
+        </div>
       </div>
     </div>
   );

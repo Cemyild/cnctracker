@@ -16,6 +16,7 @@ import OperasyonKapanislarSayfasi from "./OperasyonKapanislarSayfasi";
 import OperasyonTakipSayfasi from "./OperasyonTakipSayfasi";
 import SubeRaporuSayfasi from "./SubeRaporuSayfasi";
 import { type TalepDetay } from "./portalUtils";
+import { SanalTarihSaglayici } from "./sanalTarih";
 import { DepoHatirlatmaPenceresi } from "./depoIslemTakibi";
 import {
   useTalepBildirimleri, bildirimIzniIste, type SayfaAnahtari,
@@ -151,8 +152,10 @@ export default function PortalApp() {
   };
 
   return (
-    <SidebarProvider style={style as React.CSSProperties}>
-      <PortalIcerik me={me} />
-    </SidebarProvider>
+    <SanalTarihSaglayici>
+      <SidebarProvider style={style as React.CSSProperties}>
+        <PortalIcerik me={me} />
+      </SidebarProvider>
+    </SanalTarihSaglayici>
   );
 }

@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Search } from "lucide-react";
 import type { Beyanname } from "@shared/schema";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Command, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
 import { Input } from "@/components/ui/input";
 
-const LIMIT = 100;
+// Tam ekran listede daha fazlası rahatça görünür (eski dar popover'da 100'dü).
+const LIMIT = 250;
 const VARSAYILAN_PLACEHOLDER =
   "Aramak için Ref, Alıcı yada Beyanname No yazın, yada açılır listeden seçin";
 
@@ -103,51 +104,71 @@ export default function BeyannameSecici({
   const sec = (id: string) => { onChange(id); setArama(""); setAcik(false); };
 
   return (
-    <Popover open={acik} onOpenChange={acKapa}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={acik}
-          disabled={disabled}
-          className={cn("w-full justify-between font-normal", !secili && "text-muted-foreground", className)}
-          data-testid={testId}
-        >
-          <span className="truncate">
-            {secili ? `${kimlik(secili)} — ${secili.alici ?? "?"}` : placeholder}
-          </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-        {/* shouldFilter={false}: filtre yukarida, Turkce-dogru sekilde yapiliyor */}
-        <Command shouldFilter={false}>
-          <CommandInput
-            value={arama}
-            onValueChange={setArama}
-            placeholder={placeholder}
-            data-testid={`${testId}-arama`}
-          />
-          <div className="flex gap-1 border-b p-1.5">
-            {REJIMLER.map((r) => (
-              <button
-                key={r.kod}
-                type="button"
-                onClick={() => setRejimFiltre(r.kod)}
-                className={cn(
-                  "flex-1 rounded px-2 py-1 text-xs transition-colors",
-                  rejimFiltre === r.kod
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted",
-                )}
-                data-testid={`${testId}-rejim-${r.kod}`}
-              >
-                {r.etiket}
-              </button>
-            ))}
-          </div>
-          <CommandList>
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        role="combobox"
+        aria-expanded={acik}
+        disabled={disabled}
+        onClick={() => acKapa(true)}
+        className={cn("w-full justify-between font-normal", !secili && "text-muted-foreground", className)}
+        data-testid={testId}
+      >
+        <span className="truncate">
+          {secili ? `${kimlik(secili)} — ${secili.alici ?? "?"}` : placeholder}
+        </span>
+        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+
+      {/* POPOVER DEĞİL DIALOG. İki sebep:
+          (1) Popover genişliği trigger'a kilitliydi (--radix-popover-trigger-width); ortadaki
+              dar modalın içinde liste okunmuyordu. Dialog tam ekrana yakın açılır.
+          (2) Radix modal Dialog, react-remove-scroll ile Dialog içeriğinin DIŞINDA kalan her
+              yerde tekerlek olayını bloklar. Popover kendi portalıyla body'ye çıktığı için
+              "dışarısı" sayılıyor ve listede fare tekerleği çalışmıyordu (scrollbar sürüklemek
+              ya da ok tuşları çalışıyordu). En üstteki Dialog scroll kilidinin sahibidir. */}
+      <Dialog open={acik} onOpenChange={acKapa}>
+        <DialogContent className="flex h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b px-5 py-3.5">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              Beyanname Seç
+            </DialogTitle>
+          </DialogHeader>
+          {/* shouldFilter={false}: filtre yukarida, Turkce-dogru sekilde yapiliyor */}
+          <Command shouldFilter={false} className="flex min-h-0 flex-1 flex-col">
+            <CommandInput
+              value={arama}
+              onValueChange={setArama}
+              placeholder={placeholder}
+              data-testid={`${testId}-arama`}
+            />
+            <div className="flex shrink-0 gap-1 border-b p-1.5">
+              {REJIMLER.map((r) => (
+                <button
+                  key={r.kod}
+                  type="button"
+                  onClick={() => setRejimFiltre(r.kod)}
+                  className={cn(
+                    "flex-1 rounded px-2 py-1.5 text-xs transition-colors",
+                    rejimFiltre === r.kod
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted",
+                  )}
+                  data-testid={`${testId}-rejim-${r.kod}`}
+                >
+                  {r.etiket}
+                </button>
+              ))}
+            </div>
+            {!transitForm && (
+              <div className="shrink-0 border-b px-3 py-1.5 text-[11px] text-muted-foreground" data-testid={`${testId}-sayac`}>
+                {eslesenler.length} beyanname{kirpildi ? ` · ilk ${LIMIT} listeleniyor` : ""}
+              </div>
+            )}
+            {/* max-h-none: shadcn CommandList varsayılanı 300px; burada yüksekliği Dialog verir. */}
+            <CommandList className="max-h-none min-h-0 flex-1">
             {transitForm ? (
               <div className="space-y-2 p-2" data-testid={`${testId}-transit-form`}>
                 <div className="text-xs font-medium text-muted-foreground">Yeni Transit</div>
@@ -208,9 +229,10 @@ export default function BeyannameSecici({
                 )}
               </>
             )}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

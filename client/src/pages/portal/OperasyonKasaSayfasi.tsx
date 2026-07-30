@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatPara, formatTarih, bugunYmd } from "./portalUtils";
+import { formatPara, formatTarih } from "./portalUtils";
+import { useSanalTarih } from "./sanalTarih";
 import YeniOdemeModal from "./YeniOdemeModal";
 import { masraflariGrupla } from "./masrafGruplama";
 import { KpiKart, GunKutusu, SonDevirKart, IK } from "./kasaUI";
@@ -22,6 +23,7 @@ type Ozet = {
 
 export default function OperasyonKasaSayfasi() {
   const { toast } = useToast();
+  const { bugun } = useSanalTarih();
   const { data: ozet } = useQuery<Ozet>({
     queryKey: ["/api/portal/operasyon/ozet"],
     refetchInterval: 10000,
@@ -62,9 +64,16 @@ export default function OperasyonKasaSayfasi() {
   const gunuKapat = async () => {
     setKapatiliyor(true);
     try {
-      const res = await fetch("/api/portal/operasyon/gunu-kapat", { method: "POST", credentials: "include" });
+      // Kapanış günü sunucunun saatinden DEĞİL, gün kutusundan gelir — geriye dönük
+      // gün kapatabilmek için (sunucu yine YYYY-MM-DD ve ileri-tarih doğrulaması yapar).
+      const res = await fetch("/api/portal/operasyon/gunu-kapat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gunTarihi: bugun }),
+        credentials: "include",
+      });
       if (!res.ok) throw new Error((await res.json()).error || "Kapatılamadı");
-      toast({ title: "Gün kapatıldı", description: "Rapor muhasebeye iletildi." });
+      toast({ title: `${formatTarih(bugun)} kapatıldı`, description: "Rapor muhasebeye iletildi." });
       setKapatDialog(false);
       tazele();
       queryClient.invalidateQueries({ queryKey: ["/api/portal/operasyon/kapanislar"] });
@@ -138,10 +147,10 @@ export default function OperasyonKasaSayfasi() {
             <div className="flex justify-between border-t pt-1 font-semibold"><span>Kapanış bakiyesi:</span><span className="tabular-nums">{formatPara(ozet?.bakiye ?? 0, "₺")}</span></div>
             {farkliTarihli && (
               <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300" data-testid="uyari-kapanis-tarih-araligi">
-                Listede <b>{formatTarih(enErken)} – {formatTarih(enGec)}</b> arası masraflar var. Hepsi <b>{formatTarih(bugunYmd())}</b> kapanışına yazılır.
+                Listede <b>{formatTarih(enErken)} – {formatTarih(enGec)}</b> arası masraflar var. Hepsi <b>{formatTarih(bugun)}</b> kapanışına yazılır.
               </p>
             )}
-            <p className="pt-2 text-xs text-muted-foreground">Kapanış, kapattığınız günün ({formatTarih(bugunYmd())}) adını alır — içindeki masrafların tarihi farklı olabilir. Kapatınca hepsi kilitlenir, rapor muhasebeye iletilir, bakiye ertesi güne devreder.</p>
+            <p className="pt-2 text-xs text-muted-foreground">Kapanış, kapattığınız günün ({formatTarih(bugun)}) adını alır — içindeki masrafların tarihi farklı olabilir. Kapatınca hepsi kilitlenir, rapor muhasebeye iletilir, bakiye ertesi güne devreder.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setKapatDialog(false)}>Vazgeç</Button>

@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { formatTarih, formatPara } from "./portalUtils";
 import { masraflariGrupla } from "./masrafGruplama";
 import { KpiKart, GunKutusu, SonDevirKart, IK } from "./kasaUI";
+import { useSanalTarih } from "./sanalTarih";
 import { MasrafTablosu } from "./MasrafTablosu";
 import { ChevronRight, ChevronDown } from "lucide-react";
 
@@ -22,6 +23,7 @@ type Detay = { bakiye: number; acik: { avanslar: OperasyonAvans[]; masraflar: Op
 
 export default function OperasyonTakipSayfasi() {
   const { toast } = useToast();
+  const { bugun } = useSanalTarih();
   const { data: liste = [] } = useQuery<Satir[]>({
     queryKey: ["/api/portal/operasyon-takip"], refetchInterval: 10000, refetchIntervalInBackground: true,
   });
@@ -91,10 +93,8 @@ export default function OperasyonTakipSayfasi() {
   // Aksi hâlde seçili dosya bir sonraki şubenin kaydına sessizce eklenir (Radix dialog
   // unmount olduğundan alan BOŞ görünür ama state doludur).
   const avansFormSifirla = () => {
-    // Tarih varsayılanı BUGÜN (yerel gün — new Date() argümansız, parse yok). Kullanıcı
-    // geriye dönük avans için değiştirebilir.
-    const d = new Date();
-    const bugun = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    // Tarih varsayılanı, sağ üstteki gün kutusundaki gün. Kullanıcı geriye dönük
+    // avans için yine de elle değiştirebilir.
     setAvansTutar(""); setAvansAciklama(""); setAvansTarih(bugun);
     setAvansDekont(null); setDekontSayac((s) => s + 1);
   };

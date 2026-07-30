@@ -21,6 +21,7 @@ import {
   IADE_ETIKET, devamEdenTeminatlar, iadeEdilebilirTeminatlar,
 } from "./portalUtils";
 import { SayfaBasligi } from "./kasaUI";
+import { useSanalTarih } from "./sanalTarih";
 import BelgeLinkleri from "./BelgeLinkleri";
 import { IadeEdilebilirKarti } from "./depoIslemTakibi";
 
@@ -163,6 +164,7 @@ export default function DepoOdemeleriSayfasi() {
     queryKey: ["/api/portal/talepler"],
   });
   const [iadeTalebi, setIadeTalebi] = useState<TalepDetay | null>(null);
+  const { bugun } = useSanalTarih(); // "kaç gündür açık" gün kutusuna göre hesaplanır
   const depoTalepleri = talepler.filter((t) => t.odemeTipi === "depo_teminat");
   const islemSuren = devamEdenTeminatlar(depoTalepleri).length;
   const iadeEdilebilir = iadeEdilebilirTeminatlar(depoTalepleri).length;
@@ -206,7 +208,7 @@ export default function DepoOdemeleriSayfasi() {
               // İade alınana kadar para dışarıdadır — islem_tamam aşamasında da sayaç işler.
               const acikGun =
                 t.durum === "odendi" && t.iadeDurumu !== "iade_edildi"
-                  ? gunFarki(t.odemeTarihi)
+                  ? gunFarki(t.odemeTarihi, bugun)
                   : null;
               return (
                 <TableRow key={t.id} className="hover:bg-muted/30" data-testid={`row-depo-${t.id}`}>
