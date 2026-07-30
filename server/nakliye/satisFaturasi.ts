@@ -1,7 +1,7 @@
 import { storage } from "../storage";
-import { parasutIstek, jsonApiCoz } from "../parasut/client";
+import { parasutIstek, jsonApiCoz, iliskiId } from "../parasut/client";
 import { paraBirimiParasut } from "../parasut/hesap";
-import { normalizeKonteyner } from "./dogrulama";
+import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
 import { firmaAdiBenzerligi } from "@shared/turkceNormalize";
 import type { NakliyeFaturasi, GumrukVerisi } from "@shared/schema";
 
@@ -86,6 +86,73 @@ function faturaNotuUret(g: GumrukVerisi, konteynerler: string[]): string {
 }
 
 /**
+ * Paraşüt'teki MEVCUT satış faturalarında geçen konteyner numaralarını toplar.
+ *
+ * Neden gerekli: bu sistem devreye girmeden önce müşteri faturaları elle
+ * kesilmişti ve muhasebeci konteyner numarasını satış faturasının ürün adına
+ * yazıyor ("20 CNTR GEMLİK-BURSA/KAYAPA NAKLİYE BEDELİ HLBU8087850").
+ * Bu tarama olmadan sistem, elle kesilmiş faturaları ikinci kez keserdi —
+ * ölçüldü: hazır görünen 14 dosyadan 13'ü zaten faturalanmıştı.
+ *
+ * parasut_satis_faturalari tablosu yalnızca BU sistemin kestiklerini bilir;
+ * geçmişi bilmez. Bu yüzden kaynak olarak Paraşüt'ün kendisi taranır.
+ */
+let kesilmisOnbellek: { zaman: number; konteynerler: Map<string, string> } | null = null;
+const ONBELLEK_MS = 10 * 60 * 1000;
+
+async function kesilmisKonteynerler(): Promise<Map<string, string>> {
+  if (kesilmisOnbellek && Date.now() - kesilmisOnbellek.zaman < ONBELLEK_MS) {
+    return kesilmisOnbellek.konteynerler;
+  }
+
+  const bulunan = new Map<string, string>(); // konteyner → "tarih / tutar"
+  const yil = new Date().getFullYear();
+
+  for (let sayfa = 1; sayfa <= 40; sayfa++) {
+    const cevap = await parasutIstek<any>("/sales_invoices", {
+      query: {
+        "filter[issue_date][gteq]": `${yil - 1}-01-01`,
+        "filter[issue_date][lteq]": `${yil}-12-31`,
+        "page[size]": "25",
+        "page[number]": String(sayfa),
+        include: "details,details.product",
+      },
+    });
+    const { veri, iliskili } = jsonApiCoz(cevap);
+    if (veri.length === 0) break;
+
+    for (const d of veri) {
+      const parcalar: string[] = [d.attributes?.description || "", d.attributes?.invoice_note || ""];
+      for (const det of d.relationships?.details?.data || []) {
+        const dd = iliskili.get(`sales_invoice_details:${det.id}`);
+        if (!dd) continue;
+        parcalar.push(dd.attributes?.description || "");
+        const pid = iliskiId(dd, "product");
+        if (pid) parcalar.push(iliskili.get(`products:${pid}`)?.attributes?.name || "");
+      }
+      const metin = parcalar.join(" ").toUpperCase();
+      const re = /([A-Z]{4})\s*(\d{7})/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(metin)) !== null) {
+        const k = normalizeKonteyner(m[1] + m[2]);
+        if (konteynerGecerliMi(k)) {
+          bulunan.set(k, `${d.attributes?.issue_date} / ${d.attributes?.net_total}`);
+        }
+      }
+    }
+    if (veri.length < 25) break;
+  }
+
+  kesilmisOnbellek = { zaman: Date.now(), konteynerler: bulunan };
+  return bulunan;
+}
+
+/** Mükerrer taramasının önbelleğini boşaltır (yeni fatura kesildikten sonra). */
+export function kesilmisOnbellegiTemizle(): void {
+  kesilmisOnbellek = null;
+}
+
+/**
  * Beyanname bazında gruplanmış faturaların önizlemesini üretir.
  * Paraşüt'e HİÇBİR ŞEY YAZMAZ — hem UI hem kuru çalıştırma için.
  */
@@ -119,13 +186,33 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
 
   const sonuc: DosyaOnizleme[] = [];
 
+  // Paraşüt'te daha önce (elle) kesilmiş faturaların konteynerleri
+  let kesilmis: Map<string, string>;
+  try {
+    kesilmis = await kesilmisKonteynerler();
+  } catch (e) {
+    // Tarama yapılamazsa GÜVENLİ TARAFTA kal: hiçbir dosyayı hazır saymayız.
+    // Aksi halde mükerrer fatura kesme riski doğar.
+    console.error("Mükerrer taraması yapılamadı:", e instanceof Error ? e.message : e);
+    kesilmis = new Map([["__TARAMA_BASARISIZ__", "bilinmiyor"]]);
+  }
+  const taramaBasarisiz = kesilmis.has("__TARAMA_BASARISIZ__");
+
   for (const [dosyaNo, grup] of Array.from(gruplar.entries())) {
     const beklenen = parseInt(String(grup.gumruk.konteynerSayisi || "0"), 10) || 0;
     const eslesen = grup.konteynerler.size;
     const vkn = String(grup.gumruk.vn || "").replace(/\D/g, "") || null;
 
+    // Bu dosyanın konteynerlerinden biri Paraşüt'teki bir satış faturasında
+    // geçiyorsa fatura zaten kesilmiş demektir.
+    const zatenKesilmis = Array.from(grup.konteynerler).find((k) => kesilmis.has(k));
+
     let engel: string | null = null;
-    if (await storage.getSatisFaturasiByDosyaNo(dosyaNo)) engel = "Bu dosya için taslak zaten var";
+    if (taramaBasarisiz) engel = "Mükerrer taraması yapılamadı — güvenlik gereği bekletiliyor";
+    else if (await storage.getSatisFaturasiByDosyaNo(dosyaNo)) engel = "Bu dosya için taslak zaten var";
+    else if (zatenKesilmis) {
+      engel = `Paraşüt'te zaten faturalanmış (${zatenKesilmis} → ${kesilmis.get(zatenKesilmis)})`;
+    }
     else if (!beklenen) engel = "Beyannamede konteyner sayısı boş — otomatik tetiklenemez";
     else if (eslesen < beklenen) engel = `${beklenen} konteynerin ${eslesen}'i eşleşti — bekliyor`;
     else if (!vkn && !grup.gumruk.firmaUnvan) engel = "Beyannamede ne VKN ne firma unvanı var";
@@ -381,6 +468,7 @@ export async function tamamlananDosyalariFaturala(
         await storage.updateNakliyeFaturasi(k.faturaId, { durum: "faturalandi", hataMesaji: null });
       }
       olusturulan++;
+      kesilmisOnbellegiTemizle();
     } catch (e) {
       const mesaj = e instanceof Error ? e.message : "Bilinmeyen hata";
       await storage.insertSatisFaturasi({
