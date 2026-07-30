@@ -9,12 +9,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatPara } from "./portalUtils";
+import { formatPara, formatTarih, bugunYmd } from "./portalUtils";
 import MasrafTuruSecici from "./MasrafTuruSecici";
 import BeyannameSecici from "./BeyannameSecici";
 
 // Anlık kayıt olduğundan, eklenen masraf sunucudan dönen OperasyonMasraf'ın alt kümesidir.
-type Eklenen = { id: string; masrafTuru: string | null; alacakli: string; tutar: string };
+type Eklenen = { id: string; masrafTuru: string | null; alacakli: string; tutar: string; tarih: string };
 
 export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
@@ -29,6 +29,10 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
   const seciliBeyanname = beyannameler.find((b) => b.id === beyannameId);
 
   // Masraf formu
+  const bugun = bugunYmd();
+  // Masraf tarihi = fişin/faturanın TARİHİ, giriş günü değil. Geç eline geçen belge
+  // önceki güne işlenebilir. Ard arda giriş için sıfırlanmaz (bkz. masrafFormuSifirla).
+  const [tarih, setTarih] = useState(bugun);
   const [masrafTuru, setMasrafTuru] = useState("");
   const [tutar, setTutar] = useState("");
   const [alacakli, setAlacakli] = useState("");
@@ -54,14 +58,15 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
     queryClient.invalidateQueries({ queryKey: ["/api/portal/odeme-sirketleri"] });
   };
 
-  // YALNIZ masraf alanları — beyanname SABİT kalır.
+  // YALNIZ masraf alanları — beyanname ve TARİH sabit kalır (aynı güne ait fişler
+  // arka arkaya girilir; her kalemde tarihi yeniden seçtirmek gereksiz sürtünme).
   const masrafFormuSifirla = () => {
     setMasrafTuru(""); setTutar(""); setAlacakli(""); setIban(""); setAciklama("");
     setBelge(null); setBelgeSayac((s) => s + 1);
   };
   const beyannameDegistir = () => { setBeyannameId(""); setDosyaYok(false); };
   const kapat = () => {
-    beyannameDegistir(); masrafFormuSifirla(); setEklenenler([]);
+    beyannameDegistir(); masrafFormuSifirla(); setEklenenler([]); setTarih(bugun);
     onClose();
   };
 
@@ -70,11 +75,14 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
     if (!tutar.trim() || !alacakli.trim()) { toast({ title: "Tutar ve alacaklı zorunlu", variant: "destructive" }); return; }
     if (!dosyaYok && !beyannameId) { toast({ title: "Beyanname seçin veya 'Ofis Masrafı' işaretleyin", variant: "destructive" }); return; }
     if (dosyaYok && !aciklama.trim()) { toast({ title: "Ofis masrafında açıklama zorunlu", variant: "destructive" }); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tarih)) { toast({ title: "Masraf tarihi seçin", variant: "destructive" }); return; }
+    if (tarih > bugun) { toast({ title: "İleri tarihli masraf kaydedilemez", variant: "destructive" }); return; }
     setGonderiliyor(true);
     try {
       const fd = new FormData();
       if (!dosyaYok) fd.set("beyannameId", beyannameId);
       fd.set("dosyaYok", String(dosyaYok));
+      fd.set("tarih", tarih);
       fd.set("masrafTuru", masrafTuru);
       fd.set("tutar", tutar);
       fd.set("alacakli", alacakli);
@@ -84,8 +92,8 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
       const res = await fetch("/api/portal/operasyon/masraf", { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) throw new Error((await res.json()).error || "Kaydedilemedi");
       const kayit = await res.json();
-      setEklenenler((prev) => [...prev, { id: kayit.id, masrafTuru: kayit.masrafTuru, alacakli: kayit.alacakli, tutar: kayit.tutar }]);
-      toast({ title: "Masraf eklendi", description: "Bakiyeden düşüldü." });
+      setEklenenler((prev) => [...prev, { id: kayit.id, masrafTuru: kayit.masrafTuru, alacakli: kayit.alacakli, tutar: kayit.tutar, tarih: kayit.tarih }]);
+      toast({ title: "Masraf eklendi", description: `${formatTarih(kayit.tarih)} tarihine işlendi, bakiyeden düşüldü.` });
       masrafFormuSifirla(); // beyanname SABİT
       tazele();
     } catch (err: any) {
@@ -139,7 +147,19 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
           {sabitlendi && (
             <>
               <div className="space-y-3">
-                <div className="space-y-2"><Label>Masraf Türü</Label><MasrafTuruSecici value={masrafTuru} onChange={setMasrafTuru} testId="op-masraf-turu" /></div>
+                {/* minmax(0,1fr): combobox'ın min-content genişliği sütunu modalın dışına taşımasın */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_176px]">
+                  <div className="min-w-0 space-y-2"><Label>Masraf Türü</Label><MasrafTuruSecici value={masrafTuru} onChange={setMasrafTuru} testId="op-masraf-turu" /></div>
+                  <div className="space-y-2">
+                    <Label>Masraf Tarihi</Label>
+                    <Input type="date" max={bugun} value={tarih} onChange={(e) => setTarih(e.target.value)} data-testid="input-op-tarih" />
+                  </div>
+                </div>
+                {tarih && tarih < bugun && (
+                  <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300" data-testid="uyari-op-geriye-donuk">
+                    Geriye dönük giriş — bu masraf <b>{formatTarih(tarih)}</b> tarihine yazılacak. Günü kapattığınızda kapanış, kapattığınız günün adını alır.
+                  </p>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2"><Label>Tutar (TL)</Label><Input placeholder="0,00" value={tutar} onChange={(e) => setTutar(e.target.value)} data-testid="input-op-tutar" /></div>
                   <div className="space-y-2">
@@ -163,7 +183,7 @@ export default function YeniOdemeModal({ open, onClose }: { open: boolean; onClo
               <div className="text-xs font-medium text-muted-foreground">Bu oturumda eklenenler ({eklenenler.length})</div>
               {eklenenler.map((e) => (
                 <div key={e.id} className="flex items-center justify-between gap-2 text-sm" data-testid={`eklenen-${e.id}`}>
-                  <span className="min-w-0 truncate">{e.masrafTuru ?? "Masraf"} · {e.alacakli}</span>
+                  <span className="min-w-0 truncate"><span className="tabular-nums text-muted-foreground">{formatTarih(e.tarih)}</span> · {e.masrafTuru ?? "Masraf"} · {e.alacakli}</span>
                   <span className="flex shrink-0 items-center gap-2">
                     <span className="text-destructive">−{formatPara(e.tutar, "TL")}</span>
                     <Button variant="ghost" size="sm" onClick={() => eklenenKaldir(e.id)} data-testid={`button-eklenen-kaldir-${e.id}`}>Kaldır</Button>

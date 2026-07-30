@@ -16,7 +16,7 @@ import { KpiKart, GunKutusu, SonDevirKart, IK } from "./kasaUI";
 import { MasrafTablosu } from "./MasrafTablosu";
 import { ChevronRight, ChevronDown } from "lucide-react";
 
-type Satir = { id: string; adSoyad: string; kullaniciAdi: string; sube: string | null; bakiye: number; bugunHarcanan: number };
+type Satir = { id: string; adSoyad: string; kullaniciAdi: string; sube: string | null; bakiye: number; acikMasraf: number };
 type Kapanis = OperasyonGunKapanis & { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] };
 type Detay = { bakiye: number; acik: { avanslar: OperasyonAvans[]; masraflar: OperasyonMasraf[] }; kapanislar: Kapanis[] };
 
@@ -171,7 +171,7 @@ export default function OperasyonTakipSayfasi() {
                 <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card p-3 shadow-sm" data-testid={`sube-${s.id}`}>
                   <div>
                     <div className="font-medium">{s.adSoyad}</div>
-                    <div className="text-xs text-muted-foreground">Bugün harcanan: <span className="tabular-nums">{formatPara(s.bugunHarcanan, "₺")}</span></div>
+                    <div className="text-xs text-muted-foreground">Açık masraf: <span className="tabular-nums">{formatPara(s.acikMasraf, "₺")}</span></div>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className={`text-lg font-bold tabular-nums ${s.bakiye < 0 ? "text-rose-600" : ""}`} data-testid={`sube-bakiye-${s.id}`}>{formatPara(s.bakiye, "₺")}</div>

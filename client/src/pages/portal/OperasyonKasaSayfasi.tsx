@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatPara } from "./portalUtils";
+import { formatPara, formatTarih, bugunYmd } from "./portalUtils";
 import YeniOdemeModal from "./YeniOdemeModal";
 import { masraflariGrupla } from "./masrafGruplama";
 import { KpiKart, GunKutusu, SonDevirKart, IK } from "./kasaUI";
@@ -74,6 +74,13 @@ export default function OperasyonKasaSayfasi() {
 
   const hareketSayisi = (ozet?.avanslar.length ?? 0) + (ozet?.masraflar.length ?? 0);
 
+  // Kapanış onayında gösterilecek tarih aralığı. Açık masraflar farklı günlere ait
+  // olabilir; kapanış YİNE DE kapatıldığı günün adını alır (gunuKapat → bugün).
+  const masrafTarihleri = (ozet?.masraflar ?? []).map((m) => m.tarih).filter(Boolean).sort();
+  const enErken = masrafTarihleri[0];
+  const enGec = masrafTarihleri[masrafTarihleri.length - 1];
+  const farkliTarihli = !!enErken && enErken !== enGec;
+
   return (
     <div className="space-y-6">
       {/* Başlık şeridi + sabit gün kutusu */}
@@ -129,7 +136,12 @@ export default function OperasyonKasaSayfasi() {
             <div className="flex justify-between"><span>Gelen avans:</span><span className="tabular-nums text-emerald-600">+{formatPara(acikAvansToplam, "₺")}</span></div>
             <div className="flex justify-between"><span>Güncel masraf:</span><span className="tabular-nums text-rose-600">−{formatPara(acikMasrafToplam, "₺")}</span></div>
             <div className="flex justify-between border-t pt-1 font-semibold"><span>Kapanış bakiyesi:</span><span className="tabular-nums">{formatPara(ozet?.bakiye ?? 0, "₺")}</span></div>
-            <p className="pt-2 text-xs text-muted-foreground">Kapatınca bu hareketler kilitlenir ve rapor muhasebeye iletilir. Bakiye ertesi güne devreder.</p>
+            {farkliTarihli && (
+              <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300" data-testid="uyari-kapanis-tarih-araligi">
+                Listede <b>{formatTarih(enErken)} – {formatTarih(enGec)}</b> arası masraflar var. Hepsi <b>{formatTarih(bugunYmd())}</b> kapanışına yazılır.
+              </p>
+            )}
+            <p className="pt-2 text-xs text-muted-foreground">Kapanış, kapattığınız günün ({formatTarih(bugunYmd())}) adını alır — içindeki masrafların tarihi farklı olabilir. Kapatınca hepsi kilitlenir, rapor muhasebeye iletilir, bakiye ertesi güne devreder.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setKapatDialog(false)}>Vazgeç</Button>

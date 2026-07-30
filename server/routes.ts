@@ -5875,9 +5875,17 @@ export async function registerRoutes(
     try {
       const ben = await portalKullanici(req);
       if (!ben) { sil(); return res.status(401).json({ error: "Giriş gerekli" }); }
-      const { beyannameId, dosyaYok, masrafTuru, tutar, alacakli, iban, aciklama } = req.body || {};
+      const { beyannameId, dosyaYok, masrafTuru, tutar, alacakli, iban, aciklama, tarih } = req.body || {};
       const dosyaYokB = dosyaYok === "true" || dosyaYok === true;
       const tutarNum = parseTutar(tutar);
+      // Masraf tarihi GİRİŞ gününden bağımsızdır — fiş/fatura ertesi gün ele geçebilir,
+      // geriye dönük giriş serbesttir (avans endpoint'iyle aynı kalıp). Kapanış bunu
+      // değiştirmez: gün kapatıldığında tarihi ne olursa olsun tüm AÇIK hareketler
+      // kapatıldığı günün kapanışına yazılır. Geçersiz/boş → bugün.
+      const bugun = bugunYmd();
+      const masrafTarih = typeof tarih === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tarih) ? tarih : bugun;
+      // İleri tarih REDDEDİLİR: henüz yapılmamış ödeme kasadan düşemez.
+      if (masrafTarih > bugun) { sil(); return res.status(400).json({ error: "İleri tarihli masraf kaydedilemez" }); }
       // Belge zorunluluğu masraf TÜRÜNE bağlı. Bayrağı SUNUCU okur — istemciye güvenilmez.
       // Tür boş veya bulunamadıysa GÜVENLİ varsayılan: belge zorunlu.
       const turAdi = String(masrafTuru ?? "").trim();
@@ -5898,7 +5906,7 @@ export async function registerRoutes(
         alacakli: String(alacakli).trim(),
         iban: iban ? String(iban).trim() : null,
         aciklama: aciklama ? String(aciklama) : null,
-        tarih: bugunYmd(),
+        tarih: masrafTarih,
         belgeDosya: belge ? belge.path.replace(/\\/g, "/") : null,
         belgeAdi: belge ? fixUploadFilename(belge.originalname) : null,
       });
@@ -5942,12 +5950,14 @@ export async function registerRoutes(
   app.get("/api/portal/operasyon-takip", requireMuhasebe, async (_req, res) => {
     try {
       const kullanicilar = await storage.getOperasyonKullanicilar();
-      const bugun = bugunYmd();
       const sonuc = await Promise.all(kullanicilar.map(async (k) => {
         const bakiye = await storage.getOperasyonBakiye(k.id);
         const { masraflar } = await storage.getAcikHareketler(k.id);
-        const bugunHarcanan = masraflar.filter((m) => m.tarih === bugun).reduce((s, m) => s + parseFloat(m.tutar), 0);
-        return { id: k.id, adSoyad: k.adSoyad, kullaniciAdi: k.kullaniciAdi, sube: k.sube ?? null, bakiye, bugunHarcanan: Math.round(bugunHarcanan * 100) / 100 };
+        // "Bugün harcanan" DEĞİL: masraf tarihi artık geriye dönük olabildiğinden
+        // tarih=bugün filtresi dün elden geçen fişi görünmez yapardı. Muhasebenin
+        // görmesi gereken, kapatılmamış (henüz raporlanmamış) masraf toplamıdır.
+        const acikMasraf = masraflar.reduce((s, m) => s + parseFloat(m.tutar), 0);
+        return { id: k.id, adSoyad: k.adSoyad, kullaniciAdi: k.kullaniciAdi, sube: k.sube ?? null, bakiye, acikMasraf: Math.round(acikMasraf * 100) / 100 };
       }));
       res.json(sonuc);
     } catch (e: any) { res.status(500).json({ error: e.message }); }

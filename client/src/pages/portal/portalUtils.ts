@@ -30,6 +30,15 @@ export function formatPara(tutar: string | number | null | undefined, doviz?: st
   return `${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${doviz ?? ""}`.trim();
 }
 
+// Bugün "YYYY-MM-DD" — YEREL takvim gününden kurulur.
+// toISOString() KULLANILMAZ: UTC'ye çevirir, TR'de (UTC+3) gece yarısından önce
+// bir önceki günü döndürerek masrafı yanlış güne yazar.
+export function bugunYmd(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 // Bugüne uzaklık (gün) — YYYY-MM-DD, UTC aritmetiği (kayma yok)
 export function gunFarki(ymd: string | null | undefined): number | null {
   if (!ymd) return null;
