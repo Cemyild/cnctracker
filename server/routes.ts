@@ -13,6 +13,7 @@ import { faturaDogrula } from "./nakliye/dogrulama";
 import { parasuttanCek } from "./nakliye/parasutOkuma";
 import { senkronCalistir, senkronHazirMi } from "./nakliye/senkron";
 import { faturaOnizleme, tamamlananDosyalariFaturala } from "./nakliye/satisFaturasi";
+import { dosyaNoIleEslestir } from "./nakliye/dosyaEslestirme";
 
 const ruhsatStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -4229,11 +4230,16 @@ export async function registerRoutes(
     }
   });
 
-  // Nakliye verisi güncelle
+  // Nakliye verisi güncelle.
+  //
+  // `ilgiliDosyaNo` gövdede varsa ELLE EŞLEŞTİRME yapılır: dosya numarası
+  // gümrük/beyanname listesinde aranır ve eşleşme alanlarının TAMAMI oradan
+  // doldurulur. Ham yazma yapılmaz — yalnız dosya no yazılsa mor kutu eksik
+  // görünür ve faturalama "firma unvanı yok" diye durdurur.
   app.put("/api/nakliye/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const veri = req.body;
+      const { ilgiliDosyaNo: istenenDosyaNo, ...veri } = req.body ?? {};
       const updated = await storage.updateNakliyeVerisi(id, veri);
 
       // KONTEYNER DÜZELTMESİNİ BORU HATTI TABLOSUNA DA YAZ.
@@ -4262,7 +4268,31 @@ export async function registerRoutes(
         }
       }
 
-      res.json({ success: true, message: "Kayıt güncellendi", data: updated });
+      // ---- ELLE DOSYA NO EŞLEŞTİRMESİ ----
+      let eslesme: { ok: boolean; mesaj: string; adaylar?: string[] } | undefined;
+      let sonKayit = updated;
+
+      if (typeof istenenDosyaNo === "string") {
+        const dosyaNo = istenenDosyaNo.trim();
+
+        if (!dosyaNo) {
+          // Boş gönderildi → eşleşmeyi kaldır (yanlış eşleştirmeyi geri alma yolu).
+          sonKayit = await storage.updateNakliyeVerisi(id, {
+            ilgiliDosyaNo: null, gumrukFirmaUnvan: null, gumrukAdi: null,
+            gumrukDovizKiymeti: null, gumrukDovizCinsi: null, gumrukTescilNo: null,
+            gumrukTescilTarihi: null, eslesenHouseNo: null,
+          });
+          eslesme = { ok: true, mesaj: "Eşleşme kaldırıldı" };
+        } else {
+          const cozum = await dosyaNoIleEslestir(dosyaNo, veri?.musteri ?? updated?.musteri ?? null);
+          if (cozum.alanlar) {
+            sonKayit = await storage.updateNakliyeVerisi(id, cozum.alanlar);
+          }
+          eslesme = { ok: Boolean(cozum.alanlar), mesaj: cozum.mesaj, adaylar: cozum.adaylar };
+        }
+      }
+
+      res.json({ success: true, message: "Kayıt güncellendi", data: sonKayit, eslesme });
     } catch (error) {
       console.error("Nakliye güncelleme hatası:", error);
       res.status(500).json({ error: "Kayıt güncellenemedi" });

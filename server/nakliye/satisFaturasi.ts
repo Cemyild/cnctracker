@@ -4,6 +4,7 @@ import { paraBirimiParasut } from "../parasut/hesap";
 import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
 import { firmaAdiBenzerligi } from "@shared/turkceNormalize";
 import { konteynerAnahtarlari } from "@shared/konteyner";
+import { tarihGoster } from "./tarih";
 import type { NakliyeFaturasi, GumrukVerisi, NakliyeVerisi } from "@shared/schema";
 
 /** Gelen matrahın üzerine eklenen marj. 10.000 → 12.000 (+ KDV). */
@@ -47,32 +48,6 @@ export type DosyaOnizleme = {
   /** Paraşüt "Fatura Notu" alanına yazılacak beyanname bilgi satırı. */
   faturaNotu: string;
 };
-
-/**
- * Tarihi gg.aa.yyyy biçimine çevirir.
- * Üç girdi biçimi: YYYY-MM-DD, DD.MM.YYYY ve EXCEL SERİ NUMARASI (örn. 46223 —
- * gumruk_verileri.tescil_tarihi Excel import'undan böyle gelebiliyor).
- * new Date() ile parse EDİLMEZ (timezone kayması, commit c897dff).
- */
-function tarihGoster(t: string | null | undefined): string {
-  const s = String(t ?? "").trim();
-  if (!s) return "";
-  if (/^\d{2}\.\d{2}\.\d{4}/.test(s)) return s.slice(0, 10);
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    const [y, a, g] = s.slice(0, 10).split("-");
-    return `${g}.${a}.${y}`;
-  }
-  if (/^\d{4,6}$/.test(s)) {
-    const seri = Number(s);
-    if (seri >= 20000 && seri <= 60000) {
-      const d = new Date((seri - 25569) * 86400_000);
-      const g = String(d.getUTCDate()).padStart(2, "0");
-      const a = String(d.getUTCMonth() + 1).padStart(2, "0");
-      return `${g}.${a}.${d.getUTCFullYear()}`;
-    }
-  }
-  return s;
-}
 
 /**
  * Paraşüt "Fatura Notu" alanına yazılacak beyanname bilgi satırını üretir.
@@ -254,6 +229,45 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
       grup.faturaKaydiOlmayan.push(v.faturaNo!);
     } else if (!KESILEMEZ_DURUMLAR.has(f.durum)) {
       grup.faturaNolar.add(f.faturaNo);
+    }
+  }
+
+  // YEDEK ARAMA — konteyner üzerinden gümrük kaydı bulunamayan gruplar için.
+  //
+  // Elle dosya no ile eşleştirilen faturalarda (konteyner numarası hiç
+  // olmayanlar) yukarıdaki konteyner anahtarlı indeks tutmaz. VKN ve beklenen
+  // konteyner sayısı yalnız gümrük kaydında olduğu için dosya numarasıyla
+  // tekrar aranır. N+1 değil: eksik dosyaların TAMAMI tek inArray sorgusunda.
+  const eksikDosyalar = Array.from(gruplar.values())
+    .filter((g) => !g.gumruk)
+    .map((g) => g.dosyaNo);
+
+  if (eksikDosyalar.length > 0) {
+    const ekstra = await storage.getGumrukVerileriByDosyaNolar(eksikDosyalar);
+    const dosyaBazli = new Map<string, GumrukVerisi[]>();
+    for (const g of ekstra) {
+      if (!g.dosyaNo) continue;
+      if (!dosyaBazli.has(g.dosyaNo)) dosyaBazli.set(g.dosyaNo, []);
+      dosyaBazli.get(g.dosyaNo)!.push(g);
+    }
+
+    for (const grup of Array.from(gruplar.values())) {
+      if (grup.gumruk) continue;
+      const adaylar = dosyaBazli.get(grup.dosyaNo);
+      if (!adaylar || adaylar.length === 0) continue;
+
+      // Aynı dosyada birden çok firma olabildiği için ekrandaki unvanla kırılır.
+      // Kıramazsak seçim YAPMAYIZ — yanlış firmanın VKN'si yanlış müşteriye
+      // fatura kesilmesine yol açar; VKN'siz kalıp unvan yedeğine düşmek daha güvenli.
+      if (adaylar.length === 1) { grup.gumruk = adaylar[0]; continue; }
+      const ekranUnvan = grup.ekran.gumrukFirmaUnvan || grup.ekran.musteri || "";
+      if (!ekranUnvan) continue;
+      const puanli = adaylar
+        .map((g) => ({ g, p: firmaAdiBenzerligi(ekranUnvan, g.firmaUnvan || "") }))
+        .sort((a, b) => b.p - a.p);
+      if (puanli[0].p >= 70 && (!puanli[1] || puanli[0].p > puanli[1].p)) {
+        grup.gumruk = puanli[0].g;
+      }
     }
   }
 

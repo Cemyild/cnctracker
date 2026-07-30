@@ -66,6 +66,8 @@ export interface IStorage {
   getDistinctGumrukUnvanlar(): Promise<string[]>;
   getGumrukFirmaFaturaAggregate(refDateStr: string, faturaPenceresiDays: number): Promise<Map<string, { son90: number; yillik: number; ytdCiro: number; ytdIslemSayisi: number }>>;
   getGumrukHouseNoVerileri(): Promise<GumrukVerisi[]>;
+  getGumrukVerileriByDosyaNo(dosyaNo: string): Promise<GumrukVerisi[]>;
+  getGumrukVerileriByDosyaNolar(dosyaNolar: string[]): Promise<GumrukVerisi[]>;
   getGumrukVerileriByFirma(firma: string): Promise<GumrukVerisi[]>;
   insertGumrukVerileri(veriler: InsertGumrukVerisi[]): Promise<GumrukVerisi[]>;
   updateGumrukDosyaRecordCount(id: string, count: number): Promise<void>;
@@ -399,6 +401,7 @@ export interface IStorage {
   upsertBeyannameler(rows: InsertBeyanname[]): Promise<{ eklenen: number; guncellenen: number }>;
   getBeyannameler(kullanici?: string): Promise<Beyanname[]>;
   getBeyannameKonteynerVerileri(): Promise<Beyanname[]>;
+  getBeyannamelerByDosyaNo(dosyaNo: string): Promise<Beyanname[]>;
   getBeyanname(id: string): Promise<Beyanname | undefined>;
   createManuelTransit(girdi: { beyanNo: string; alici: string; gumrukIdaresi: string | null }): Promise<Beyanname>;
   getEslesmeyenBeyannameKullanicilari(): Promise<{ kullanici: string; adet: number }[]>;
@@ -565,6 +568,28 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(gumrukVerileri)
       .where(isNotNull(gumrukVerileri.houseNo));
+  }
+
+  // Dosya numarasına göre gümrük satırları. Nakliye faturasını ELLE dosya no
+  // ile eşleştirmek için kullanılır (konteyner numarası olmayan faturalar).
+  // DİKKAT: aynı dosya numarasında birden çok firma satırı olabilir
+  // (canlıda görüldü: 26-10359 → ENYTEKS + FEKA), bu yüzden dizi döner —
+  // çağıran taraf firmayı ayırt etmek zorundadır.
+  async getGumrukVerileriByDosyaNo(dosyaNo: string): Promise<GumrukVerisi[]> {
+    return await db
+      .select()
+      .from(gumrukVerileri)
+      .where(eq(gumrukVerileri.dosyaNo, dosyaNo));
+  }
+
+  // Çoklu dosya no — N+1 önlemek için. Elle eşleştirilmiş (konteynersiz)
+  // faturalarda VKN ve konteyner sayısını tek sorguda toplamak için kullanılır.
+  async getGumrukVerileriByDosyaNolar(dosyaNolar: string[]): Promise<GumrukVerisi[]> {
+    if (dosyaNolar.length === 0) return [];
+    return await db
+      .select()
+      .from(gumrukVerileri)
+      .where(inArray(gumrukVerileri.dosyaNo, dosyaNolar));
   }
 
   // Tek firma için timeline. Eskiden tüm tabloyu çekip JS'de filter
@@ -3539,6 +3564,14 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(beyannameler)
       .where(isNotNull(beyannameler.konteynerler));
+  }
+
+  // Dosya numarasına göre beyannameler. Nakliye faturasını ELLE dosya no ile
+  // eşleştirirken gümrük satışlar listesinde bulunamayan dosyalar için yedek
+  // kaynak. Aynı dosya no IM ve EX olarak iki kez bulunabilir (kimlik çifttir),
+  // bu yüzden dizi döner.
+  async getBeyannamelerByDosyaNo(dosyaNo: string): Promise<Beyanname[]> {
+    return await db.select().from(beyannameler).where(eq(beyannameler.dosyaNo, dosyaNo));
   }
 
   async getBeyanname(id: string): Promise<Beyanname | undefined> {

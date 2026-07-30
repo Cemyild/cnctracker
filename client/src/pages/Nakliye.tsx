@@ -266,6 +266,8 @@ export default function Nakliye() {
     // Modal Edit States
     const [editMusteri, setEditMusteri] = useState("");
     const [editKonteynerler, setEditKonteynerler] = useState("");
+    // Elle dosya no eşleştirmesi (konteyner numarası olmayan faturalar için)
+    const [editDosyaNo, setEditDosyaNo] = useState("");
     const [openCombobox, setOpenCombobox] = useState(false);
     const [updating, setUpdating] = useState(false);
     // Fatura kesme işlemi süren dosya no ("__TUMU__" = toplu işlem)
@@ -363,11 +365,17 @@ export default function Nakliye() {
             } else {
                 setEditKonteynerler(extractContainerRefs(selectedInvoice.malHizmet).join(", "));
             }
+
+            setEditDosyaNo(selectedInvoice.ilgiliDosyaNo || "");
         }
     }, [selectedInvoice, customerIndex]);
 
     const handleUpdate = async () => {
         if (!selectedInvoice) return;
+
+        // Dosya no alanı yalnızca DEĞİŞTİYSE gönderilir. Her kaydetmede
+        // göndermek, dokunulmamış bir eşleşmeyi gereksizce yeniden çözerdi.
+        const dosyaNoDegisti = editDosyaNo.trim() !== String(selectedInvoice.ilgiliDosyaNo || "").trim();
 
         setUpdating(true);
         try {
@@ -376,23 +384,38 @@ export default function Nakliye() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     musteri: editMusteri,
-                    konteynerler: editKonteynerler
+                    konteynerler: editKonteynerler,
+                    ...(dosyaNoDegisti ? { ilgiliDosyaNo: editDosyaNo.trim() } : {}),
                 })
             });
 
-            if (response.ok) {
-                const updated = await response.json();
-                toast({ title: "Güncellendi", description: "Fatura bilgileri güncellendi." });
+            if (!response.ok) throw new Error("Güncelleme başarısız");
 
-                // Update local state
-                setSavedInvoices(prev => prev.map(inv =>
-                    inv.id === selectedInvoice.id ? { ...inv, musteri: editMusteri, konteynerler: editKonteynerler } : inv
-                ));
+            const sonuc = await response.json();
+            // Sunucu eşleştirmeyi çözüp mor kutunun tüm alanlarını doldurduğu için
+            // yerel state sunucunun döndürdüğü kayıttan tazelenir; elle kurgulanan
+            // bir nesne beyanname alanlarını eksik bırakırdı.
+            const guncel = sonuc?.data ?? { ...selectedInvoice, musteri: editMusteri, konteynerler: editKonteynerler };
 
-                // Update selectedInvoice
-                setSelectedInvoice((prev: any) => ({ ...prev, musteri: editMusteri, konteynerler: editKonteynerler }));
+            setSavedInvoices(prev => prev.map(inv =>
+                inv.id === selectedInvoice.id ? { ...inv, ...guncel } : inv
+            ));
+            setSelectedInvoice((prev: any) => ({ ...prev, ...guncel }));
+
+            const eslesme = sonuc?.eslesme;
+            if (eslesme && !eslesme.ok) {
+                // Eşleştirme çözülemedi (dosya bulunamadı ya da çok firma adayı var).
+                // Diğer alanlar kaydedildi; kullanıcıya ne yapması gerektiği söylenir.
+                toast({
+                    variant: "destructive",
+                    title: "Eşleştirme yapılamadı",
+                    description: eslesme.mesaj + (eslesme.adaylar?.length ? ` (${eslesme.adaylar.join(" · ")})` : ""),
+                });
             } else {
-                throw new Error("Güncelleme başarısız");
+                toast({
+                    title: "Güncellendi",
+                    description: eslesme?.mesaj || "Fatura bilgileri güncellendi.",
+                });
             }
         } catch (error) {
             console.error("Update error:", error);
@@ -1048,7 +1071,12 @@ export default function Nakliye() {
 
             {/* ===== Fatura Detay Modalı (korundu) ===== */}
             <Dialog open={!!selectedInvoice} onOpenChange={(open) => !open && setSelectedInvoice(null)}>
-                <DialogContent className="max-w-2xl">
+                {/* max-h + overflow-y ZORUNLU: uzun mal/hizmet açıklaması ve finansal
+                    özet bazı faturalarda ekranı aşıyordu, alttaki kaydet düğmesine
+                    ulaşılamıyordu. min-w-0 ise DialogContent'in grid olmasından:
+                    grid öğelerinin min-width'i auto'dur, içindeki truncate metin
+                    kutuyu kırpmak yerine modalı max-w'nin dışına iter. */}
+                <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] max-w-2xl overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-xl">
                             <FileText className="h-5 w-5 text-sky-600" />
@@ -1057,7 +1085,7 @@ export default function Nakliye() {
                     </DialogHeader>
 
                     {selectedInvoice && (
-                        <div className="grid gap-6 py-4">
+                        <div className="grid min-w-0 gap-6 py-4">
                             <div className="flex flex-col items-center justify-between gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row">
                                 <div className="flex flex-col items-center gap-1 sm:items-start">
                                     <span className="text-xs font-bold uppercase text-muted-foreground">Fatura No</span>
@@ -1082,27 +1110,32 @@ export default function Nakliye() {
 
                             {/* Matched Gumruk Info */}
                             {selectedInvoice.ilgiliDosyaNo && (
-                                <div className="flex items-center justify-center rounded-lg border border-purple-200 bg-purple-50 p-3 text-center text-sm font-medium text-purple-800 dark:border-purple-900/40 dark:bg-purple-950/20 dark:text-purple-300">
-                                    <CheckCircle2 className="mr-2 h-5 w-5 text-purple-600" />
-                                    <span>
+                                <div className="flex min-w-0 items-center justify-center rounded-lg border border-purple-200 bg-purple-50 p-3 text-center text-sm font-medium text-purple-800 dark:border-purple-900/40 dark:bg-purple-950/20 dark:text-purple-300">
+                                    <CheckCircle2 className="mr-2 h-5 w-5 shrink-0 text-purple-600" />
+                                    <span className="min-w-0 break-words">
                                         {/* Format: 1-DOSYA NO, 2-FİRMA ÜNVAN, 3-GÜMRÜK, 4-DOVİZ KIYMETİ, 5-DOVİZ, 6-TESCİL NO, 7-TESCİL TARİHİ, 8-HOUSE NO */}
                                         {selectedInvoice.ilgiliDosyaNo} - {selectedInvoice.gumrukFirmaUnvan} - {selectedInvoice.gumrukAdi} - {selectedInvoice.gumrukDovizKiymeti} - {selectedInvoice.gumrukDovizCinsi} - {selectedInvoice.gumrukTescilNo} - {selectedInvoice.gumrukTescilTarihi} - {selectedInvoice.eslesenHouseNo}
                                     </span>
                                 </div>
                             )}
 
-                            {/* Editable Fields */}
+                            {/* Editable Fields
+                                Her grid çocuğunda min-w-0 var: grid öğelerinin varsayılan
+                                min-width'i auto olduğu için uzun müşteri unvanı sütunu
+                                şişirip komşu kutunun üzerine taşıyordu. */}
                             <div className="grid grid-cols-1 gap-4 rounded-xl border bg-muted/10 p-4 md:grid-cols-2">
-                                <div className="space-y-2">
+                                <div className="min-w-0 space-y-2">
                                     <Label className="text-xs font-bold uppercase text-muted-foreground">Müşteri</Label>
                                     <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
                                         <PopoverTrigger asChild>
-                                            <Button variant="outline" role="combobox" aria-expanded={openCombobox} className="w-full justify-between font-normal">
-                                                {editMusteri ? customers.find((c) => c === editMusteri) || editMusteri : "Müşteri Seçiniz..."}
+                                            <Button variant="outline" role="combobox" aria-expanded={openCombobox} className="w-full min-w-0 justify-between font-normal">
+                                                <span className="min-w-0 flex-1 truncate text-left" title={editMusteri || undefined}>
+                                                    {editMusteri || "Müşteri Seçiniz..."}
+                                                </span>
                                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                             </Button>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-[300px] p-0">
+                                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] max-w-[90vw] p-0" align="start">
                                             <Command>
                                                 <CommandInput placeholder="Müşteri ara..." />
                                                 <CommandList>
@@ -1128,11 +1161,36 @@ export default function Nakliye() {
                                     </Popover>
                                 </div>
 
-                                <div className="space-y-2">
+                                <div className="min-w-0 space-y-2">
                                     <Label className="text-xs font-bold uppercase text-muted-foreground">Konteynerler</Label>
-                                    <Input value={editKonteynerler} onChange={(e) => setEditKonteynerler(e.target.value)} placeholder="Konteyner no giriniz..." className="font-mono text-sm" />
+                                    <Input value={editKonteynerler} onChange={(e) => setEditKonteynerler(e.target.value)} placeholder="Konteyner no giriniz..." className="w-full min-w-0 font-mono text-sm" />
                                     <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
                                         <AlertCircle className="h-3 w-3" /> Birden fazla ise virgülle ayırın.
+                                    </p>
+                                </div>
+
+                                {/* DOSYA NO ile ELLE EŞLEŞTİRME.
+                                    Otomatik eşleştirme yalnız konteyner numarasıyla çalışıyor;
+                                    konteyner numarası hiç geçmeyen faturalar ("GEMLİK RODA LİMAN
+                                    - BURSA NAKLİYE BEDELİ" gibi) kendiliğinden eşleşemez.
+                                    Buraya dosya no girilince sunucu beyanname bilgilerinin
+                                    tamamını doldurur ve fatura kesilebilir hale gelir. */}
+                                <div className="min-w-0 space-y-2 md:col-span-2">
+                                    <Label className="text-xs font-bold uppercase text-muted-foreground">
+                                        Dosya No <span className="normal-case text-muted-foreground/70">(elle eşleştirme)</span>
+                                    </Label>
+                                    <Input
+                                        value={editDosyaNo}
+                                        onChange={(e) => setEditDosyaNo(e.target.value)}
+                                        placeholder="Örn. 26-10359"
+                                        className="w-full min-w-0 font-mono text-sm"
+                                    />
+                                    <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
+                                        <AlertCircle className="mt-px h-3 w-3 shrink-0" />
+                                        <span>
+                                            Konteyner numarası olmayan faturalar için. Kaydedince beyanname
+                                            bilgileri otomatik doldurulur. Boş bırakıp kaydederseniz eşleşme kaldırılır.
+                                        </span>
                                     </p>
                                 </div>
                             </div>
@@ -1175,7 +1233,7 @@ export default function Nakliye() {
                                 <div className="my-2 h-px bg-border" />
                                 <div className="-mx-2 flex items-center justify-between rounded bg-sky-50 p-2 text-lg dark:bg-sky-950/20">
                                     <span className="font-bold" style={{ color: "#0284c7" }}>Genel Toplam:</span>
-                                    <span className="font-mono font-black tabular-nums text-foreground">{formatCurrency(selectedInvoice.odenecekTutar)} TVL</span>
+                                    <span className="font-mono font-black tabular-nums text-foreground">{formatCurrency(selectedInvoice.odenecekTutar)} TL</span>
                                 </div>
                             </div>
                             <DialogFooter className="mt-4 gap-2">
