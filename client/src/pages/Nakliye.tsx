@@ -165,6 +165,63 @@ function extractContainerRefs(text: string | null | undefined): string[] {
     return Array.from(new Set(matches));
 }
 
+/**
+ * Bir faturanın Paraşüt yolculuğunu iki rozetle gösterir:
+ *
+ *   ALIŞ  — gelen fatura muhasebeye (Paraşüt alış faturası) işlendi mi?
+ *   SATIŞ — bu faturaya karşılık müşteriye fatura oluşturuldu mu?
+ *
+ * Amaç: beyanname beklerken hangi faturanın nerede takıldığını gözden
+ * kaçırmamak. Durumlar sunucuda hesaplanıyor (bkz. GET /api/nakliye).
+ */
+function DurumRozetleri({ inv }: { inv: any }) {
+    const alisIslendi = inv.parasutAlisDurum === "islendi";
+    const satis = inv.parasutSatisDurum as string | undefined;
+
+    const rozet = (
+        etiket: string,
+        tamam: boolean,
+        renk: "yesil" | "gri" | "kirmizi" | "sari",
+        baslik: string,
+    ) => {
+        const renkler = {
+            yesil: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-900/50",
+            sari: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-900/50",
+            kirmizi: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900/50",
+            gri: "bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-900/40 dark:text-slate-400 dark:border-slate-700",
+        };
+        return (
+            <span
+                title={baslik}
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${renkler[renk]}`}
+            >
+                {tamam ? <Check className="h-2.5 w-2.5" /> : <span className="text-[9px]">○</span>}
+                {etiket}
+            </span>
+        );
+    };
+
+    return (
+        <div className="flex flex-col gap-1">
+            {rozet(
+                "Alış",
+                alisIslendi,
+                alisIslendi ? "yesil" : "sari",
+                alisIslendi
+                    ? `Paraşüt'e işlendi (alış faturası ${inv.parasutPurchaseBillId})`
+                    : "Paraşüt'e henüz işlenmedi",
+            )}
+            {satis === "olusturuldu"
+                ? rozet("Satış", true, "yesil", `Müşteri faturası oluşturuldu (${inv.parasutSalesInvoiceId})`)
+                : satis === "hata"
+                    ? rozet("Satış", false, "kirmizi", `Hata: ${inv.parasutSatisHata || "bilinmiyor"}`)
+                    : satis === "eslesme_yok"
+                        ? rozet("Satış", false, "gri", "Beyanname eşleşmesi bekleniyor")
+                        : rozet("Satış", false, "sari", "Beyanname eşleşti, müşteri faturası bekliyor")}
+        </div>
+    );
+}
+
 export default function Nakliye() {
     const [uploading, setUploading] = useState(false);
     const [success, setSuccess] = useState(false);
@@ -767,6 +824,7 @@ export default function Nakliye() {
                                     <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Tevkifat</TableHead>
                                     <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Vergili Top.</TableHead>
                                     <TableHead className="h-9 px-2.5 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Genel Toplam</TableHead>
+                                    <TableHead className="h-9 px-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500" title="Gelen faturanın Paraşüt'e işlenme ve müşteriye fatura kesilme durumu">Durum</TableHead>
                                     <TableHead className="h-9 w-[40px] px-1.5"></TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -803,6 +861,9 @@ export default function Nakliye() {
                                             <TableCell className="px-2.5 py-1.5 text-right tabular-nums" style={{ color: "#d97706" }}>{formatCurrency(inv.hesaplananKdvTevkifat20)}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 text-right tabular-nums text-muted-foreground">{formatCurrency(inv.vergilerDahilToplamTutar)}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 text-right font-black tabular-nums text-foreground">{formatCurrency(inv.odenecekTutar)}</TableCell>
+                                            <TableCell className="px-2.5 py-1.5">
+                                                <DurumRozetleri inv={inv} />
+                                            </TableCell>
                                             <TableCell className="px-1.5 py-1 text-center">
                                                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={(e) => handleDeleteInvoice(inv.id, e)}>
                                                     <Trash2 className="h-3.5 w-3.5" />
@@ -812,7 +873,7 @@ export default function Nakliye() {
                                     ))
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={14} className="h-40 text-center text-muted-foreground">
+                                        <TableCell colSpan={15} className="h-40 text-center text-muted-foreground">
                                             <div className="flex flex-col items-center gap-2">
                                                 <AlertCircle className="h-10 w-10 opacity-20" />
                                                 <p>Henüz kayıtlı fatura bulunamadı.</p>

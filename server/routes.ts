@@ -4062,7 +4062,44 @@ export async function registerRoutes(
   app.get("/api/nakliye", async (_req, res) => {
     try {
       const veriler = await storage.getNakliyeVerileri();
-      res.json(veriler);
+
+      // Paraşüt durumlarını ekle. Ekran nakliye_verileri'ni kullanıyor ama
+      // Paraşüt bilgisi iki ayrı tabloda: alış tarafı nakliye_faturalari
+      // (parasutPurchaseBillId), satış tarafı parasut_satis_faturalari
+      // (beyanname dosya no bazında). N+1 önlemi: her tablo TEK sorguda
+      // çekilip Map ile birleştirilir.
+      const [parasutFaturalari, satisFaturalari] = await Promise.all([
+        storage.getNakliyeFaturalari(),
+        storage.getSatisFaturalari(),
+      ]);
+
+      const alisMap = new Map(parasutFaturalari.map((f) => [f.faturaNo, f]));
+      const satisMap = new Map(satisFaturalari.map((s) => [s.gumrukDosyaNo, s]));
+
+      const zenginlestirilmis = veriler.map((v) => {
+        const alis = v.faturaNo ? alisMap.get(v.faturaNo) : undefined;
+        const satis = v.ilgiliDosyaNo ? satisMap.get(v.ilgiliDosyaNo) : undefined;
+
+        return {
+          ...v,
+          // Alış: gelen fatura Paraşüt'e (muhasebeye) işlendi mi?
+          parasutAlisDurum: alis?.parasutPurchaseBillId ? "islendi" : "bekliyor",
+          parasutPurchaseBillId: alis?.parasutPurchaseBillId ?? null,
+          // Satış: bu faturaya karşılık müşteriye fatura oluşturuldu mu?
+          // Beyanname eşleşmesi yoksa henüz sıra gelmemiştir.
+          parasutSatisDurum: !v.ilgiliDosyaNo
+            ? "eslesme_yok"
+            : satis?.durum === "taslak"
+              ? "olusturuldu"
+              : satis?.durum === "hata"
+                ? "hata"
+                : "bekliyor",
+          parasutSalesInvoiceId: satis?.parasutSalesInvoiceId ?? null,
+          parasutSatisHata: satis?.hataMesaji ?? null,
+        };
+      });
+
+      res.json(zenginlestirilmis);
     } catch (error) {
       console.error("Nakliye getirme hatası:", error);
       res.status(500).json({ error: "Veriler getirilirken bir hata oluştu." });
