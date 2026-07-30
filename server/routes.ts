@@ -5641,6 +5641,39 @@ export async function registerRoutes(
     },
   );
 
+  // Gümrük işleminin bittiğini TEMSİLCİ işaretler — teminat, işlem bitmeden geri istenemez.
+  // Muhasebe de işaretleyebilir (temsilci telefonla haber verdiyse).
+  app.put("/api/portal/talepler/:id/islem-durumu", requirePortal, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const talep = await storage.getOdemeTalep(req.params.id);
+      if (!talep) return res.status(404).json({ error: "Bulunamadı" });
+      if (talep.odemeTipi !== "depo_teminat") {
+        return res.status(400).json({ error: "Yalnız depo teminatlarında işlem takibi vardır" });
+      }
+      if (talep.durum !== "odendi") {
+        return res.status(400).json({ error: "Ödenmemiş teminatın işlemi takip edilmez" });
+      }
+      // Muhasebe iadeyi aldıysa akış KAPANMIŞTIR — temsilci geri çekemez.
+      if (talep.iadeDurumu === "iade_edildi") {
+        return res.status(409).json({ error: "İade alınmış — durum değiştirilemez" });
+      }
+      // Temsilci YALNIZ kendi talebini işaretler (istemci filtresine güvenilmez).
+      if (ben.rol === "temsilci" && talep.talepEdenId !== ben.id) {
+        return res.status(403).json({ error: "Bu talep sizin değil" });
+      }
+      const tamamlandi = req.body?.tamamlandi === true || req.body?.tamamlandi === "true";
+      const guncel = await storage.updateOdemeTalep(talep.id, {
+        iadeDurumu: tamamlandi ? "islem_tamam" : "beklemede",
+        islemBitisTarihi: tamamlandi ? bugunYmd() : null,
+        islemBitirenId: tamamlandi ? ben.id : null,
+      });
+      if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(guncel);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.put("/api/portal/talepler/:id/iade", requireMuhasebe, async (req, res) => {
     try {
       const talep = await storage.getOdemeTalep(req.params.id);
@@ -5649,7 +5682,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Yalnız depo teminatları iade takibindedir" });
       }
       const { iadeDurumu, iadeTutari, iadeTarihi, iadeNotu } = req.body || {};
-      if (!["beklemede", "iade_edildi"].includes(String(iadeDurumu))) {
+      // islem_tamam da geçerli hedef: muhasebe yanlış girdiği iadeyi "iade talep edilebilir"e çekebilir.
+      if (!["beklemede", "islem_tamam", "iade_edildi"].includes(String(iadeDurumu))) {
         return res.status(400).json({ error: "Geçersiz iade durumu" });
       }
       const guncel = await storage.updateOdemeTalep(talep.id, {

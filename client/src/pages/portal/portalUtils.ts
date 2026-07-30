@@ -60,10 +60,31 @@ export const DURUM_ETIKET: Record<string, string> = {
   odendi: "Ödendi",
 };
 
+// Depo teminatı akışı: beklemede → islem_tamam → iade_edildi.
+// "beklemede" ARTIK "İade Bekleniyor" DEĞİL: teminat, gümrük işlemi bitmeden zaten
+// geri istenemez; bu aşamada beklenen şey iade değil, İŞLEMİN BİTMESİDİR.
 export const IADE_ETIKET: Record<string, string> = {
-  beklemede: "İade Bekleniyor",
+  beklemede: "İşlem Devam Ediyor",
+  islem_tamam: "İade Talep Edilebilir",
   iade_edildi: "İade Alındı",
 };
+
+// Depo teminatı süzgeçleri — TEK doğruluk kaynağı (temsilci kartı, hatırlatma
+// penceresi, muhasebe kartı ve sidebar rozeti aynı tanımı kullanır).
+export function devamEdenTeminatlar<T extends { odemeTipi: string; durum: string; iadeDurumu: string | null }>(t: T[]): T[] {
+  return t.filter((x) => x.odemeTipi === "depo_teminat" && x.durum === "odendi" && x.iadeDurumu === "beklemede");
+}
+export function iadeEdilebilirTeminatlar<T extends { odemeTipi: string; durum: string; iadeDurumu: string | null }>(t: T[]): T[] {
+  return t.filter((x) => x.odemeTipi === "depo_teminat" && x.durum === "odendi" && x.iadeDurumu === "islem_tamam");
+}
+
+// Açık kalma süresine göre aciliyet rengi: <15 nötr · 15–30 amber · >30 rose.
+export function gunAciliyetSinifi(gun: number | null): string {
+  if (gun == null) return "text-muted-foreground";
+  if (gun > 30) return "font-semibold text-rose-600 dark:text-rose-400";
+  if (gun >= 15) return "font-semibold text-amber-600 dark:text-amber-400";
+  return "text-muted-foreground";
+}
 
 export const BELGE_ETIKET: Record<string, string> = {
   fatura: "Fatura",

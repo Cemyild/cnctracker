@@ -11,11 +11,13 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import {
   type TalepDetay, formatTarih, formatPara,
-  TIP_ETIKET, DURUM_ETIKET, IADE_ETIKET, BELGE_ETIKET, belgeUrl,
+  TIP_ETIKET, DURUM_ETIKET, IADE_ETIKET,
 } from "./portalUtils";
 import { SayfaBasligi } from "./kasaUI";
 import BeyannameSecici from "./BeyannameSecici";
-import { AlertTriangle, FileText } from "lucide-react";
+import BelgeLinkleri from "./BelgeLinkleri";
+import { DevamEdenIslemlerKarti, IslemGeriAlButonu } from "./depoIslemTakibi";
+import { AlertTriangle } from "lucide-react";
 
 // Durum/iade rozetleri — tek accent + semantik (gökkuşağı yok).
 // bekliyor=amber · odendi=emerald · iade beklemede=rose (açık kalan tutar) · iade edildi=indigo (çözümlenmiş).
@@ -23,8 +25,11 @@ const DURUM_STIL: Record<string, string> = {
   bekliyor: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
   odendi: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
 };
+// Depo teminatı akışı: beklemede (işlem sürüyor) = amber · islem_tamam (temsilci bitirdi,
+// muhasebe sırada) = emerald · iade_edildi (kapandı) = indigo.
 const IADE_STIL: Record<string, string> = {
-  beklemede: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
+  beklemede: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+  islem_tamam: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
   iade_edildi: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300",
 };
 
@@ -135,6 +140,8 @@ export default function TaleplerimSayfasi() {
     <div className="space-y-6">
       <SayfaBasligi baslik="Taleplerim" alt="Gönderdiğiniz ödeme taleplerinin durumu ve belgeleri" />
 
+      <DevamEdenIslemlerKarti talepler={talepler} />
+
       <EslesmeBekleyenler talepler={talepler} beyannameler={beyannameler} />
 
       <Card>
@@ -205,25 +212,11 @@ export default function TaleplerimSayfasi() {
                           {IADE_ETIKET[t.iadeDurumu] ?? t.iadeDurumu}
                         </Badge>
                       )}
+                      {/* Yanlış işaretleme ucuz düzeltilir; muhasebe iadeyi aldıysa buton kendini gizler. */}
+                      <IslemGeriAlButonu talep={t} />
                     </div>
                   </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-1">
-                      {t.belgeler.map((b) => (
-                        <a
-                          key={b.id}
-                          href={belgeUrl(b)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex min-w-0 items-center gap-1 text-xs text-indigo-600 hover:underline dark:text-indigo-400"
-                        >
-                          <FileText className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{BELGE_ETIKET[b.belgeTipi] ?? b.belgeTipi}: {b.filename}</span>
-                        </a>
-                      ))}
-                      {t.belgeler.length === 0 && <span className="text-xs text-muted-foreground">—</span>}
-                    </div>
-                  </TableCell>
+                  <TableCell><BelgeLinkleri talep={t} kompakt /></TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -1067,8 +1067,15 @@ export const odemeTalepleri = pgTable("odeme_talepleri", {
   talepTarihi: text("talep_tarihi").notNull(), // YYYY-MM-DD
   odemeTarihi: text("odeme_tarihi"), // ödendi anında damgalanır
   odeyenId: varchar("odeyen_id").references(() => portalKullanicilar.id),
-  // Depo teminatı iade takibi (Faz 2'de genişleyecek)
-  iadeDurumu: text("iade_durumu"), // depo: 'beklemede' | 'iade_edildi'; masrafta null
+  // Depo teminatı iade takibi. Doğrusal akış — TEK alan, ayrı islemDurumu kolonu YOK:
+  //   beklemede    = gümrük işlemi sürüyor ("İşlem Devam Ediyor")
+  //   islem_tamam  = temsilci işlemin bittiğini işaretledi → iade talep edilebilir
+  //   iade_edildi  = muhasebe iadeyi aldı (uç durum, temsilci geri alamaz)
+  iadeDurumu: text("iade_durumu"), // depo: 'beklemede' | 'islem_tamam' | 'iade_edildi'; masrafta null
+  // Teminat, gümrük işlemi bitmeden geri istenemez; bitişi YALNIZ temsilci bilir.
+  // Damgalar muhasebeye "kim, ne zaman bitirdi" bilgisini verir (kime soracağını bilsin).
+  islemBitisTarihi: text("islem_bitis_tarihi"), // YYYY-MM-DD; geri alınınca null'a döner
+  islemBitirenId: varchar("islem_bitiren_id").references(() => portalKullanicilar.id),
   iadeTutari: decimal("iade_tutari", { precision: 18, scale: 2 }), // kısmi iade / demuraj kesintisi
   iadeTarihi: text("iade_tarihi"),
   iadeNotu: text("iade_notu"),

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { type TalepDetay, formatPara } from "./portalUtils";
+import { type TalepDetay, formatPara, iadeEdilebilirTeminatlar } from "./portalUtils";
 import { type PortalMe } from "./PortalApp";
 
 export type SayfaAnahtari = "taleplerim" | "gelenTalepler" | "depo";
@@ -71,6 +71,13 @@ function bildirimMetni(sayfa: SayfaAnahtari, degisen: TalepDetay[]): string {
     return `${degisen.length} yeni ödeme talebi var`;
   }
   if (sayfa === "depo") {
+    // Temsilcinin "işlem bitti" işareti muhasebe için aksiyon çağrısıdır — varsa onu duyur.
+    const biten = degisen.filter((t) => t.iadeDurumu === "islem_tamam");
+    if (biten.length === 1) {
+      const t = biten[0];
+      return `İşlem tamamlandı — iade talep edilebilir: ${t.beyanname?.dosyaNo ?? t.alacakli} (${t.talepEdenAd})`;
+    }
+    if (biten.length > 1) return `${biten.length} teminatta işlem bitti — iade talep edilebilir`;
     return degisen.length === 1
       ? `İade takibinde değişiklik: ${degisen[0].beyanname?.dosyaNo ?? degisen[0].alacakli}`
       : `İade takibinde ${degisen.length} değişiklik var`;
@@ -148,6 +155,15 @@ export function useTalepBildirimleri(
     // aktif + görünür sayfanın rozeti her zaman 0 (senkron effect'i imzayı güncelliyor)
     if (s === aktifSayfa && typeof document !== "undefined" && document.visibilityState === "visible") continue;
     rozetler[s] = degisenler(imzalar[s], sayfaTalepleri(s, talepler)).length;
+  }
+
+  // DEPO ROZETİ İKİ ANLAMIN BÜYÜĞÜDÜR. Yukarıdaki hesap "son görülenden beri değişiklik"
+  // sayar; bu bir OKUNDU bildirimidir ve sayfaya bakınca sıfırlanır. Oysa temsilcinin
+  // "işlem bitti" dediği teminat muhasebe için bir İŞ YÜKÜdür: iade alınana kadar
+  // durmalıdır. İkisini max ile birleştiririz — bakmakla kaybolmaz, yeni değişiklikte
+  // yine yükselir. (Muhasebe rolünde değilse sayfalar listesinde 'depo' zaten yok.)
+  if (sayfalar.includes("depo")) {
+    rozetler.depo = Math.max(rozetler.depo, iadeEdilebilirTeminatlar(talepler).length);
   }
 
   const toplam = sayfalar.reduce((a, s) => a + rozetler[s], 0);

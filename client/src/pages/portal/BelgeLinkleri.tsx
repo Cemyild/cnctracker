@@ -29,19 +29,17 @@ export default function BelgeLinkleri({ talep, kompakt }: { talep: TalepDetay; k
     );
   }
 
-  // Varsayılan (dialog vb.): dikey link listesi.
+  // Varsayılan (dialog vb.): belge başına AYRI BUTON — metin link değil (kullanıcı kararı,
+  // indirilebilir şey her yerde tıklanabilir bir düğme gibi görünsün).
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-wrap gap-1.5">
       {talep.belgeler.map((b) => (
-        <a
-          key={b.id}
-          href={belgeUrl(b)}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-primary underline"
-        >
-          {BELGE_ETIKET[b.belgeTipi] ?? b.belgeTipi}: {b.filename}
-        </a>
+        <Button key={b.id} asChild variant="outline" size="sm" className="h-8 max-w-full gap-1.5">
+          <a href={belgeUrl(b)} target="_blank" rel="noreferrer" download={b.filename} title={b.filename}>
+            <Download className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{BELGE_ETIKET[b.belgeTipi] ?? b.belgeTipi}</span>
+          </a>
+        </Button>
       ))}
     </div>
   );

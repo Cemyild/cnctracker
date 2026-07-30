@@ -17,11 +17,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import {
-  type TalepDetay, formatTarih, formatPara, gunFarki,
-  IADE_ETIKET,
+  type TalepDetay, formatTarih, formatPara, gunFarki, gunAciliyetSinifi,
+  IADE_ETIKET, devamEdenTeminatlar, iadeEdilebilirTeminatlar,
 } from "./portalUtils";
 import { SayfaBasligi } from "./kasaUI";
 import BelgeLinkleri from "./BelgeLinkleri";
+import { IadeEdilebilirKarti } from "./depoIslemTakibi";
 
 const TH = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
 
@@ -36,10 +37,24 @@ function IadeRozeti({ talep }: { talep: TalepDetay }) {
   if (!talep.iadeDurumu) {
     return <Badge variant="outline">—</Badge>;
   }
-  const stil = talep.iadeDurumu === "iade_edildi"
-    ? "border-transparent bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
-    : "border-transparent bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
-  return <Badge className={stil}>{IADE_ETIKET[talep.iadeDurumu] ?? talep.iadeDurumu}</Badge>;
+  // islem_tamam = muhasebenin AKSİYON alması gereken durum → en dikkat çeken renk (emerald).
+  const STIL: Record<string, string> = {
+    beklemede: "border-transparent bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+    islem_tamam: "border-transparent bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+    iade_edildi: "border-transparent bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300",
+  };
+  return (
+    <div className="flex flex-col gap-0.5">
+      <Badge className={STIL[talep.iadeDurumu] ?? STIL.beklemede}>
+        {IADE_ETIKET[talep.iadeDurumu] ?? talep.iadeDurumu}
+      </Badge>
+      {talep.iadeDurumu === "islem_tamam" && talep.islemBitisTarihi && (
+        <span className="text-[11px] text-muted-foreground">
+          {formatTarih(talep.islemBitisTarihi)} bitti
+        </span>
+      )}
+    </div>
+  );
 }
 
 function IadeDialog({
@@ -96,7 +111,8 @@ function IadeDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="beklemede">İade Bekleniyor</SelectItem>
+                  <SelectItem value="beklemede">İşlem Devam Ediyor</SelectItem>
+                  <SelectItem value="islem_tamam">İade Talep Edilebilir</SelectItem>
                   <SelectItem value="iade_edildi">İade Alındı</SelectItem>
                 </SelectContent>
               </Select>
@@ -148,16 +164,18 @@ export default function DepoOdemeleriSayfasi() {
   });
   const [iadeTalebi, setIadeTalebi] = useState<TalepDetay | null>(null);
   const depoTalepleri = talepler.filter((t) => t.odemeTipi === "depo_teminat");
-  const bekleyenIadeSayisi = depoTalepleri.filter(
-    (t) => t.durum === "odendi" && t.iadeDurumu === "beklemede",
-  ).length;
+  const islemSuren = devamEdenTeminatlar(depoTalepleri).length;
+  const iadeEdilebilir = iadeEdilebilirTeminatlar(depoTalepleri).length;
+  const altBaslik = [
+    iadeEdilebilir > 0 ? `${iadeEdilebilir} iade talep edilebilir` : null,
+    islemSuren > 0 ? `${islemSuren} işlem devam ediyor` : null,
+  ].filter(Boolean).join(" · ") || "İade takibi";
 
   return (
     <div className="space-y-6">
-      <SayfaBasligi
-        baslik="Depo Teminatları"
-        alt={`İade takibi${bekleyenIadeSayisi > 0 ? ` · ${bekleyenIadeSayisi} iade bekliyor` : ""}`}
-      />
+      <SayfaBasligi baslik="Depo Teminatları" alt={altBaslik} />
+
+      <IadeEdilebilirKarti talepler={depoTalepleri} iadeAc={setIadeTalebi} />
 
       <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
         <Table>
@@ -185,8 +203,9 @@ export default function DepoOdemeleriSayfasi() {
               </TableRow>
             )}
             {depoTalepleri.map((t) => {
+              // İade alınana kadar para dışarıdadır — islem_tamam aşamasında da sayaç işler.
               const acikGun =
-                t.durum === "odendi" && t.iadeDurumu === "beklemede"
+                t.durum === "odendi" && t.iadeDurumu !== "iade_edildi"
                   ? gunFarki(t.odemeTarihi)
                   : null;
               return (
@@ -221,9 +240,7 @@ export default function DepoOdemeleriSayfasi() {
                   <TableCell className="tabular-nums">{formatTarih(t.odemeTarihi)}</TableCell>
                   <TableCell className="tabular-nums">
                     {acikGun == null ? "—" : (
-                      <span className={acikGun > 30 ? "font-semibold text-rose-600" : ""}>
-                        {acikGun} gün
-                      </span>
+                      <span className={gunAciliyetSinifi(acikGun)}>{acikGun} gün</span>
                     )}
                   </TableCell>
                   <TableCell>

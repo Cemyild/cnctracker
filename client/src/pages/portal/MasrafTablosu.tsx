@@ -60,7 +60,18 @@ export function MasrafTablosu({
           <span className="col-start-1 text-sm font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{formatTarihKisa(a.tarih)}</span>
           <span className="col-start-2 col-span-4 flex items-center gap-2 text-sm">
             <span className="inline-block rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">Gelen Avans</span>
-            {a.belgeDosya && <a className="text-xs text-emerald-700 underline dark:text-emerald-400" href={"/" + a.belgeDosya.replace(/^\/+/, "")} target="_blank" rel="noreferrer">dekont</a>}
+            {/* Metin link değil buton: indirilebilir belge her yerde düğme gibi görünür. */}
+            {a.belgeDosya && (
+              <a
+                className="inline-flex h-6 items-center gap-1 rounded-md border border-emerald-300 px-2 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                href={"/" + a.belgeDosya.replace(/^\/+/, "")}
+                target="_blank"
+                rel="noreferrer"
+                title="Dekontu indir"
+              >
+                <Download className="h-3 w-3" />Dekont
+              </a>
+            )}
           </span>
           <span className="col-start-6 text-right text-sm font-bold tabular-nums text-emerald-600">+{formatPara(a.tutar, "₺")}</span>
           <span className="col-start-7 flex items-center justify-end">

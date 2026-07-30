@@ -82,6 +82,9 @@ export function SonDevirKart({ gunTarihi, kapanisBakiye }: { gunTarihi: string |
 }
 
 // Tüm portal ekranlarının ortak başlık şeridi: sol başlık + alt açıklama, sağda slot (gün kutusu / aksiyon).
+// sag verilmezse VARSAYILAN olarak gün kutusu gelir: operasyon Kasam'daki başlık dili
+// (solda başlık, sağda tarih) temsilci ve muhasebe ekranlarının tamamına böyle yayılır.
+// Kasam kendi başlığını elle kurduğu için orada çift GunKutusu oluşmaz.
 export function SayfaBasligi({ baslik, alt, sag }: { baslik: string; alt?: string; sag?: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -89,7 +92,7 @@ export function SayfaBasligi({ baslik, alt, sag }: { baslik: string; alt?: strin
         <h1 className="text-xl font-bold tracking-tight">{baslik}</h1>
         {alt && <p className="text-sm text-muted-foreground">{alt}</p>}
       </div>
-      {sag}
+      {sag ?? <GunKutusu />}
     </div>
   );
 }

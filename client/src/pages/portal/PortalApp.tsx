@@ -16,6 +16,7 @@ import OperasyonKapanislarSayfasi from "./OperasyonKapanislarSayfasi";
 import OperasyonTakipSayfasi from "./OperasyonTakipSayfasi";
 import SubeRaporuSayfasi from "./SubeRaporuSayfasi";
 import { type TalepDetay } from "./portalUtils";
+import { DepoHatirlatmaPenceresi } from "./depoIslemTakibi";
 import {
   useTalepBildirimleri, bildirimIzniIste, type SayfaAnahtari,
 } from "./useTalepBildirimleri";
@@ -74,6 +75,9 @@ function PortalIcerik({ me }: { me: PortalMe }) {
 
   return (
     <div className="flex h-screen w-full bg-background">
+      {/* Günlük depo teminatı hatırlatması — hangi sayfada olursa olsun günde bir kez sorar
+          (kendi içinde rol ve "bugün gösterildi mi" kontrolünü yapar). */}
+      <DepoHatirlatmaPenceresi me={me} talepler={talepler} />
       <PortalSidebar me={me} rozetler={rozetler} cikisYap={cikisYap} />
       <div className="flex flex-col flex-1 min-w-0">
         <header className="flex items-center gap-4 h-14 px-4 border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10">
