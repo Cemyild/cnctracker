@@ -233,7 +233,11 @@ function DurumRozetleri({
                 alisIslendi ? "yesil" : "sari",
                 alisIslendi
                     ? `Paraşüt'e işlendi (alış faturası ${inv.parasutPurchaseBillId})`
-                    : "Paraşüt'e henüz işlenmedi",
+                    : inv.belgeTipi === "efatura"
+                        // e-Fatura Paraşüt'ün gelen kutusuna düşer; sistem YAZMAZ,
+                        // yazarsa "İçeri Al" sonrası mükerrer kayıt olur.
+                        ? "e-Fatura — Paraşüt'te \"İçeri Al\" ile aktarmanız gerekiyor (sistem yazmaz)"
+                        : "Paraşüt'e henüz işlenmedi",
             )}
             {satis === "olusturuldu"
                 ? rozet("Satış", true, "yesil", `Müşteri faturası oluşturuldu (${inv.parasutSalesInvoiceId})`)

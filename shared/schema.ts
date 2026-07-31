@@ -1257,7 +1257,17 @@ export type ParasutToken = typeof parasutToken.$inferSelect;
 // ortak deposu. faturaNo unique olduğu için iki kanaldan aynı fatura girmez.
 export const nakliyeFaturalari = pgTable("nakliye_faturalari", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  kaynak: text("kaynak").notNull(), // 'earsiv' | 'efatura'
+  // KANAL: fatura sisteme nereden girdi. 'earsiv' = mail/PDF yüklemesi,
+  // 'efatura' = Paraşüt'ten çekildi. BELGE TİPİ DEĞİLDİR — tedarikçiler
+  // e-Fatura'larını da mail ile gönderiyor.
+  kaynak: text("kaynak").notNull(),
+  // BELGE TİPİ: belgenin kendisi ne? Ham PDF metninden belirlenir
+  // (bkz. belgeTipiBelirle, server/nakliye/dogrulama.ts).
+  // 'earsiv'     → Paraşüt'e hiç düşmez, sistem yazar
+  // 'efatura'    → Paraşüt'ün gelen kutusuna düşer, kullanıcı "İçeri Al" yapar;
+  //                SİSTEM YAZMAZ (yazarsa mükerrer kayıt olur)
+  // 'bilinmiyor' → emin değiliz, YAZMA (fail-closed)
+  belgeTipi: text("belge_tipi"),
   faturaNo: text("fatura_no").notNull(),
   faturaTarihi: text("fatura_tarihi"), // YYYY-MM-DD
   tedarikciUnvan: text("tedarikci_unvan"),

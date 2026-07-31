@@ -60,7 +60,7 @@ async function tedarikciBul(vkn: string): Promise<string | undefined> {
  * Bu, geçiş döneminin güvenlik ağı: muhasebeci aynı faturayı elle girmişse
  * yeni kayıt açılmaz, mevcut kaydın id'si döndürülür.
  */
-async function parasuttaVarMi(faturaNo: string, faturaTarihi: string): Promise<string | undefined> {
+export async function parasuttaVarMi(faturaNo: string, faturaTarihi: string): Promise<string | undefined> {
   const t = Date.parse(`${faturaTarihi}T00:00:00Z`);
   if (Number.isNaN(t)) return undefined;
   const bas = new Date(t - 7 * 86400_000).toISOString().slice(0, 10);

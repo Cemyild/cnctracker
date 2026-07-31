@@ -121,6 +121,10 @@ export async function parasuttanCek(
 
       await storage.insertNakliyeFaturasi({
         kaynak: "efatura",
+        // Paraşüt'ten çekilen kayıt zaten Paraşüt'te var; sistemin oraya
+        // yazacağı bir şey yok. Tipi "efatura" işaretlemek yazma kapısını
+        // kapalı tutar (bkz. senkron.ts adım 2).
+        belgeTipi: "efatura",
         faturaNo,
         faturaTarihi: a.issue_date || null,
         tedarikciUnvan: supplier?.attributes?.name || null,

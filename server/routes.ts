@@ -9,7 +9,7 @@ import fs from "fs";
 import path from "path";
 import express from "express";
 import { pdfMetniCikar, faturaAnalizEt } from "./nakliye/faturaAnaliz";
-import { faturaDogrula } from "./nakliye/dogrulama";
+import { faturaDogrula, belgeTipiBelirle } from "./nakliye/dogrulama";
 import { parasuttanCek } from "./nakliye/parasutOkuma";
 import { senkronCalistir, senkronHazirMi } from "./nakliye/senkron";
 import { faturaOnizleme, tamamlananDosyalariFaturala } from "./nakliye/satisFaturasi";
@@ -906,8 +906,15 @@ export async function registerRoutes(
         /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
       );
 
+      // BELGE TİPİ ham metinden belirlenir, kanaldan DEĞİL. Mailden gelen her
+      // PDF e-Arşiv değil; tedarikçiler e-Fatura'larını da mail ile gönderiyor
+      // ve o faturalar Paraşüt'ün gelen kutusuna da düşüyor. Yalnızca e-Arşiv
+      // olanlar Paraşüt'e yazılır (bkz. senkron.ts adım 2).
+      const belgeTipi = belgeTipiBelirle(hamMetin);
+
       const kayit = mevcut ?? await storage.insertNakliyeFaturasi({
         kaynak: "earsiv",
+        belgeTipi,
         faturaNo: alanlar.fatura_no,
         faturaTarihi: alanlar.fatura_tarihi,
         tedarikciUnvan: alanlar.tedarikci_unvan,
@@ -930,6 +937,11 @@ export async function registerRoutes(
         durum: dogrulama.gecerli ? "ayristirildi" : "dogrulama_hatasi",
         hataMesaji: dogrulama.gecerli ? null : dogrulama.hatalar.join(" | "),
       });
+
+      // Belge tipi sonradan eklendi; eski kayıtlarda boş olabilir.
+      if (mevcut && !mevcut.belgeTipi && belgeTipi !== "bilinmiyor") {
+        await storage.updateNakliyeFaturasi(mevcut.id, { belgeTipi });
+      }
 
       // Kayıt fatura no ile zaten vardı ama MD5'i yoktu (MD5 dedup'ından önce
       // eklenmiş). Geriye yazılır; böylece bir sonraki turda analiz edilmez.
@@ -4189,6 +4201,9 @@ export async function registerRoutes(
           // Alış: gelen fatura Paraşüt'e (muhasebeye) işlendi mi?
           parasutAlisDurum: alis?.parasutPurchaseBillId ? "islendi" : "bekliyor",
           parasutPurchaseBillId: alis?.parasutPurchaseBillId ?? null,
+          // Belge tipi rozette gösterilir: e-Fatura ise sistem Paraşüt'e YAZMAZ,
+          // kullanıcının "İçeri Al" ile aktarması beklenir.
+          belgeTipi: alis?.belgeTipi ?? null,
           // Satış: bu faturaya karşılık müşteriye fatura oluşturuldu mu?
           // Beyanname eşleşmesi yoksa henüz sıra gelmemiştir.
           parasutSatisDurum: !v.ilgiliDosyaNo
