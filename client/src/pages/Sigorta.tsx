@@ -34,7 +34,6 @@ interface PolicyRow {
     netPrim?: number;
     brutPrim?: number;
     komisyon?: number;
-    sigortaBedeli?: number;
 }
 
 interface CompanyData {
@@ -535,12 +534,11 @@ function SigortaOzet({ yil, ay, acente = "tum" }: { yil: number, ay: string, ace
     const stats = filteredOzet?.reduce((acc: any, curr: any) => ({
         toplamPrim: acc.toplamPrim + (curr.toplamPrim || 0),
         toplamKomisyon: acc.toplamKomisyon + (curr.toplamKomisyon || 0),
-        toplamBedel: acc.toplamBedel + (curr.toplamBedel || 0),
         policeSayisi: acc.policeSayisi + (curr.policeSayisi || 0),
         evetSayisi: acc.evetSayisi + (curr.evetSayisi || 0),
         tutarFarkiSayisi: acc.tutarFarkiSayisi + (curr.tutarFarkiSayisi || 0),
-    }), { toplamPrim: 0, toplamKomisyon: 0, toplamBedel: 0, policeSayisi: 0, evetSayisi: 0, tutarFarkiSayisi: 0 })
-    || { toplamPrim: 0, toplamKomisyon: 0, toplamBedel: 0, policeSayisi: 0, evetSayisi: 0, tutarFarkiSayisi: 0 };
+    }), { toplamPrim: 0, toplamKomisyon: 0, policeSayisi: 0, evetSayisi: 0, tutarFarkiSayisi: 0 })
+    || { toplamPrim: 0, toplamKomisyon: 0, policeSayisi: 0, evetSayisi: 0, tutarFarkiSayisi: 0 };
 
     const dekontOrani = stats.policeSayisi > 0
         ? ((stats.evetSayisi / stats.policeSayisi) * 100).toFixed(1)
@@ -572,7 +570,6 @@ function SigortaOzet({ yil, ay, acente = "tum" }: { yil: number, ay: string, ace
     const kpis = [
         { label: "Toplam Net Prim", value: formatCurrency(stats.toplamPrim), sub: `${yil} kümülatif`, color: "#0ea5e9" },
         { label: "Toplam Komisyon", value: formatCurrency(stats.toplamKomisyon), sub: "komisyon", color: "#7c3aed" },
-        { label: "Sigorta Bedeli (Risk)", value: formatCurrency(stats.toplamBedel), sub: "teminat altındaki", color: "#0f766e" },
         { label: "Poliçe Adedi", value: String(stats.policeSayisi), sub: `${stats.evetSayisi} dekont · ${stats.tutarFarkiSayisi} tutar farkı`, color: "#d97706" },
         { label: "Dekont Oranı", value: `%${dekontOrani}`, sub: "tahsil edilmiş", color: "#10b981" },
     ];
@@ -855,7 +852,6 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
             { header: 'Net Prim', key: 'netPrim', width: 18 },
             { header: 'Brüt Prim', key: 'brutPrim', width: 18 },
             { header: 'Komisyon', key: 'komisyon', width: 18 },
-            { header: 'Sigorta Bedeli', key: 'sigortaBedeli', width: 22 },
             { header: 'Dekont', key: 'dekontDurumu', width: 15 },
         ];
 
@@ -880,19 +876,17 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
         });
 
         // 3. Add Data with Zebra Striping
-        let totalNet = 0, totalBrut = 0, totalKom = 0, totalBedel = 0;
+        let totalNet = 0, totalBrut = 0, totalKom = 0;
 
         sortedPoliceler.forEach((p: any, index: number) => {
             // Calculate totals
             const net = parseFloat(p.netPrim) || 0;
             const brut = parseFloat(p.brutPrim) || 0;
             const kom = parseFloat(p.komisyon) || 0;
-            const bedel = parseFloat(p.sigortaBedeli) || 0;
-            
+
             totalNet += net;
             totalBrut += brut;
             totalKom += kom;
-            totalBedel += bedel;
 
             const row = worksheet.addRow({
                 brans: p.brans,
@@ -902,7 +896,6 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
                 netPrim: net,
                 brutPrim: brut,
                 komisyon: kom,
-                sigortaBedeli: bedel,
                 dekontDurumu: p.dekontDurumu === 'EVET' ? 'EVET' : (p.dekontDurumu === 'HAYIR' ? 'HAYIR' : 'HAYIR')
             });
 
@@ -921,7 +914,7 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
 
             // Cell Styles
             const centerCols = ['brans', 'tanzimTarihi'];
-            const moneyCols = ['netPrim', 'brutPrim', 'komisyon', 'sigortaBedeli'];
+            const moneyCols = ['netPrim', 'brutPrim', 'komisyon'];
 
             row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                 const colKey = headerTerms[colNumber - 1].key;
@@ -978,8 +971,7 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
             sigortali: 'GENEL TOPLAM',
             netPrim: totalNet,
             brutPrim: totalBrut,
-            komisyon: totalKom,
-            sigortaBedeli: totalBedel
+            komisyon: totalKom
         });
         
         totalRow.height = 30;
@@ -989,7 +981,7 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
             cell.border = { top: { style: 'double' } };
             
             const colKey = headerTerms[colNumber - 1]?.key;
-            if (['netPrim', 'brutPrim', 'komisyon', 'sigortaBedeli'].includes(colKey || '')) {
+            if (['netPrim', 'brutPrim', 'komisyon'].includes(colKey || '')) {
                 cell.numFmt = '#,##0.00 "₺"';
                 cell.alignment = { vertical: 'middle', horizontal: 'right' };
             } else if (colKey === 'sigortali') {
@@ -1727,7 +1719,8 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
         netPrim:       ["netprim", "net", "netprimi", "netprimtutari", "primnet"],
         brutPrim:      ["brutprim", "brut", "brutprimi", "brutprimtutari", "primbrut", "toplamprim", "odemekprim"],
         komisyon:      ["komisyon", "komisyontutari", "komisyontutar", "commission", "komtutari", "komtutar"],
-        sigortaBedeli: ["sigortabedeli", "sigortabedel", "bedel", "teminat", "teminattutari", "teminatbedeli", "sigortatemini"],
+        // NOT: "sigortaBedeli" artık takip edilmiyor — Ray'in yeni raporunda bu
+        // kolon yok ve iş akışında kullanılmıyor. DB kolonu geçmiş veri için duruyor.
         dekontDurumu:  ["dekont", "dekontdurumu", "dekontdurum", "dekontevethayir"],
     };
 
@@ -1870,7 +1863,6 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                             netPrim: String(parseAmount(get("netPrim"))),
                             brutPrim: String(brutPrimVal),
                             komisyon: String(parseAmount(get("komisyon"))),
-                            sigortaBedeli: String(parseAmount(get("sigortaBedeli"))),
                             sirket: subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY,
                             // Öncelik: Excel'de açıkça yazılı dekont durumu > auto-EVET > boş (upsert korur)
                             dekontDurumu: excelDekont !== "" ? excelDekont : (autoEvet ? "EVET" : ""),
@@ -1885,7 +1877,6 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                             existing.netPrim = String(parseFloat(existing.netPrim) + parseFloat(policy.netPrim));
                             existing.brutPrim = String(parseFloat(existing.brutPrim) + parseFloat(policy.brutPrim));
                             existing.komisyon = String(parseFloat(existing.komisyon) + parseFloat(policy.komisyon));
-                            existing.sigortaBedeli = String(parseFloat(existing.sigortaBedeli) + parseFloat(policy.sigortaBedeli));
                         } else {
                             uniqueMap.set(key, policy);
                         }
@@ -1903,7 +1894,7 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                         const result = await res.json();
                         if (result.success) {
                             // Hangi alanlar bulundu / bulunmadı raporu
-                            const expectedFields = ["brans", "policeNo", "sigortali", "tanzimTarihi", "netPrim", "brutPrim", "komisyon", "sigortaBedeli"] as const;
+                            const expectedFields = ["brans", "policeNo", "sigortali", "tanzimTarihi", "netPrim", "brutPrim", "komisyon"] as const;
                             const eksikler = expectedFields.filter(f => (mapping as any)[f] === undefined);
                             const eksikUyari = eksikler.length > 0 ? ` Bulunmayan kolonlar: ${eksikler.join(", ")}.` : "";
                             toast({
@@ -2466,7 +2457,6 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                                 <TableHead className="text-right">Net Prim</TableHead>
                                                 <TableHead className="text-right">Brüt Prim</TableHead>
                                                 <TableHead className="text-right">Komisyon</TableHead>
-                                                <TableHead className="text-right">Sigorta Bedeli</TableHead>
                                                 <TableHead className="text-center font-bold text-blue-700">Dekont</TableHead>
                                             </TableRow>
                                         </TableHeader>
@@ -2501,7 +2491,6 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                                         <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(p.netPrim))}</TableCell>
                                                         <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(p.brutPrim))}</TableCell>
                                                         <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(p.komisyon))}</TableCell>
-                                                        <TableCell className="text-right">{new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2 }).format(parseFloat(p.sigortaBedeli))}</TableCell>
                                                         <TableCell className="text-center">
                                                             {p.dekontDurumu === 'EVET' ? (
                                                                 <Badge className="bg-green-500">EVET</Badge>

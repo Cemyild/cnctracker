@@ -152,7 +152,7 @@ export interface IStorage {
   getSigortaPoliceleri(sirket?: string, ay?: string, yil?: number): Promise<SigortaPolice[]>;
   insertSigortaPoliceleri(veriler: InsertSigortaPolice[]): Promise<SigortaPolice[]>;
   deleteSigortaPoliceleri(sirket: string, ay?: string, yil?: number): Promise<void>;
-  getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; toplamBedel: number; evetSayisi: number; tutarFarkiSayisi: number }[]>;
+  getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; evetSayisi: number; tutarFarkiSayisi: number }[]>;
   getSigortaSirketler(yil: number): Promise<string[]>;
   getSigortaFirmaOzet(yil: number, ay?: string, sirket?: string): Promise<{ sigortali: string; brutPrim: number; komisyon: number; policeSayisi: number }[]>;
   updateSigortaPoliceDekontDurumu(id: string, durum: string): Promise<SigortaPolice | null>;
@@ -1593,7 +1593,8 @@ export class DatabaseStorage implements IStorage {
              netPrim: sql`excluded.net_prim`,
              brutPrim: sql`excluded.brut_prim`,
              komisyon: sql`excluded.komisyon`,
-             sigortaBedeli: sql`excluded.sigorta_bedeli`,
+             // sigortaBedeli artık yüklenmiyor; upsert'te de dokunulmuyor ki
+             // geçmiş yılların mevcut değerleri NULL'a ezilmesin.
              // Yeniden yüklemede mutabakat sonucu kaybolmasın: gelen değer boşsa mevcut tutulur,
              // gelen değer doluysa explicit bir update sayılır (UI üzerinden gelen update için gerekli).
              dekontDurumu: sql`COALESCE(NULLIF(excluded.dekont_durumu, ''), ${sigortaPoliceleri.dekontDurumu})`,
@@ -1640,14 +1641,13 @@ export class DatabaseStorage implements IStorage {
     return updated.length;
   }
 
-  async getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; toplamBedel: number; evetSayisi: number; tutarFarkiSayisi: number }[]> {
+  async getSigortaOzet(yil: number): Promise<{ ay: string; sirket: string; policeSayisi: number; toplamPrim: number; toplamKomisyon: number; evetSayisi: number; tutarFarkiSayisi: number }[]> {
     const result = await db.select({
       ay: sigortaPoliceleri.ay,
       sirket: sigortaPoliceleri.sirket,
       policeSayisi: sql<number>`count(*)`,
       toplamPrim: sql<string>`sum(${sigortaPoliceleri.netPrim})`,
       toplamKomisyon: sql<string>`sum(${sigortaPoliceleri.komisyon})`,
-      toplamBedel: sql<string>`sum(${sigortaPoliceleri.sigortaBedeli})`,
       evetSayisi: sql<number>`count(*) filter (where ${sigortaPoliceleri.dekontDurumu} = 'EVET')`,
       tutarFarkiSayisi: sql<number>`count(*) filter (where ${sigortaPoliceleri.dekontDurumu} = 'TUTAR FARKI')`,
     })
@@ -1661,7 +1661,6 @@ export class DatabaseStorage implements IStorage {
       policeSayisi: Number(r.policeSayisi),
       toplamPrim: parseFloat(r.toplamPrim || "0"),
       toplamKomisyon: parseFloat(r.toplamKomisyon || "0"),
-      toplamBedel: parseFloat(r.toplamBedel || "0"),
       evetSayisi: Number(r.evetSayisi),
       tutarFarkiSayisi: Number(r.tutarFarkiSayisi),
     }));

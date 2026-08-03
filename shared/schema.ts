@@ -412,6 +412,10 @@ export const sigortaPoliceleri = pgTable("sigorta_policeleri", {
   netPrim: decimal("net_prim", { precision: 15, scale: 2 }),
   brutPrim: decimal("brut_prim", { precision: 15, scale: 2 }),
   komisyon: decimal("komisyon", { precision: 15, scale: 2 }),
+  // KULLANIM DIŞI: sigorta bedeli artık takip edilmiyor (Ray'in raporunda bu
+  // kolon yok). Yazılmıyor, okunmuyor, hiçbir ekranda gösterilmiyor. Kolon
+  // yalnızca geçmiş yıl kayıtlarındaki değerleri korumak için duruyor —
+  // şemadan silmek db:push'ta DROP COLUMN üretir ve o veriyi yok eder.
   sigortaBedeli: decimal("sigorta_bedeli", { precision: 15, scale: 2 }),
   dekontDurumu: text("dekont_durumu"), // EVET, HAYIR, ÖDENEN (veya null)
   sirket: text("sirket").notNull(), // Mapfre, Ray Sigorta
