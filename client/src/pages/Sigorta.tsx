@@ -713,6 +713,11 @@ function SigortaOzet({ yil, ay, acente = "tum" }: { yil: number, ay: string, ace
 // ---------------------------------------------------------------------------
 // 2. POLİÇE LİSTESİ TAB COMPONENT
 // ---------------------------------------------------------------------------
+// Poliçe listesi kolon şablonu — başlık ve satırlar aynı değeri kullanmalı,
+// aksi halde kolonlar kayar. Sıra: Branş · Poliçe No · Sigortalı · Tanzim
+// Tarihi · Net · Brüt · Komisyon · Dekont (Excel çıktısıyla aynı sıra).
+const POLICE_GRID = "0.7fr 1.15fr 1.7fr 0.95fr 0.9fr 0.9fr 0.9fr 0.75fr";
+
 function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, acente?: "tum" | "mapfre" | "ray" }) {
     const { mapfreVarMi } = useSigortaSirketler(yil);
     const [subTab, setSubTab] = useState("ray");
@@ -1104,13 +1109,14 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
             {/* Poliçe tablosu kartı */}
             <div className="rounded-[14px] border bg-card overflow-hidden">
                 <div className="overflow-x-auto">
-                    <div className="min-w-[880px]">
+                    <div className="min-w-[1000px]">
                         {/* Başlık satırı */}
                         <div className="grid items-center gap-2.5 px-5 py-3 bg-slate-50 border-b text-[10.5px] font-bold uppercase tracking-[0.03em] text-slate-500"
-                            style={{ gridTemplateColumns: "0.8fr 1.2fr 1.8fr 1fr 1fr 1fr 0.8fr" }}>
+                            style={{ gridTemplateColumns: POLICE_GRID }}>
                             <div>Branş</div>
                             <div><SortHeaderBtn column="policeNo" label="Poliçe No" /></div>
                             <div>Sigortalı</div>
+                            <div><SortHeaderBtn column="tanzimTarihi" label="Tanzim Tarihi" /></div>
                             <div className="text-right">Net Prim</div>
                             <div className="text-right">Brüt Prim</div>
                             <div className="text-right">Komisyon</div>
@@ -1138,7 +1144,7 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
                                             onClick={() => setSelectedPolicy(p)}
                                             title="Detay için tıkla"
                                             className="grid items-center gap-2.5 px-5 py-[11px] border-b last:border-b-0 hover:bg-slate-50 cursor-pointer transition-colors"
-                                            style={{ gridTemplateColumns: "0.8fr 1.2fr 1.8fr 1fr 1fr 1fr 0.8fr" }}
+                                            style={{ gridTemplateColumns: POLICE_GRID }}
                                         >
                                             <div>
                                                 <span className="inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold"
@@ -1148,6 +1154,8 @@ function PoliceListesi({ yil, ay, acente = "tum" }: { yil: number, ay: string, a
                                             </div>
                                             <div className="font-mono text-[12px] text-sky-600 truncate">{p.policeNo}</div>
                                             <div className="text-[13px] font-semibold text-slate-800 truncate">{p.sigortali}</div>
+                                            {/* Tarih DB'de zaten dd.mm.yyyy metni — Date'e çevirmeden basılır (zaman dilimi kayması olmasın) */}
+                                            <div className="text-[12.5px] text-slate-600 tabular-nums">{p.tanzimTarihi || "—"}</div>
                                             <div className="text-right text-[12.5px] text-slate-600 tabular-nums">{formatCurrency(parseFloat(p.netPrim))}</div>
                                             <div className="text-right text-[13px] font-bold text-slate-900 tabular-nums">{formatCurrency(parseFloat(p.brutPrim))}</div>
                                             <div className="text-right text-[12.5px] font-medium text-violet-600 tabular-nums">{formatCurrency(parseFloat(p.komisyon))}</div>
