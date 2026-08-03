@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import compression from "compression";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -8,6 +9,13 @@ import { setupPortalSession } from "./portalAuth";
 
 const app = express();
 const httpServer = createServer(app);
+
+// gzip — HER ŞEYDEN ÖNCE. Sıkıştırma yokken istemci bundle'ı 3.2 MB HAM iniyordu
+// (ölçüldü: Content-Encoding başlığı yok, Content-Length 3.300.192) ve portal ilk
+// açılışta saniyelerce boş duruyordu. Beyanname listesi de 26 bin satır / ~6.7 MB JSON.
+// Metin gövdeler ~%75-90 sıkışır; ölçülen sunucu süreleri (4-16ms) zaten hızlıydı,
+// darboğaz TRANSFERDİ. Statik dosyalar da bu middleware'den geçer (serveStatic sonra gelir).
+app.use(compression());
 
 declare module "http" {
   interface IncomingMessage {

@@ -5186,6 +5186,14 @@ export async function registerRoutes(
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
 
+  // Muhasebe GÖRÜNÜRLÜĞÜ olan roller. requireMuhasebe middleware'i admin'i geçirir ama
+  // handler İÇİNDEKİ rol karşılaştırmaları ayrı bir katmandır: `rol === "muhasebe"`
+  // yazıldığında admin sessizce temsilci muamelesi görür (kendi kayıtlarıyla filtrelenir)
+  // ve BOŞ liste alır. Yeni bir rol kontrolü yazarken bu yardımcıyı kullan.
+  function tumKayitlariGorur(rol: string): boolean {
+    return rol === "muhasebe" || rol === "admin";
+  }
+
   // TEST ARACI — portalın sağ üstündeki gün kutusu, geriye dönük bir günü canlandırmak
   // için isteklere X-Sanal-Tarih başlığı ekler. Damga atan portal uçları bugunYmd()
   // yerine BUNU çağırır. Sunucu saati değişmez; yalnız "bugün nedir" cevabı değişir.
@@ -5346,8 +5354,8 @@ export async function registerRoutes(
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
       // Filtre SUNUCUDA: temsilci yalnız kendi (avAdi) beyannamelerini görür.
       // avAdi atanmamış temsilci hiçbir şey görmez (boş string hiçbir kullaniciyla eşleşmez).
-      // Muhasebe ve operasyon (şube) TÜM beyannameleri görür (spec: şube tüm dosyalara ödeme yapabilir).
-      const liste = ben.rol === "muhasebe" || ben.rol === "operasyon"
+      // Muhasebe/admin ve operasyon (şube) TÜM beyannameleri görür (spec: şube tüm dosyalara ödeme yapabilir).
+      const liste = tumKayitlariGorur(ben.rol) || ben.rol === "operasyon"
         ? await storage.getBeyannameler()
         : await storage.getBeyannameler(ben.avAdi ?? "");
       res.json(liste);
@@ -5617,7 +5625,8 @@ export async function registerRoutes(
     try {
       const ben = await portalKullanici(req);
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
-      const filtre = ben.rol === "muhasebe" ? {} : { talepEdenId: ben.id };
+      // admin de TÜM talepleri görür — aksi hâlde kendi talebi olmadığı için boş liste alır.
+      const filtre = tumKayitlariGorur(ben.rol) ? {} : { talepEdenId: ben.id };
       res.json(await storage.getOdemeTalepleri(filtre));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -5757,7 +5766,7 @@ export async function registerRoutes(
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
       const talep = await storage.getOdemeTalep(req.params.id);
       if (!talep) return res.status(404).json({ error: "Bulunamadı" });
-      if (ben.rol !== "muhasebe" && talep.talepEdenId !== ben.id) {
+      if (!tumKayitlariGorur(ben.rol) && talep.talepEdenId !== ben.id) {
         return res.status(403).json({ error: "Yetkisiz" });
       }
       if (talep.beyannameId) {

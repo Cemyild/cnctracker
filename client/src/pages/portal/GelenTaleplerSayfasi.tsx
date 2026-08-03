@@ -112,7 +112,7 @@ function ymd(d: Date) {
 }
 
 export default function GelenTaleplerSayfasi() {
-  const { data: talepler = [] } = useQuery<TalepDetay[]>({
+  const { data: talepler = [], isLoading } = useQuery<TalepDetay[]>({
     queryKey: ["/api/portal/talepler"],
   });
   const [odemeTalebi, setOdemeTalebi] = useState<TalepDetay | null>(null);
@@ -148,8 +148,9 @@ export default function GelenTaleplerSayfasi() {
         <TableBody>
           {list.length === 0 && (
             <TableRow className="hover:bg-transparent">
-              <TableCell colSpan={11} className="text-center text-muted-foreground">
-                {bosMesaj}
+              {/* Yükleme sırasında "talep yok" YAZMA — kullanıcı bunu boş ekran sanıyordu. */}
+              <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
+                {isLoading ? "Talepler yükleniyor…" : bosMesaj}
               </TableCell>
             </TableRow>
           )}
