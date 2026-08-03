@@ -26,7 +26,7 @@ export async function dogrulaSifre(sifre: string, kayitliHash: string): Promise<
 declare module "express-session" {
   interface SessionData {
     portalUserId?: string;
-    portalRol?: string; // 'temsilci' | 'muhasebe' | 'operasyon'
+    portalRol?: string; // 'temsilci' | 'muhasebe' | 'operasyon' | 'admin'
   }
 }
 
@@ -66,12 +66,25 @@ export function requirePortal(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// admin, muhasebenin gördüğü HER ŞEYİ görür (üstüne silme yetkisi) — bu yüzden
+// muhasebe guard'ı admin'i de geçirir. Tersi geçerli DEĞİL: requireAdmin muhasebeyi almaz.
 export function requireMuhasebe(req: Request, res: Response, next: NextFunction) {
   if (!req.session.portalUserId) {
     return res.status(401).json({ error: "Giriş gerekli" });
   }
-  if (req.session.portalRol !== "muhasebe") {
+  if (req.session.portalRol !== "muhasebe" && req.session.portalRol !== "admin") {
     return res.status(403).json({ error: "Yetkisiz" });
+  }
+  next();
+}
+
+// Kayıt SİLME uçları — yalnız admin. Silme geri alınamaz ve para kaydını yok eder.
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.session.portalUserId) {
+    return res.status(401).json({ error: "Giriş gerekli" });
+  }
+  if (req.session.portalRol !== "admin") {
+    return res.status(403).json({ error: "Bu işlem için admin yetkisi gerekir" });
   }
   next();
 }

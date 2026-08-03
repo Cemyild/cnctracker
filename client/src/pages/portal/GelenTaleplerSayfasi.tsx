@@ -17,6 +17,7 @@ import {
   TIP_ETIKET, DURUM_ETIKET,
 } from "./portalUtils";
 import { SayfaBasligi } from "./kasaUI";
+import { AdminSilButonu } from "./adminSilme";
 import BelgeLinkleri from "./BelgeLinkleri";
 
 const TH = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
@@ -188,15 +189,23 @@ export default function GelenTaleplerSayfasi() {
                 <DurumRozeti durum={t.durum} />
               </TableCell>
               <TableCell>
-                {t.durum === "bekliyor" && (
-                  <Button
-                    size="sm"
-                    onClick={() => setOdemeTalebi(t)}
-                    data-testid={`button-ode-${t.id}`}
-                  >
-                    Öde
-                  </Button>
-                )}
+                <div className="flex items-center justify-end gap-1.5">
+                  {t.durum === "bekliyor" && (
+                    <Button
+                      size="sm"
+                      onClick={() => setOdemeTalebi(t)}
+                      data-testid={`button-ode-${t.id}`}
+                    >
+                      Öde
+                    </Button>
+                  )}
+                  {/* Yalnız admin görür (bileşen rolü kendi kontrol eder) */}
+                  <AdminSilButonu
+                    tip="talep"
+                    id={t.id}
+                    ozet={`${formatTarih(t.talepTarihi)} · ${t.talepEdenAd} · ${formatPara(t.tutar, t.paraBirimi)} · ${t.alacakli}`}
+                  />
+                </div>
               </TableCell>
             </TableRow>
           ))}

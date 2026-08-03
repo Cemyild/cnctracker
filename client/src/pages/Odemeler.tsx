@@ -208,6 +208,8 @@ function KullaniciFormDialog({
                   <SelectItem value="temsilci">Müşteri Temsilcisi</SelectItem>
                   <SelectItem value="muhasebe">Muhasebe</SelectItem>
                   <SelectItem value="operasyon">Operasyon</SelectItem>
+                  {/* Yönetici: muhasebe ekranlarının tamamı + kayıt silme yetkisi */}
+                  <SelectItem value="admin">Yönetici (Admin)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

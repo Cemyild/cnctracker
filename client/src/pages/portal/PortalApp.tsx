@@ -15,6 +15,7 @@ import OperasyonKasaSayfasi from "./OperasyonKasaSayfasi";
 import OperasyonKapanislarSayfasi from "./OperasyonKapanislarSayfasi";
 import OperasyonTakipSayfasi from "./OperasyonTakipSayfasi";
 import SubeRaporuSayfasi from "./SubeRaporuSayfasi";
+import SilmeLogSayfasi from "./SilmeLogSayfasi";
 import { type TalepDetay } from "./portalUtils";
 import { SanalTarihSaglayici } from "./sanalTarih";
 import { DepoHatirlatmaPenceresi } from "./depoIslemTakibi";
@@ -25,9 +26,16 @@ import {
 export type PortalMe = {
   id: string;
   adSoyad: string;
-  rol: "temsilci" | "muhasebe" | "operasyon";
+  // admin = muhasebe ekranlarının tamamı + kayıt silme yetkisi
+  rol: "temsilci" | "muhasebe" | "operasyon" | "admin";
   avAdi: string | null;
 };
+
+// Muhasebe ekranlarını gören roller — admin, muhasebenin gördüğü HER ŞEYİ görür.
+// Rota, sidebar ve varsayılan sayfa kararlarında tek kaynak.
+export function muhasebeGorunumu(rol: PortalMe["rol"]): boolean {
+  return rol === "muhasebe" || rol === "admin";
+}
 
 const SAYFA_BASLIKLARI: Record<string, string> = {
   "/portal/yeni-talep": "Yeni Talep",
@@ -40,6 +48,7 @@ const SAYFA_BASLIKLARI: Record<string, string> = {
   "/portal/kapanislarim": "Kapanışlarım",
   "/portal/sube-masraf": "Şube Masraf",
   "/portal/sube-raporu": "Şube Raporu",
+  "/portal/silme-log": "Silme Günlüğü",
 };
 
 const ROTA_SAYFASI: Record<string, SayfaAnahtari> = {
@@ -71,7 +80,7 @@ function PortalIcerik({ me }: { me: PortalMe }) {
     queryClient.setQueryData(["/api/portal/me"], null);
   };
 
-  const varsayilanRota = me.rol === "muhasebe" ? "/portal/gelen-talepler" : me.rol === "operasyon" ? "/portal/kasam" : "/portal/yeni-talep";
+  const varsayilanRota = muhasebeGorunumu(me.rol) ? "/portal/gelen-talepler" : me.rol === "operasyon" ? "/portal/kasam" : "/portal/yeni-talep";
   const baslik = SAYFA_BASLIKLARI[location] ?? "Ödemeler Portalı";
 
   return (
@@ -96,23 +105,26 @@ function PortalIcerik({ me }: { me: PortalMe }) {
               {me.rol === "temsilci" && (
                 <Route path="/portal/taleplerim" component={TaleplerimSayfasi} />
               )}
-              {me.rol === "muhasebe" && (
+              {muhasebeGorunumu(me.rol) && (
                 <Route path="/portal/gelen-talepler" component={GelenTaleplerSayfasi} />
               )}
-              {me.rol === "muhasebe" && (
+              {muhasebeGorunumu(me.rol) && (
                 <Route path="/portal/depo" component={DepoOdemeleriSayfasi} />
               )}
-              {me.rol === "muhasebe" && (
+              {muhasebeGorunumu(me.rol) && (
                 <Route path="/portal/dogrudan-odeme" component={DogrudanOdemeSayfasi} />
               )}
-              {me.rol === "muhasebe" && (
+              {muhasebeGorunumu(me.rol) && (
                 <Route path="/portal/firmalar" component={FirmalarSayfasi} />
               )}
-              {me.rol === "muhasebe" && (
+              {muhasebeGorunumu(me.rol) && (
                 <Route path="/portal/sube-masraf" component={OperasyonTakipSayfasi} />
               )}
-              {me.rol === "muhasebe" && (
+              {muhasebeGorunumu(me.rol) && (
                 <Route path="/portal/sube-raporu" component={SubeRaporuSayfasi} />
+              )}
+              {me.rol === "admin" && (
+                <Route path="/portal/silme-log" component={SilmeLogSayfasi} />
               )}
               {me.rol === "operasyon" && (
                 <Route path="/portal/kasam" component={OperasyonKasaSayfasi} />

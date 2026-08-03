@@ -3,6 +3,7 @@ import type { OperasyonAvans, OperasyonMasraf } from "@shared/schema";
 import type { GruplamaSonucu } from "./masrafGruplama";
 import { formatPara, formatTarihKisa } from "./portalUtils";
 import { RejimRozeti, REJIM_STIL, rejimAnahtar } from "./kasaUI";
+import { AdminSilButonu } from "./adminSilme";
 
 // Başlık, grup satırı ve açılan alt kalemler AYNI ızgarayı paylaşır → sütunlar hizalı kalır.
 const GRID = "grid grid-cols-[64px_92px_100px_160px_minmax(0,1fr)_116px_52px] gap-3 items-center";
@@ -45,6 +46,13 @@ export function MasrafTablosu({
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         )}
+        {/* Admin: kilitli (kapanmış) kayıtta da görünür — buton rolü kendi kontrol eder. */}
+        <AdminSilButonu
+          tip="masraf"
+          id={m.id}
+          ozet={`${formatTarihKisa(m.tarih)} · ${formatPara(m.tutar, "₺")} · ${m.alacakli}${m.masrafTuru ? ` · ${m.masrafTuru}` : ""}`}
+          kilitli={!!m.kapanisId}
+        />
       </span>
     </div>
   );
@@ -74,10 +82,16 @@ export function MasrafTablosu({
             )}
           </span>
           <span className="col-start-6 text-right text-sm font-bold tabular-nums text-emerald-600">+{formatPara(a.tutar, "₺")}</span>
-          <span className="col-start-7 flex items-center justify-end">
+          <span className="col-start-7 flex items-center justify-end gap-1.5">
             {onAvansKaldir && !a.kapanisId && (
               <button type="button" className="flex h-6 w-6 items-center justify-center rounded-md border text-muted-foreground hover:border-rose-300 hover:text-rose-600" title="Kaldır" onClick={() => onAvansKaldir(a.id)} data-testid={`button-avans-kaldir-${a.id}`}><Trash2 className="h-3.5 w-3.5" /></button>
             )}
+            <AdminSilButonu
+              tip="avans"
+              id={a.id}
+              ozet={`${formatTarihKisa(a.tarih)} · Avans ${formatPara(a.tutar, "₺")}${a.aciklama ? ` · ${a.aciklama}` : ""}`}
+              kilitli={!!a.kapanisId}
+            />
           </span>
         </div>
       ))}

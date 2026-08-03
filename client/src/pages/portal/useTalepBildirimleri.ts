@@ -53,7 +53,8 @@ function degisenler(imza: Imza | undefined, liste: TalepDetay[]): TalepDetay[] {
 }
 
 function rolSayfalari(rol: PortalMe["rol"]): SayfaAnahtari[] {
-  return rol === "muhasebe" ? ["gelenTalepler", "depo"] : ["taleplerim"];
+  // admin muhasebe ekranlarını gördüğü için aynı rozetleri alır.
+  return rol === "muhasebe" || rol === "admin" ? ["gelenTalepler", "depo"] : ["taleplerim"];
 }
 
 const SAYFA_ROTASI: Record<SayfaAnahtari, string> = {

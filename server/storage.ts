@@ -32,6 +32,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   odemeSirketleri, type OdemeSirketi, type InsertOdemeSirketi,
   firmaIbanlari, type FirmaIban, type OdemeSirketiDetay,
   operasyonAvanslar, operasyonMasraflar, operasyonGunKapanis, type OperasyonAvans, type OperasyonMasraf, type OperasyonGunKapanis,
+  silmeLog, type SilmeLog, type InsertSilmeLog,
   type SubeGiderRaporu, type SubeGiderBloku,
   parasutToken, type ParasutToken,
   nakliyeFaturalari, type NakliyeFaturasi, type InsertNakliyeFaturasi,
@@ -443,6 +444,13 @@ export interface IStorage {
   geriAc(kapanisId: string, geriAcanId: string): Promise<OperasyonGunKapanis | null>;
   getSubeGiderRaporu(baslangic: string, bitis: string): Promise<SubeGiderRaporu>;
   subeGiderRaporuExcel(baslangic: string, bitis: string): Promise<Buffer>;
+
+  // --- Admin silme ---
+  getOdemeBelgeleri(talepId: string): Promise<OdemeBelge[]>;
+  deleteOdemeTalep(id: string): Promise<void>;
+  kapanislariYenidenZincirle(operasyonId: string): Promise<void>;
+  createSilmeLog(l: InsertSilmeLog): Promise<SilmeLog>;
+  getSilmeLog(limit?: number): Promise<SilmeLog[]>;
 
   // --- Paraşüt nakliye entegrasyonu ---
   getParasutToken(): Promise<ParasutToken | undefined>;
@@ -4023,6 +4031,55 @@ export class DatabaseStorage implements IStorage {
     bloklar.sort((a, b) => b.toplam - a.toplam);
     const genelToplam = Math.round(bloklar.reduce((t, b) => t + b.toplam, 0) * 100) / 100;
     return { subeler: bloklar, genelToplam };
+  }
+
+  // ---- Admin silme ----
+
+  async getOdemeBelgeleri(talepId: string): Promise<OdemeBelge[]> {
+    return db.select().from(odemeBelgeleri).where(eq(odemeBelgeleri.talepId, talepId));
+  }
+
+  async deleteOdemeTalep(id: string): Promise<void> {
+    // odeme_belgeleri.talep_id FK'si onDelete:"cascade" — belge satırları kendiliğinden gider.
+    // Disk dosyalarını route siler (storage dosya sistemine dokunmaz).
+    await db.delete(odemeTalepleri).where(eq(odemeTalepleri.id, id));
+  }
+
+  // Gün kapanışları bir ZİNCİRDİR: her günün açılışı bir önceki günün kapanışıdır.
+  // Kapanmış bir masraf/avans silinince yalnız o günün toplamı değil, SONRAKİ tüm
+  // günlerin açılış/kapanış bakiyeleri kayar. Tek bir kapanışı yamamak yerine zinciri
+  // baştan kurmak hem daha basit hem her senaryoda doğru (kapanış sayısı günlük mertebede).
+  // Anlık bakiye (Σavans − Σmasraf) türetilmiş olduğu için kendiliğinden zaten doğrudur.
+  async kapanislariYenidenZincirle(operasyonId: string): Promise<void> {
+    const kapanislar = await db.select().from(operasyonGunKapanis)
+      .where(eq(operasyonGunKapanis.operasyonId, operasyonId))
+      .orderBy(asc(operasyonGunKapanis.kapanisZamani));
+    let acilis = 0;
+    for (const k of kapanislar) {
+      const [av] = await db.select({ t: sql<string>`COALESCE(SUM(${operasyonAvanslar.tutar}),0)` })
+        .from(operasyonAvanslar).where(eq(operasyonAvanslar.kapanisId, k.id));
+      const [ma] = await db.select({ t: sql<string>`COALESCE(SUM(${operasyonMasraflar.tutar}),0)` })
+        .from(operasyonMasraflar).where(eq(operasyonMasraflar.kapanisId, k.id));
+      const avansToplam = Math.round(parseFloat(av.t) * 100) / 100;
+      const masrafToplam = Math.round(parseFloat(ma.t) * 100) / 100;
+      const kapanisBakiye = Math.round((acilis + avansToplam - masrafToplam) * 100) / 100;
+      await db.update(operasyonGunKapanis).set({
+        acilisBakiye: acilis.toFixed(2),
+        avansToplam: avansToplam.toFixed(2),
+        masrafToplam: masrafToplam.toFixed(2),
+        kapanisBakiye: kapanisBakiye.toFixed(2),
+      }).where(eq(operasyonGunKapanis.id, k.id));
+      acilis = kapanisBakiye;
+    }
+  }
+
+  async createSilmeLog(l: InsertSilmeLog): Promise<SilmeLog> {
+    const [yeni] = await db.insert(silmeLog).values(l).returning();
+    return yeni;
+  }
+
+  async getSilmeLog(limit = 200): Promise<SilmeLog[]> {
+    return db.select().from(silmeLog).orderBy(desc(silmeLog.silmeZamani)).limit(limit);
   }
 
   async subeGiderRaporuExcel(baslangic: string, bitis: string): Promise<Buffer> {

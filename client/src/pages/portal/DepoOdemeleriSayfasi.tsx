@@ -24,6 +24,7 @@ import { SayfaBasligi } from "./kasaUI";
 import { useSanalTarih } from "./sanalTarih";
 import BelgeLinkleri from "./BelgeLinkleri";
 import { IadeEdilebilirKarti } from "./depoIslemTakibi";
+import { AdminSilButonu } from "./adminSilme";
 
 const TH = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
 
@@ -258,16 +259,23 @@ export default function DepoOdemeleriSayfasi() {
                   </TableCell>
                   <TableCell><BelgeLinkleri talep={t} /></TableCell>
                   <TableCell>
-                    {t.durum === "odendi" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setIadeTalebi(t)}
-                        data-testid={`button-iade-${t.id}`}
-                      >
-                        İade Kaydı
-                      </Button>
-                    )}
+                    <div className="flex items-center justify-end gap-1.5">
+                      {t.durum === "odendi" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setIadeTalebi(t)}
+                          data-testid={`button-iade-${t.id}`}
+                        >
+                          İade Kaydı
+                        </Button>
+                      )}
+                      <AdminSilButonu
+                        tip="talep"
+                        id={t.id}
+                        ozet={`${t.beyanname?.dosyaNo ?? "Dosyasız"} · ${t.konsimentoNo ?? "—"} · ${formatPara(t.tutar, t.paraBirimi)} · ${t.alacakli}`}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               );

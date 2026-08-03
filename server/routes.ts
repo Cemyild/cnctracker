@@ -209,7 +209,7 @@ import { PDFParse } from "pdf-parse";
 import { getTCMBExchangeRate, normalizeCurrencyCode } from "./currency"; // Helper added
 import { processUserQuery, generateNaturalLanguageResponse } from "./lib/openai";
 import { extractPolicyFields } from "./lib/policeOcr";
-import { hashSifre, dogrulaSifre, requirePortal, requireMuhasebe, requireOperasyon } from "./portalAuth";
+import { hashSifre, dogrulaSifre, requirePortal, requireMuhasebe, requireOperasyon, requireAdmin } from "./portalAuth";
 import { konsimentoAnalizEt, analizYapilandirildiMi } from "./konsimentoAnaliz";
 import { insertPortalKullaniciSchema, type PortalKullanici, type InsertPortalKullanici, type Beyanname } from "@shared/schema";
 import type { Request, Response, NextFunction } from "express";
@@ -5275,7 +5275,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Şifre en az 4 karakter olmalı" });
       }
       const parsed = insertPortalKullaniciSchema.omit({ sifreHash: true }).parse(alanlar);
-      if (!["temsilci", "muhasebe", "operasyon"].includes(parsed.rol)) {
+      if (!["temsilci", "muhasebe", "operasyon", "admin"].includes(parsed.rol)) {
         return res.status(400).json({ error: "Geçersiz rol" });
       }
       if (parsed.rol === "operasyon" && !String(parsed.sube ?? "").trim()) {
@@ -5302,7 +5302,7 @@ export async function registerRoutes(
       if (typeof req.body?.adSoyad === "string" && req.body.adSoyad.trim()) {
         izinli.adSoyad = req.body.adSoyad.trim();
       }
-      if (["temsilci", "muhasebe", "operasyon"].includes(req.body?.rol)) izinli.rol = req.body.rol;
+      if (["temsilci", "muhasebe", "operasyon", "admin"].includes(req.body?.rol)) izinli.rol = req.body.rol;
       if (req.body?.avAdi !== undefined) {
         izinli.avAdi = req.body.avAdi ? String(req.body.avAdi).trim() : null;
       }
@@ -6030,6 +6030,76 @@ export async function registerRoutes(
       const ben = await portalKullanici(req);
       if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
       res.json(await storage.getKapanislar(ben.id));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ==================== ADMIN: KAYIT SİLME ====================
+  // Silme GERİ ALINAMAZ ve para kaydını yok eder. Üç güvence:
+  //  (1) yalnız requireAdmin,
+  //  (2) her silme silme_log'a snapshot'lanır (kaynak satır gittiği için JOIN ile türetilemez),
+  //  (3) kapanmış operasyon kaydı silinirse kapanış ZİNCİRİ yeniden hesaplanır.
+  const silmeOzetiTalep = (t: any) =>
+    [t.konsimentoNo || t.masrafTuru, `${t.tutar} ${t.paraBirimi}`, t.alacakli].filter(Boolean).join(" · ");
+
+  app.delete("/api/portal/admin/talep/:id", requireAdmin, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const talep = await storage.getOdemeTalep(req.params.id);
+      if (!talep) return res.status(404).json({ error: "Bulunamadı" });
+      const belgeler = await storage.getOdemeBelgeleri(talep.id);
+      await storage.createSilmeLog({
+        silenId: ben.id, silenAd: ben.adSoyad, kayitTipi: "odeme_talebi", kayitId: talep.id,
+        ozet: silmeOzetiTalep(talep),
+        detayJson: JSON.stringify({ talep, belgeler }),
+      });
+      await storage.deleteOdemeTalep(talep.id); // belge satırları FK cascade ile gider
+      // Disk dosyaları log YAZILDIKTAN sonra silinir — log atılamazsa dosya da durur.
+      for (const b of belgeler) fs.promises.unlink(b.filepath).catch(() => {});
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/portal/admin/masraf/:id", requireAdmin, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const m = await storage.getOperasyonMasraf(req.params.id);
+      if (!m) return res.status(404).json({ error: "Bulunamadı" });
+      await storage.createSilmeLog({
+        silenId: ben.id, silenAd: ben.adSoyad, kayitTipi: "operasyon_masraf", kayitId: m.id,
+        ozet: [m.tarih, `${m.tutar} TL`, m.alacakli, m.masrafTuru].filter(Boolean).join(" · "),
+        detayJson: JSON.stringify(m),
+      });
+      await storage.masrafSil(m.id);
+      if (m.belgeDosya) fs.promises.unlink(m.belgeDosya).catch(() => {});
+      // Kilitli kayıt silindiyse kapanış raporu artık yanlış — zinciri baştan kur.
+      if (m.kapanisId) await storage.kapanislariYenidenZincirle(m.operasyonId);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/portal/admin/avans/:id", requireAdmin, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const a = await storage.getOperasyonAvans(req.params.id);
+      if (!a) return res.status(404).json({ error: "Bulunamadı" });
+      await storage.createSilmeLog({
+        silenId: ben.id, silenAd: ben.adSoyad, kayitTipi: "operasyon_avans", kayitId: a.id,
+        ozet: [a.tarih, `${a.tutar} TL`, a.aciklama].filter(Boolean).join(" · "),
+        detayJson: JSON.stringify(a),
+      });
+      await storage.avansSil(a.id);
+      if (a.belgeDosya) fs.promises.unlink(a.belgeDosya).catch(() => {});
+      if (a.kapanisId) await storage.kapanislariYenidenZincirle(a.operasyonId);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/portal/admin/silme-log", requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getSilmeLog());
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

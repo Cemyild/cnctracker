@@ -983,7 +983,11 @@ export const portalKullanicilar = pgTable("portal_kullanicilar", {
   kullaniciAdi: text("kullanici_adi").notNull().unique(),
   sifreHash: text("sifre_hash").notNull(), // "salt:hash" (crypto.scrypt)
   adSoyad: text("ad_soyad").notNull(),
-  rol: text("rol").notNull(), // 'temsilci' | 'muhasebe' | 'operasyon'
+  // 'temsilci' | 'muhasebe' | 'operasyon' | 'admin'
+  // admin = muhasebe ekranlarının tamamı + kayıt SİLME yetkisi (bkz. silmeLog).
+  // DB'de enum kısıtı YOK; geçerli değerler uygulama katmanında whitelist'lenir
+  // (server/routes.ts kullanıcı oluşturma/güncelleme + client PortalMe tipi).
+  rol: text("rol").notNull(),
   avAdi: text("av_adi"), // Beyanname Excel AV sütunu eşleşmesi (örn. "SÜLEYMAN")
   sube: text("sube"), // Şube (yalnız rol='operasyon' için anlamlı; `subeler` listesinden). Nullable — operasyon dışı roller ve eski satırlar için.
   aktif: boolean("aktif").notNull().default(true),
@@ -1207,6 +1211,25 @@ export const insertOperasyonGunKapanisSchema = createInsertSchema(operasyonGunKa
 export type OperasyonAvans = typeof operasyonAvanslar.$inferSelect;
 export type OperasyonMasraf = typeof operasyonMasraflar.$inferSelect;
 export type OperasyonGunKapanis = typeof operasyonGunKapanis.$inferSelect;
+
+// ==================== ADMIN SİLME GÜNLÜĞÜ ====================
+// Silinen kayıt geri gelmez; silinen PARA kaydının izi kalmalı ("bu masraf nereye gitti?").
+// Kullanıcı adı ve kayıt özeti SNAPSHOT olarak yazılır — kaynak satır yok olduğu için
+// sonradan JOIN ile türetilemez. detayJson kaydın silinme anındaki tam hâlidir.
+export const silmeLog = pgTable("silme_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  silenId: varchar("silen_id").notNull(),
+  silenAd: text("silen_ad").notNull(),          // snapshot
+  kayitTipi: text("kayit_tipi").notNull(),      // 'odeme_talebi' | 'operasyon_masraf' | 'operasyon_avans'
+  kayitId: varchar("kayit_id").notNull(),       // silinen satırın id'si (artık FK DEĞİL)
+  ozet: text("ozet").notNull(),                 // insan okur: "26-10264 · 1.500,00 USD · MSC"
+  detayJson: text("detay_json"),                // silinen satırın tam JSON'u
+  silmeZamani: timestamp("silme_zamani").defaultNow(),
+}, (t) => [index("IDX_silme_log_zaman").on(t.silmeZamani)]);
+
+export type SilmeLog = typeof silmeLog.$inferSelect;
+export const insertSilmeLogSchema = createInsertSchema(silmeLog).omit({ id: true, silmeZamani: true });
+export type InsertSilmeLog = z.infer<typeof insertSilmeLogSchema>;
 
 // Şube gider raporu — türetilmiş tipler (tablo DEĞİL, /api/portal/operasyon-takip/rapor/sube dönüşü)
 export type SubeGiderSatiri = { masrafTuru: string; adet: number; tutar: number };

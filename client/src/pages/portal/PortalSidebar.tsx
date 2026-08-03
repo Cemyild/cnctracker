@@ -6,7 +6,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut, Wallet, CalendarCheck, Building, BarChart3 } from "lucide-react";
+import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut, Wallet, CalendarCheck, Building, BarChart3, Trash2 } from "lucide-react";
 import { type PortalMe } from "./PortalApp";
 import { type Rozetler, type SayfaAnahtari } from "./useTalepBildirimleri";
 
@@ -36,10 +36,17 @@ const OPERASYON_MENU: MenuOgesi[] = [
   { title: "Kapanışlarım", href: "/portal/kapanislarim", icon: CalendarCheck },
 ];
 
+// Admin muhasebenin gördüğü her şeyi görür; üstüne silme günlüğü.
+const ADMIN_MENU: MenuOgesi[] = [
+  ...MUHASEBE_MENU,
+  { title: "Silme Günlüğü", href: "/portal/silme-log", icon: Trash2 },
+];
+
 const ROL_ETIKETI: Record<PortalMe["rol"], string> = {
   muhasebe: "Muhasebe",
   operasyon: "Operasyon",
   temsilci: "Müşteri Temsilcisi",
+  admin: "Yönetici",
 };
 
 // Ad-soyad -> baş harfler (avatar rozeti). tr-TR locale ile Türkçe büyük harf kuralı (i -> İ) doğru çalışır.
@@ -55,7 +62,10 @@ export default function PortalSidebar({
   me, rozetler, cikisYap,
 }: { me: PortalMe; rozetler: Rozetler; cikisYap: () => void }) {
   const [location] = useLocation();
-  const menu = me.rol === "muhasebe" ? MUHASEBE_MENU : me.rol === "operasyon" ? OPERASYON_MENU : TEMSILCI_MENU;
+  const menu = me.rol === "admin" ? ADMIN_MENU
+    : me.rol === "muhasebe" ? MUHASEBE_MENU
+    : me.rol === "operasyon" ? OPERASYON_MENU
+    : TEMSILCI_MENU;
 
   return (
     <Sidebar className="border-r border-sidebar-border">
