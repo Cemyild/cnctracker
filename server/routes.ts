@@ -1443,7 +1443,7 @@ export async function registerRoutes(
 
   app.put("/api/sigorta/muhasebe/:id/match", async (req, res) => {
       try {
-          const { eslestiMi, eslesenPolicyId } = req.body;
+          const { eslestiMi, eslesenPolicyId, dekontDurumu } = req.body;
           const updated = await storage.updateSigortaMuhasebeKaydi(req.params.id, {
               eslestiMi: eslestiMi ? 1 : 0,
               eslesenPolicyId: eslesenPolicyId || null
@@ -1451,16 +1451,37 @@ export async function registerRoutes(
           if (!updated) {
               return res.status(404).json({ error: "Bulunamadı" });
           }
-          // Eşleştirilen poliçenin dekont durumunu da senkron et.
-          // eslesenPolicyId verildiyse → EVET, eslestiMi=false ise → HAYIR'a düşür.
+          // Eşleştirilen poliçenin dekont durumunu da senkron et. Tutar uyuşmuyorsa
+          // istemci "TUTAR FARKI" gönderir; gönderilmezse varsayılan "EVET".
+          // (Eskiden koşulsuz "EVET" yazılıyordu ve yükleme akışıyla çelişiyordu.)
           if (eslesenPolicyId) {
-              await storage.updateSigortaPoliceDekontDurumu(eslesenPolicyId, "EVET");
+              await storage.updateSigortaPoliceDekontDurumu(eslesenPolicyId, dekontDurumu || "EVET");
           }
           res.json(updated);
       } catch (err) {
           console.error("Eşleştirme güncellenirken hata:", err);
           res.status(500).json({ error: "Eşleştirme sırasında hata oluştu" });
       }
+  });
+
+  // Eşleşme durumunu doğrudan set eder. Öneri reddi için kullanılır
+  // (eslestiMi=4 → kayıt eşleşmemiş kalır ama bir daha öneri üretilmez).
+  app.put("/api/sigorta/muhasebe/:id/durum", async (req, res) => {
+    try {
+        const { eslestiMi } = req.body;
+        const deger = Number(eslestiMi);
+        if (!Number.isInteger(deger) || deger < 0 || deger > 4) {
+            return res.status(400).json({ error: "Geçersiz durum değeri" });
+        }
+        const updated = await storage.updateSigortaMuhasebeKaydi(req.params.id, { eslestiMi: deger });
+        if (!updated) {
+            return res.status(404).json({ error: "Bulunamadı" });
+        }
+        res.json(updated);
+    } catch (err) {
+        console.error("Muhasebe durumu güncellenirken hata:", err);
+        res.status(500).json({ error: "Durum güncellenirken hata oluştu" });
+    }
   });
 
   app.delete("/api/sigorta/muhasebe/:id", async (req, res) => {

@@ -69,9 +69,9 @@ function useSigortaSirketler(yil: number) {
     };
 }
 
-// Bu firmalar için kesilen poliçeler 0-değerli olduğundan muhasebede hiç
-// görünmez; otomatik "EVET" sayılırlar. Yeni firma eklemek için sadece
-// alt-kase, TR karaktersiz bir anahtar kelime ekle — substring eşleşir.
+// Bu firmaların poliçeleri hiçbir zaman dekont edilmez (abonman müşterileri);
+// primi sıfır olmasa bile otomatik "EVET" sayılırlar. Yeni firma eklemek için
+// sadece alt-kase, TR karaktersiz bir anahtar kelime ekle — substring eşleşir.
 const AUTO_EVET_FIRMS_KEYWORDS = ["feka", "promedis"];
 
 const normalizeFirmName = (s: any): string =>
@@ -84,6 +84,202 @@ const normalizeFirmName = (s: any): string =>
 const isAutoEvetFirm = (sigortali: any): boolean => {
     const norm = normalizeFirmName(sigortali);
     return AUTO_EVET_FIRMS_KEYWORDS.some(k => norm.includes(k));
+};
+
+// Dekont beklenmeyen poliçeler — iki bağımsız kural:
+//   1) FEKA/PROMEDİS poliçeleri (tutarı ne olursa olsun),
+//   2) brüt primi sıfır olan her poliçe — tahsil edilecek tutar yoksa
+//      muhasebede karşılık kaydı da doğmaz (sertifika satırları).
+// Eskiden yalnızca (1) vardı; (2) olmadığı için FEKA/PROMEDİS dışı sıfır
+// primli poliçeler sonsuza dek "dekontsuz" listesinde takılı kalıyordu.
+const isDekontBeklenmez = (sigortali: any, brutPrim: any): boolean => {
+    if (isAutoEvetFirm(sigortali)) return true;
+    const brut = typeof brutPrim === "number" ? brutPrim : parseFloat(String(brutPrim ?? "").replace(",", "."));
+    return !brut || brut === 0;
+};
+
+// Veri hangi sayfada? Bazı raporlar boş bir "Sayfa1" ile başlıyor (muhasebe
+// ekstresi böyle geliyor), bazıları tek sayfalı. Sabit "ilk sayfa" varsayımı
+// sessiz başarısızlık üretiyor: boş sayfa okunup "başlık tanınmadı" deniyor.
+// Kural: tercih edilen bir sayfa adı varsa onu al, yoksa en çok dolu satırı
+// olan sayfayı seç — böylece sayfa sırası değişse de doğru veri bulunur.
+const veriSayfasiniSec = (workbook: XLSX.WorkBook, tercihEdilenAdlar: string[] = []): string => {
+    for (const ad of tercihEdilenAdlar) {
+        if (workbook.SheetNames.includes(ad)) return ad;
+    }
+    let enIyiSayfa = workbook.SheetNames[0];
+    let enCokDoluSatir = -1;
+    for (const ad of workbook.SheetNames) {
+        const ws = workbook.Sheets[ad];
+        if (!ws || !ws["!ref"]) continue;
+        const satirlar = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false }) as any[][];
+        const dolu = satirlar.filter(r => r && r.some(c => c !== null && c !== undefined && c !== "")).length;
+        if (dolu > enCokDoluSatir) { enCokDoluSatir = dolu; enIyiSayfa = ad; }
+    }
+    return enIyiSayfa;
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// POLİÇE ↔ MUHASEBE EŞLEŞTİRME YARDIMCILARI
+// Muhasebe satırındaki evrak no insan eliyle giriliyor; sahada görülen hata
+// desenleri: bir hane düşmesi, fazladan bir hane, tek hane yanlış yazımı,
+// tarihin numaraya yapışması ("159360467013,07") ve numaranın hiç yazılmayıp
+// açıklamaya gömülmesi ("SİGORTA-23,02,2026/1522345892 ABON").
+// ─────────────────────────────────────────────────────────────────────────
+const sadeceRakam = (s: any): string => String(s ?? "").replace(/\D/g, "");
+
+// İki numara tek bir düzenlemeyle (bir ekleme, bir silme veya bir değiştirme)
+// birbirine dönüşüyor mu? Tam Levenshtein hesabı yerine erken çıkışlı kontrol —
+// 1.800+ poliçe × yüzlerce kayıt taranacağı için maliyet önemli.
+const birDuzenlemeUzakligi = (a: string, b: string): boolean => {
+    if (!a || !b) return false;
+    const fark = a.length - b.length;
+    if (Math.abs(fark) > 1) return false;
+    if (a === b) return false; // birebir aynı → zaten tam eşleşme kademesinde yakalanır
+
+    if (fark === 0) {
+        let farkliHane = 0;
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i] && ++farkliHane > 1) return false;
+        }
+        return farkliHane === 1;
+    }
+
+    // Uzunluk farkı 1 → uzun olandan tek hane atlayarak kısa olana ulaşılıyor mu?
+    const uzun = fark > 0 ? a : b;
+    const kisa = fark > 0 ? b : a;
+    let i = 0, j = 0, atlandi = false;
+    while (i < uzun.length && j < kisa.length) {
+        if (uzun[i] !== kisa[j]) {
+            if (atlandi) return false;
+            atlandi = true;
+            i++;
+        } else { i++; j++; }
+    }
+    return true;
+};
+
+// Evrak no ve açıklamadan doğrudan denenebilecek poliçe no adayları.
+// Ray poliçe numaraları 10 hanelidir; yapışık tarih/ek hane bu yolla ayıklanır.
+const policeNoAdaylari = (evrakNo: any, aciklama: any): string[] => {
+    const adaylar: string[] = [];
+    const ham = sadeceRakam(evrakNo);
+    if (ham) {
+        adaylar.push(ham);
+        if (ham.length > 10) {
+            adaylar.push(ham.slice(0, 10));           // "15936046701307" → "1593604670"
+            adaylar.push(ham.slice(-10));             // birleşik iki numaranın ikincisi
+        }
+    }
+    // Açıklamaya gömülü 10 haneli numara: "SİGORTA-23,02,2026/1522345892 ABON"
+    const gomulu = String(aciklama ?? "").match(/\d{10}/g);
+    if (gomulu) adaylar.push(...gomulu);
+    return Array.from(new Set(adaylar.filter(Boolean)));
+};
+
+// Poliçe tahsilatı değil, banka/vergi hareketi olan satırlar. Bunlar evrak no
+// taşımaz ve borç tarafında durur; "eşleşmeyen" listesine karışıp gerçek
+// eksikleri gizliyorlardı.
+const BANKA_HAREKET_KELIMELERI = [
+    "virman", "stopaj", "muhtasar", "kurumlarvergisi", "hesapbirlestirme",
+    "hesabinagonderilen", "hesabinavirman", "hesaplararasi", "odemesi",
+];
+const isBankaHareketi = (evrakNo: any, aciklama: any, borc: number, alacak: number): boolean => {
+    if (sadeceRakam(evrakNo)) return false;      // numarası varsa poliçe kaydı sayılır
+    if (alacak > 0) return false;                // alacak tarafı prim tahakkukudur
+    const norm = normalizeFirmName(aciklama);
+    if (!norm) return false;
+    return borc > 0 && BANKA_HAREKET_KELIMELERI.some(k => norm.includes(k));
+};
+
+// Muhasebe açıklamasındaki firma kısaltmasını ("SİGORTA-FICOSA INT") poliçedeki
+// sigortalı ünvanıyla karşılaştırmak için ön ek temizliği.
+const aciklamadanFirma = (aciklama: any): string => {
+    let s = String(aciklama ?? "");
+    s = s.replace(/^\s*(ABONMAN\s+)?S[İI]GORTA\s*-\s*/i, "");
+    return normalizeFirmName(s);
+};
+
+// "dd.mm.yyyy" → karşılaştırılabilir zaman damgası. Yalnızca tarih yakınlığı
+// ölçmek için; ekranda gösterilecek hiçbir tarih buradan geçmez.
+const ddmmyyyyToGun = (s: any): number | null => {
+    const p = String(s ?? "").split(".");
+    if (p.length !== 3) return null;
+    const d = parseInt(p[0]), m = parseInt(p[1]), y = parseInt(p[2]);
+    if (isNaN(d) || isNaN(m) || isNaN(y)) return null;
+    return new Date(y, m - 1, d).getTime();
+};
+
+// Muhasebe kaydının `eslestiMi` alanı (integer) — anlamlar tek yerde toplandı.
+// 0/1/2 tarihsel değerler; 3 ve 4 bu sürümde eklendi.
+const MUHASEBE_DURUM = {
+    ESLESMEDI: 0,
+    ESLESTI: 1,
+    SUPHELI: 2,
+    BANKA_HAREKETI: 3,    // virman/stopaj/vergi — poliçe karşılığı aranmaz
+    ONERI_REDDEDILDI: 4,  // kullanıcı öneriyi reddetti, bir daha önerilmesin
+} as const;
+
+type EslesmeOnerisi = { police: any; skor: number; gerekceler: string[] };
+
+// Eşleşmeyen bir muhasebe kaydı için en olası poliçeyi arar.
+// ÖNEMLİ: burada hiçbir şey otomatik bağlanmaz — sonuç kullanıcıya gerekçesiyle
+// birlikte öneri olarak sunulur, kararı kullanıcı verir. Bu yüzden eşik yüksek
+// tutulmuştur: en az bir güçlü sinyal (tutarın kuruşuna kadar tutması ya da
+// numaranın tek düzenleme uzaklığında olması) VE ikinci adaydan belirgin fark.
+const eslesmeOnerisiBul = (
+    kayit: { belgeNo?: any; aciklama?: any; alacak?: any; tarih?: any },
+    policeler: any[],
+): EslesmeOnerisi | null => {
+    const tutar = parseFloat(String(kayit.alacak ?? "0")) || 0;
+    if (tutar <= 0) return null; // borç/virman satırı — poliçe karşılığı aranmaz
+
+    const accNo = sadeceRakam(kayit.belgeNo);
+    const firmaAnahtari = aciklamadanFirma(kayit.aciklama);
+    const kayitGun = ddmmyyyyToGun(kayit.tarih);
+
+    const adaylar: EslesmeOnerisi[] = [];
+    for (const p of policeler) {
+        const brut = parseFloat(p.brutPrim || "0") || 0;
+        if (brut <= 0) continue; // primi sıfır poliçe zaten dekont beklemez
+        if (p.dekontDurumu === "EVET") continue; // hâlihazırda kapanmış poliçeyi önerme
+
+        const gerekceler: string[] = [];
+        let skor = 0;
+
+        const tutarFarki = Math.abs(brut - tutar);
+        if (tutarFarki < 0.01) { skor += 100; gerekceler.push("tutar birebir"); }
+        else if (tutarFarki < Math.max(1, brut * 0.01)) { skor += 45; gerekceler.push("tutar yakın"); }
+
+        const pNo = sadeceRakam(p.policeNo);
+        if (accNo && birDuzenlemeUzakligi(accNo, pNo)) {
+            skor += 80;
+            gerekceler.push(accNo.length === pNo.length ? "1 hane farklı" : "1 hane eksik/fazla");
+        }
+
+        if (firmaAnahtari.length >= 5) {
+            const pFirma = normalizeFirmName(p.sigortali);
+            if (pFirma.startsWith(firmaAnahtari) || (pFirma.length >= 10 && firmaAnahtari.startsWith(pFirma.slice(0, 10)))) {
+                skor += 30;
+                gerekceler.push("firma tutuyor");
+            }
+        }
+
+        const pGun = ddmmyyyyToGun(p.tanzimTarihi);
+        if (kayitGun !== null && pGun !== null && Math.abs(kayitGun - pGun) <= 45 * 86400000) {
+            skor += 10;
+            gerekceler.push("tarih yakın");
+        }
+
+        if (skor > 0) adaylar.push({ police: p, skor, gerekceler });
+    }
+
+    if (adaylar.length === 0) return null;
+    adaylar.sort((a, b) => b.skor - a.skor);
+    const en = adaylar[0];
+    if (en.skor < 100) return null;                                   // güçlü sinyal yok
+    if (adaylar[1] && en.skor - adaylar[1].skor < 40) return null;    // belirsiz — öneri üretme
+    return en;
 };
 
 const AYLAR = [
@@ -1144,11 +1340,80 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
         }
     });
 
-    // Unmatched Records derived from DB
+    // Eşleşmeyenler — banka/vergi hareketleri (durum 3) hariç tutulur.
+    // Reddedilen öneriler (durum 4) hâlâ eşleşmemiştir, listede kalırlar;
+    // yalnızca haklarında bir daha öneri üretilmez.
     const unmatchedRecordsList = useMemo(() => {
         if (!storedMuhasebe) return [];
-        return storedMuhasebe.filter((m: any) => m.eslestiMi === 0);
+        return storedMuhasebe.filter((m: any) =>
+            m.eslestiMi === MUHASEBE_DURUM.ESLESMEDI || m.eslestiMi === MUHASEBE_DURUM.ONERI_REDDEDILDI);
     }, [storedMuhasebe]);
+
+    // Kullanıcı onayına sunulacak eşleştirme önerileri. Hiçbir şey otomatik
+    // bağlanmaz — bu liste yalnızca aday + gerekçe gösterir.
+    const eslesmeOnerileri = useMemo(() => {
+        if (!storedMuhasebe || !storedPolicies) return [] as { kayit: any; oneri: EslesmeOnerisi }[];
+        const bekleyenler = storedMuhasebe.filter((m: any) => m.eslestiMi === MUHASEBE_DURUM.ESLESMEDI);
+        const sonuc: { kayit: any; oneri: EslesmeOnerisi }[] = [];
+        for (const kayit of bekleyenler) {
+            const oneri = eslesmeOnerisiBul(kayit, storedPolicies);
+            if (oneri) sonuc.push({ kayit, oneri });
+        }
+        return sonuc.sort((a, b) => b.oneri.skor - a.oneri.skor);
+    }, [storedMuhasebe, storedPolicies]);
+
+    const [oneriIsleniyor, setOneriIsleniyor] = useState<string | null>(null);
+
+    const oneriSonrasiTazele = () => {
+        refetch();
+        refetchMuhasebe();
+        queryClient.invalidateQueries({ queryKey: ['sigorta-policeler'] });
+        queryClient.invalidateQueries({ queryKey: ['sigorta-ozet'] });
+        queryClient.invalidateQueries({ queryKey: ['sigorta-muhasebe'] });
+        queryClient.invalidateQueries({ queryKey: ['sigorta-policeler-aging'] });
+    };
+
+    const oneriOnayla = async (kayit: any, police: any) => {
+        setOneriIsleniyor(kayit.id);
+        try {
+            // Tutar uyuşmuyorsa poliçe "EVET" değil "TUTAR FARKI" olarak kapanır —
+            // yükleme akışındaki kuralın aynısı.
+            const brut = parseFloat(police.brutPrim || "0") || 0;
+            const alacak = parseFloat(kayit.alacak || "0") || 0;
+            const tutarFarki = alacak > 0 && Math.abs(brut - alacak) > Math.max(1, brut * 0.01);
+            await apiRequest("PUT", `/api/sigorta/muhasebe/${kayit.id}/match`, {
+                eslestiMi: true,
+                eslesenPolicyId: police.id,
+                dekontDurumu: tutarFarki ? "TUTAR FARKI" : "EVET",
+            });
+            oneriSonrasiTazele();
+            toast({
+                title: tutarFarki ? "Eşleştirildi (tutar farklı)" : "Eşleştirildi",
+                description: `${kayit.belgeNo || "(evrak no yok)"} → ${police.policeNo}`,
+            });
+        } catch (err) {
+            console.error(err);
+            toast({ variant: "destructive", title: "Hata", description: "Eşleştirme kaydedilemedi." });
+        } finally {
+            setOneriIsleniyor(null);
+        }
+    };
+
+    const oneriReddet = async (kayit: any) => {
+        setOneriIsleniyor(kayit.id);
+        try {
+            await apiRequest("PUT", `/api/sigorta/muhasebe/${kayit.id}/durum`, {
+                eslestiMi: MUHASEBE_DURUM.ONERI_REDDEDILDI,
+            });
+            oneriSonrasiTazele();
+            toast({ title: "Öneri reddedildi", description: "Kayıt eşleşmeyenler listesinde kalacak." });
+        } catch (err) {
+            console.error(err);
+            toast({ variant: "destructive", title: "Hata", description: "Öneri reddedilemedi." });
+        } finally {
+            setOneriIsleniyor(null);
+        }
+    };
 
     // Filtered Policies for Display
     const filteredPolicies = useMemo(() => {
@@ -1247,11 +1512,11 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                 }
             });
 
-            const matches: Array<{ muhasebeId: string; policyId: string }> = [];
+            const matches: Array<{ muhasebeId: string; policyId: string; dekontDurumu: string }> = [];
             for (const rec of unmatchedRecordsList) {
                 const accNo = String(rec.belgeNo || "").replace(/[^a-zA-Z0-9]/g, "");
                 const accAmount = parseFloat(rec.alacak || "0");
-                if (!accNo) continue;
+                // Evrak no boş olabilir — numara açıklamaya gömülmüş olabilir.
 
                 let matched: any = null;
                 if (isMapfre) {
@@ -1267,25 +1532,23 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                         }
                     }
                 } else {
-                    if (policyMap.has(accNo)) {
-                        matched = policyMap.get(accNo);
-                    } else if (accNo.length >= 4 && accNo.length <= 8) {
-                        const cand = storedPolicies.filter((p: any) => {
-                            const norm = String(p.policeNo).replace(/\D/g, "");
-                            return norm.endsWith(accNo);
-                        });
-                        if (cand.length === 1) matched = cand[0];
-                        else if (cand.length > 1) {
-                            const close = cand.filter((p: any) => {
-                                const pBrut = parseFloat(p.brutPrim);
-                                return Math.abs(pBrut - accAmount) < Math.max(1, pBrut * 0.01);
-                            });
-                            if (close.length === 1) matched = close[0];
-                        }
+                    // Ray — yükleme akışıyla aynı numara kademeleri.
+                    for (const aday of policeNoAdaylari(rec.belgeNo, rec.aciklama)) {
+                        if (policyMap.has(aday)) { matched = policyMap.get(aday); break; }
                     }
                 }
 
-                if (matched) matches.push({ muhasebeId: rec.id, policyId: matched.id });
+                if (matched) {
+                    // Tutar uyuşmuyorsa poliçe "TUTAR FARKI" olarak kapanmalı;
+                    // eskiden bu akış koşulsuz "EVET" yazıyordu.
+                    const pBrut = parseFloat(matched.brutPrim || "0") || 0;
+                    const tutarFarki = accAmount > 0 && Math.abs(pBrut - accAmount) > Math.max(1, pBrut * 0.01);
+                    matches.push({
+                        muhasebeId: rec.id,
+                        policyId: matched.id,
+                        dekontDurumu: tutarFarki ? "TUTAR FARKI" : "EVET",
+                    });
+                }
             }
 
             if (matches.length === 0) {
@@ -1299,6 +1562,7 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                 apiRequest("PUT", `/api/sigorta/muhasebe/${m.muhasebeId}/match`, {
                     eslestiMi: true,
                     eslesenPolicyId: m.policyId,
+                    dekontDurumu: m.dekontDurumu,
                 })
             ));
 
@@ -1453,10 +1717,13 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
     const HEADER_SYNONYMS: Record<string, string[]> = {
         // "urunadi": Ray "Kaynak Poliçe Listesi" raporunda branş kolonu yok,
         // ürün adı (NAKLİYAT EMTİA vb.) branş olarak kullanılıyor.
-        brans:         ["brans", "branch", "branskodu", "branskod", "urunadi", "urunad", "urun"],
+        brans:         ["brans", "branch", "branskodu", "branskod", "urunadi", "urunad", "urunno", "urunkodu", "urun"],
         policeNo:      ["policeno", "policyno", "policiseno", "polno", "polnumarasi", "polnumara"],
         sigortali:     ["sigortaliadi", "sigortali", "sigortaliad", "sigortaliunvan", "musteriadi", "musteri", "musteriad", "musteriunvan", "insured", "adsoyad", "unvan"],
-        tanzimTarihi:  ["tanzimtarihi", "tanzim", "duzenleme", "duzenlematarihi", "duzenlematar", "tarih", "policetarihi", "baslangictarihi"],
+        // "onaytarihi": Ray'in yeni raporunda tanzim tarihi kolonu "P Onay Tarihi"
+        // adıyla geliyor; yalnızca genel "tarih" sinonimine bırakılırsa başka bir
+        // tarih kolonu (valör vb.) öne geçebilir.
+        tanzimTarihi:  ["tanzimtarihi", "tanzim", "onaytarihi", "onaytarih", "duzenleme", "duzenlematarihi", "duzenlematar", "tarih", "policetarihi", "baslangictarihi"],
         netPrim:       ["netprim", "net", "netprimi", "netprimtutari", "primnet"],
         brutPrim:      ["brutprim", "brut", "brutprimi", "brutprimtutari", "primbrut", "toplamprim", "odemekprim"],
         komisyon:      ["komisyon", "komisyontutari", "komisyontutar", "commission", "komtutari", "komtutar"],
@@ -1546,7 +1813,8 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                 try {
                     const data = evt.target?.result;
                     const workbook = XLSX.read(data, { type: 'binary' });
-                    const sheetName = workbook.SheetNames[0];
+                    // Ray raporu "Report" sayfasıyla geliyor; gelmezse en dolu sayfa seçilir.
+                    const sheetName = veriSayfasiniSec(workbook, ["Report", "Poliçe Listesi", "Policeler"]);
                     const sheet = workbook.Sheets[sheetName];
                     const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
 
@@ -1590,16 +1858,17 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                         };
 
                         const sigortaliRaw = String(get("sigortali") || "");
-                        // FEKA / PROMEDİS otomatik EVET (0 değerli, muhasebede yer almayan poliçeler)
+                        const brutPrimVal = parseAmount(get("brutPrim"));
+                        // Dekont beklenmeyenler: FEKA/PROMEDİS poliçeleri + primi sıfır olan her poliçe
                         const excelDekont = String(get("dekontDurumu") || "").trim();
-                        const autoEvet = isAutoEvetFirm(sigortaliRaw);
+                        const autoEvet = isDekontBeklenmez(sigortaliRaw, brutPrimVal);
                         const policy = {
                             brans: String(get("brans") || ""),
                             policeNo: String(pNo).replace(/[^a-zA-Z0-9]/g, ""),
                             sigortali: sigortaliRaw,
                             tanzimTarihi: formatExcelDate(tanzimRaw),
                             netPrim: String(parseAmount(get("netPrim"))),
-                            brutPrim: String(parseAmount(get("brutPrim"))),
+                            brutPrim: String(brutPrimVal),
                             komisyon: String(parseAmount(get("komisyon"))),
                             sigortaBedeli: String(parseAmount(get("sigortaBedeli"))),
                             sirket: subTab === "mapfre" ? COMPANIES.MAPFRE : COMPANIES.RAY,
@@ -1690,17 +1959,8 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                     const data = evt.target?.result;
                     const workbook = XLSX.read(data, { type: 'binary' });
                     
-                    // Smart Sheet Selection
-                    let sheetName = workbook.SheetNames[0];
-                    if (workbook.SheetNames.includes("Hesap Ekstresi")) {
-                        sheetName = "Hesap Ekstresi";
-                    } else {
-                        const sheet0 = workbook.Sheets[workbook.SheetNames[0]];
-                        const json0 = XLSX.utils.sheet_to_json(sheet0, { header: 1 });
-                        if (json0.length === 0 && workbook.SheetNames.length > 1) {
-                             sheetName = workbook.SheetNames[1];
-                        }
-                    }
+                    // Muhasebe dosyası boş bir "Sayfa1" ile geliyor, veri "Hesap Ekstresi"nde.
+                    const sheetName = veriSayfasiniSec(workbook, ["Hesap Ekstresi", "Hesap Ozeti", "Ekstre"]);
 
                     const sheet = workbook.Sheets[sheetName];
                     const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
@@ -1710,6 +1970,12 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                     const accountingToSave: any[] = [];
                     const policiesToUpdate = new Map<number, any>();
                     let matchCount = 0;
+                    let bankaHareketiSayisi = 0;
+                    let farkliYilSayisi = 0;
+                    // Aynı poliçeye ikinci bir tahakkuk satırı düşerse mükerrer kayıt
+                    // şüphesi doğar; sessizce ikisini de "EVET" saymak yerine uyarılır.
+                    const policeBasinaSatir = new Map<string, number>();
+                    const mukerrerAdaylari: string[] = [];
 
                     // 1. Build Index Maps
                     const policyMap = new Map<string, any>(); // Exact normalized match (Ray & Mapfre Full)
@@ -1808,6 +2074,13 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
 
                         const sirket = subTab === 'mapfre' ? COMPANIES.MAPFRE : COMPANIES.RAY;
 
+                        // Yıl artık satırın kendi tarihinden alınıyor; eskiden UI'daki
+                        // yıl seçimi yazılıyordu ve 2025 tarihli bir satır 2026'ya düşüyordu.
+                        const tarihBilgi = extractMonthAndYear(tarihRaw);
+                        const bankaHareketi = isBankaHareketi(belgeNoRaw, aciklamaRaw, accBorc, accAlacak);
+                        if (bankaHareketi) bankaHareketiSayisi++;
+                        if (tarihBilgi && tarihBilgi.yil !== yil) farkliYilSayisi++;
+
                         const accRecord = {
                             tarih: formatExcelDate(tarihRaw),
                             belgeNo: String(belgeNoRaw || ""),
@@ -1816,11 +2089,17 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                             alacak: String(accAlacak),
                             bakiye: String(parseAmount(bakiyeRaw)),
                             sirket: sirket,
-                            ay: extractMonthAndYear(tarihRaw)?.ay || "1",
-                            yil: yil,
-                            eslestiMi: 0 as 0 | 1,
+                            ay: tarihBilgi?.ay || "1",
+                            yil: tarihBilgi?.yil || yil,
+                            eslestiMi: (bankaHareketi ? MUHASEBE_DURUM.BANKA_HAREKETI : MUHASEBE_DURUM.ESLESMEDI) as number,
                             eslesenPolicyId: null as string | null
                         };
+
+                        // Banka/vergi hareketinin poliçe karşılığı olmaz — eşleştirme denenmez.
+                        if (bankaHareketi) {
+                            accountingToSave.push(accRecord);
+                            continue;
+                        }
 
                         let matchedPolicy: any = null;
                         let isSuspicious = false; // Birden fazla aday → ŞÜPHELİ
@@ -1860,30 +2139,16 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                 }
                             }
                         } else {
-                            // RAY LOGIC — önce tam eşleşme, yoksa suffix fallback
-                            // (muhasebe kayıtlarında bazen poliçe no son 5-6 hane
-                            // olarak kısaltılır — "1494789982" yerine "789982")
-                            if (accountingPolicyNo && policyMap.has(accountingPolicyNo)) {
-                                matchedPolicy = policyMap.get(accountingPolicyNo);
-                            } else if (accountingPolicyNo && accountingPolicyNo.length >= 4 && accountingPolicyNo.length <= 8) {
-                                const candidates = storedPolicies.filter((p: any) => {
-                                    const norm = String(p.policeNo).replace(/\D/g, "");
-                                    return norm.endsWith(accountingPolicyNo);
-                                });
-                                if (candidates.length === 1) {
-                                    matchedPolicy = candidates[0];
-                                } else if (candidates.length > 1) {
-                                    // Tutar yakınlığı ile disambiguate (₺1 / %1)
-                                    const closeByAmount = candidates.filter((p: any) => {
-                                        const pBrut = parseFloat(p.brutPrim);
-                                        return Math.abs(pBrut - accAmount) < Math.max(1, pBrut * 0.01);
-                                    });
-                                    if (closeByAmount.length === 1) {
-                                        matchedPolicy = closeByAmount[0];
-                                    } else {
-                                        isSuspicious = true;
-                                        console.warn(`Ray suffix "${accountingPolicyNo}" için ${candidates.length} aday var, manuel seçim gerekli`);
-                                    }
+                            // RAY — yalnızca NUMARAYA dayalı kademeler burada çalışır:
+                            // ham evrak no, yapışık tarihten arındırılmış hâli ve
+                            // açıklamaya gömülü 10 haneli numara denenir.
+                            // Tutar/firma benzerliğine dayalı kademe kasten burada
+                            // ÇALIŞTIRILMAZ — o kademe "Eşleştirme Önerileri"ni besler
+                            // ve yalnızca kullanıcı onayıyla bağlanır.
+                            for (const aday of policeNoAdaylari(belgeNoRaw, aciklamaRaw)) {
+                                if (policyMap.has(aday)) {
+                                    matchedPolicy = policyMap.get(aday);
+                                    break;
                                 }
                             }
                         }
@@ -1902,9 +2167,13 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                             const newStatus = amountMismatch ? "TUTAR FARKI" : "EVET";
                             const updatedPolicy = { ...matchedPolicy, dekontDurumu: newStatus };
                             policiesToUpdate.set(matchedPolicy.id, updatedPolicy);
-                            accRecord.eslestiMi = 1;
+                            accRecord.eslestiMi = MUHASEBE_DURUM.ESLESTI;
                             accRecord.eslesenPolicyId = matchedPolicy.id;
                             if (!amountMismatch) matchCount++;
+
+                            const kac = (policeBasinaSatir.get(matchedPolicy.policeNo) || 0) + 1;
+                            policeBasinaSatir.set(matchedPolicy.policeNo, kac);
+                            if (kac === 2) mukerrerAdaylari.push(matchedPolicy.policeNo);
                         } else if (isSuspicious) {
                             // ŞÜPHELİ: muhasebe satırı eşleşmedi sayılacak ama log için işaretleyelim
                             // (DB tarafı henüz "şüpheli" alanına sahip değil — şimdilik aciklama'ya iliştirelim)
@@ -1940,9 +2209,32 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                     queryClient.invalidateQueries({ queryKey: ['sigorta-muhasebe'] });
                     queryClient.invalidateQueries({ queryKey: ['sigorta-policeler-aging'] });
 
-                    const unmatchedCount = accountingToSave.filter(r => r.eslestiMi === 0).length;
+                    const unmatchedCount = accountingToSave.filter(r => r.eslestiMi === MUHASEBE_DURUM.ESLESMEDI).length;
                     if (unmatchedCount > 0) {
-                         toast({ variant: "default", title: "Bilgi", description: `${unmatchedCount} adet eşleşmeyen muhasebe kaydı sisteme eklendi.` });
+                         toast({
+                             variant: "default",
+                             title: "Eşleşmeyen kayıt var",
+                             description: `${unmatchedCount} muhasebe kaydı eşleşmedi. "Eşleştirme Önerileri" bölümünden aday poliçeleri inceleyebilirsiniz.`,
+                         });
+                    }
+                    if (bankaHareketiSayisi > 0) {
+                        toast({
+                            title: "Banka hareketi ayrıldı",
+                            description: `${bankaHareketiSayisi} satır virman/stopaj/vergi hareketi olarak işaretlendi; poliçe eşleşmesi aranmadı.`,
+                        });
+                    }
+                    if (mukerrerAdaylari.length > 0) {
+                        toast({
+                            variant: "destructive",
+                            title: "Mükerrer kayıt şüphesi",
+                            description: `${mukerrerAdaylari.length} poliçeye birden fazla tahakkuk satırı düştü: ${mukerrerAdaylari.slice(0, 3).join(", ")}${mukerrerAdaylari.length > 3 ? "…" : ""}`,
+                        });
+                    }
+                    if (farkliYilSayisi > 0) {
+                        toast({
+                            title: "Farklı yıla düşen satırlar",
+                            description: `${farkliYilSayisi} satırın tarihi ${yil} yılı dışında; kendi yılına kaydedildi.`,
+                        });
                     }
                     if (skippedByCutoff > 0 || (subTab === 'ray' && rayMinPolicyNo > 0)) {
                         toast({
@@ -2228,10 +2520,80 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                             </TabsContent>
 
                             <TabsContent value="unmatched">
+                                {/* Öneri paneli — otomatik bağlama yok, her satır kullanıcı onayı bekler */}
+                                {eslesmeOnerileri.length > 0 && (
+                                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50/30 shadow-sm">
+                                        <div className="p-4 bg-amber-50 border-b border-amber-100">
+                                            <div className="flex items-center gap-2 text-amber-900 font-semibold text-sm">
+                                                <MousePointerClick className="h-4 w-4" />
+                                                Eşleştirme Önerileri ({eslesmeOnerileri.length})
+                                            </div>
+                                            <p className="mt-1 text-[12.5px] text-amber-800">
+                                                Bu kayıtların evrak numarası poliçe listesinde bulunamadı. Tutar, firma ve tarih
+                                                yakınlığından aday poliçe çıkarıldı. <strong>Hiçbiri otomatik bağlanmadı</strong> —
+                                                onaylamadığınız sürece hiçbir poliçe "EVET" olmaz.
+                                            </p>
+                                        </div>
+                                        <div className="divide-y divide-amber-100">
+                                            {eslesmeOnerileri.map(({ kayit, oneri }) => {
+                                                const brut = parseFloat(oneri.police.brutPrim || "0") || 0;
+                                                const alacak = parseFloat(kayit.alacak || "0") || 0;
+                                                return (
+                                                    <div key={kayit.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                                                                <span className="font-mono text-slate-600">
+                                                                    {kayit.belgeNo || <span className="italic text-slate-400">evrak no yok</span>}
+                                                                </span>
+                                                                <ArrowRightLeft className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                                                                <span className="font-mono font-bold text-slate-900">{oneri.police.policeNo}</span>
+                                                            </div>
+                                                            <div className="mt-1 truncate text-[12.5px] text-slate-600" title={oneri.police.sigortali}>
+                                                                {oneri.police.sigortali}
+                                                            </div>
+                                                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                                                <span className="text-[12px] text-slate-500">
+                                                                    muhasebe {formatCurrency(alacak)} · poliçe {formatCurrency(brut)}
+                                                                </span>
+                                                                {oneri.gerekceler.map(g => (
+                                                                    <Badge key={g} variant="outline" className="border-amber-300 bg-white text-[11px] text-amber-800">
+                                                                        {g}
+                                                                    </Badge>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex shrink-0 items-center gap-2">
+                                                            <Button
+                                                                size="sm"
+                                                                className="bg-green-600 hover:bg-green-700"
+                                                                disabled={oneriIsleniyor === kayit.id}
+                                                                onClick={() => oneriOnayla(kayit, oneri.police)}
+                                                            >
+                                                                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                                                                Onayla
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                disabled={oneriIsleniyor === kayit.id}
+                                                                onClick={() => oneriReddet(kayit)}
+                                                            >
+                                                                <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                                                                Reddet
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
                                  <div className="rounded-md border border-red-200 bg-red-50/20 shadow-sm">
                                     <div className="p-4 bg-red-50 border-b border-red-100 flex items-center justify-between gap-4">
                                         <span className="text-red-800 text-sm">
-                                            Bu listedeki kayıtlar Muhasebe Excel'inde bulunup poliçe listesinde eşleşmeyenlerdir (Evrak No/Poliçe No bulunamadı).
+                                            Muhasebe Excel'inde bulunup poliçe listesinde karşılığı bulunamayan kayıtlar.
+                                            Banka/vergi hareketleri (virman, stopaj) bu listeye dahil edilmez.
                                         </span>
                                         <Button
                                             size="sm"
