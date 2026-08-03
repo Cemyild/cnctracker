@@ -78,9 +78,11 @@ export default function OperasyonTakipSayfasi() {
     const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n;
   });
 
-  // KAPANIŞ İÇİ gruplar: sette OLAN KAPALI (varsayılan AÇIK) — Kapanışlarım ile aynı, yukarıdakinin TERSİ.
-  const [kapaliKapanisGruplar, setKapaliKapanisGruplar] = useState<Set<string>>(new Set());
-  const kapanisGrupAcKapa = (k: string) => setKapaliKapanisGruplar((p) => {
+  // KAPANIŞ İÇİ gruplar: sette OLAN AÇIK (varsayılan KAPALI) — açık hareketlerle AYNI yön.
+  // (Önceden tersiydi: kapanmış gün açılınca içindeki her beyanname alt kalemleriyle
+  //  birlikte açılıyor, uzun liste çıkıyordu. Kullanıcı kararı: derli toplu açılsın.)
+  const [acikKapanisGruplar, setAcikKapanisGruplar] = useState<Set<string>>(new Set());
+  const kapanisGrupAcKapa = (k: string) => setAcikKapanisGruplar((p) => {
     const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n;
   });
 
@@ -249,7 +251,7 @@ export default function OperasyonTakipSayfasi() {
                     {gunAcik && (
                       <div className="space-y-3 border-t p-4">
                         {(k.avanslar.length > 0 || gunGruplama.gruplar.length > 0 || gunGruplama.ofisMasraflar.length > 0) ? (
-                          <MasrafTablosu gruplarSonucu={gunGruplama} avanslar={k.avanslar} acikSet={kapaliKapanisGruplar} onToggle={kapanisGrupAcKapa} varsayilanAcik={true} anahtarOnEk={k.id} />
+                          <MasrafTablosu gruplarSonucu={gunGruplama} avanslar={k.avanslar} acikSet={acikKapanisGruplar} onToggle={kapanisGrupAcKapa} varsayilanAcik={false} anahtarOnEk={k.id} />
                         ) : (
                           <div className="text-xs text-muted-foreground">Hareket yok.</div>
                         )}
