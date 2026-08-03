@@ -21,9 +21,11 @@ export default function OperasyonKapanislarSayfasi() {
     const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
-  // Beyanname grubu: sette OLAN KAPALI (varsayılan AÇIK) — MasrafTablosu varsayilanAcik={true} ile eşleşir.
-  const [kapaliGruplar, setKapaliGruplar] = useState<Set<string>>(new Set());
-  const grupAcKapa = (anahtar: string) => setKapaliGruplar((p) => {
+  // Beyanname grubu: sette OLAN AÇIK (varsayılan KAPALI) — MasrafTablosu varsayilanAcik={false}.
+  // Kapanmış gün açıldığında içindeki gruplar da açılmıyor; derli toplu liste (kullanıcı kararı,
+  // muhasebe Şube Masraf detayıyla aynı yön).
+  const [acikGruplar, setAcikGruplar] = useState<Set<string>>(new Set());
+  const grupAcKapa = (anahtar: string) => setAcikGruplar((p) => {
     const n = new Set(p); n.has(anahtar) ? n.delete(anahtar) : n.add(anahtar); return n;
   });
 
@@ -65,7 +67,7 @@ export default function OperasyonKapanislarSayfasi() {
             {gunAcik && (
               <CardContent className="space-y-4 border-t pt-4">
                 {(k.avanslar.length > 0 || gunGruplama.gruplar.length > 0 || gunGruplama.ofisMasraflar.length > 0) ? (
-                  <MasrafTablosu gruplarSonucu={gunGruplama} avanslar={k.avanslar} acikSet={kapaliGruplar} onToggle={grupAcKapa} varsayilanAcik={true} anahtarOnEk={k.id} />
+                  <MasrafTablosu gruplarSonucu={gunGruplama} avanslar={k.avanslar} acikSet={acikGruplar} onToggle={grupAcKapa} varsayilanAcik={false} anahtarOnEk={k.id} />
                 ) : (
                   <div className="text-xs text-muted-foreground">Hareket yok.</div>
                 )}
