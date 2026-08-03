@@ -642,6 +642,35 @@ export function ExcelUploadModal({
         setUploadProgress
       );
 
+      // 409 — Dosyada seçilen aya ait olmayan satırlar var, kullanıcıya sor.
+      // Yanlış ay etiketiyle girerlerse doğru ayın kaydıyla mükerrer olurlar.
+      if (status === 409 && result?.ayUyusmazligi) {
+        const secilenAy = aylar.find((a) => a.value === result.secilen?.ay)?.label ?? result.secilen?.ay;
+        const detay = (result.dagilim ?? [])
+          .map((d: { ay: string; yil: number; adet: number }) => {
+            const label = aylar.find((a) => a.value === d.ay)?.label ?? d.ay;
+            return `  • ${d.adet} satır → ${label} ${d.yil}`;
+          })
+          .join("\n");
+        const confirmed = window.confirm(
+          `DİKKAT: Bu dosyadaki ${result.toplamSatir} satırın ${result.uyusmayanSatir} tanesi ` +
+            `${secilenAy} ${result.secilen?.yil} ayına ait DEĞİL:\n\n${detay}\n\n` +
+            `Bu satırlar ${secilenAy} ayına yazılırsa, doğru ay yüklendiğinde MÜKERRER kayıt oluşur.\n\n` +
+            `Önerilen: İptal edip "Dosya tüm yılı içeriyor (Otomatik Tarih)" seçeneğiyle yükleyin — ` +
+            `her satır kendi fatura tarihine göre doğru aya gider.\n\n` +
+            `Yine de hepsini ${secilenAy} ayına yüklemek istiyor musunuz?`
+        );
+        if (confirmed) {
+          setIsUploading(false);
+          setUploadProgress(0);
+          await handleUpload(true);
+          return;
+        }
+        setIsUploading(false);
+        setUploadProgress(0);
+        return;
+      }
+
       // 409 — Mükerrer dosya tespit edildi, kullanıcıya sor
       if (status === 409 && result?.duplicate) {
         const dateStr = formatExistingDate(result.existing?.uploadDate);
@@ -714,6 +743,23 @@ export function ExcelUploadModal({
           formData,
           setUploadProgress
         );
+
+        // Çoklu yüklemede tek tek onay sormak akışı kilitler; ay uyuşmazlığı
+        // olan dosyayı yüklemeyip raporda hata olarak göster.
+        if (status === 409 && body?.ayUyusmazligi) {
+          const detay = (body.dagilim ?? [])
+            .map((d: { ay: string; yil: number; adet: number }) => {
+              const label = aylar.find((a) => a.value === d.ay)?.label ?? d.ay;
+              return `${d.adet} satır ${label} ${d.yil}`;
+            })
+            .join(", ");
+          results.push({
+            kind: "error",
+            filename: file.name,
+            error: `Yüklenmedi: ${body.uyusmayanSatir}/${body.toplamSatir} satır seçilen aya ait değil (${detay}). "Dosya tüm yılı içeriyor (Otomatik Tarih)" seçeneğiyle yükleyin.`,
+          });
+          continue;
+        }
 
         if (status === 409 && body?.duplicate) {
           results.push({

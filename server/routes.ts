@@ -3770,6 +3770,10 @@ export async function registerRoutes(
       const veriler: InsertGumrukVerisi[] = [];
       const skippedRows: { ay: string | null; yil: number | null; row: any; reason: string }[] = [];
       let tarihsiz = 0;
+      // Non-bulk modda seçilen ay her satıra körü körüne yazılır. Satırın kendi
+      // FATURA TARİHİ başka bir ayı gösteriyorsa burada sayılır; karar döngü
+      // bittikten sonra verilir (409 + force akışı).
+      const ayUyusmazligi = new Map<string, number>();
 
       for (const { row, sheetName } of data) {
          const resolvedRow = hasMapping ? remapRow(row, mapping) : row;
@@ -3814,6 +3818,11 @@ export async function registerRoutes(
            // Non-bulk mode: ay/yıl body'den gelir (refine garantili)
            satirAy = ay as string;
            satirYil = yil as number;
+           const gercek = tarihiAyYilCikar(resolvedRow["FATURA TARİHİ"]);
+           if (gercek && (gercek.ay !== satirAy || gercek.yil !== satirYil)) {
+             const anahtar = `${gercek.ay}|${gercek.yil}`;
+             ayUyusmazligi.set(anahtar, (ayUyusmazligi.get(anahtar) ?? 0) + 1);
+           }
          }
 
          // Tip Mapping
@@ -3928,6 +3937,26 @@ export async function registerRoutes(
             },
           });
         }
+      }
+
+      // 4b. Ay uyuşmazlığı kontrolü (non-bulk, force=true ise atla)
+      // Dedup indeksi (ay, yil, row_hash) üzerinde olduğu için, başka aya ait
+      // satırlar yanlış ay etiketiyle girerse doğru ayın kaydıyla MÜKERRER olur
+      // ve hiçbir dedup bunu yakalayamaz. Tek savunma bu ön kontroldür.
+      if (!isBulk && !isForce && ayUyusmazligi.size > 0) {
+        const dagilim = Array.from(ayUyusmazligi.entries())
+          .map(([anahtar, adet]) => {
+            const [uyusmayanAy, uyusmayanYil] = anahtar.split("|");
+            return { ay: uyusmayanAy, yil: Number(uyusmayanYil), adet };
+          })
+          .sort((a, b) => b.adet - a.adet);
+        return res.status(409).json({
+          ayUyusmazligi: true,
+          secilen: { ay, yil },
+          toplamSatir: veriler.length,
+          uyusmayanSatir: dagilim.reduce((t, d) => t + d.adet, 0),
+          dagilim,
+        });
       }
 
       // 5. Arşiv klasörünü belirle
