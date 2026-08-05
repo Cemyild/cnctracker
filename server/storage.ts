@@ -38,6 +38,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   nakliyeFaturalari, type NakliyeFaturasi, type InsertNakliyeFaturasi,
   nakliyeFaturaEslesme, type NakliyeFaturaEslesme, type InsertNakliyeFaturaEslesme,
   parasutSatisFaturalari, type ParasutSatisFaturasi, type InsertParasutSatisFaturasi,
+  normalizeSube, normalizeKategori,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
@@ -2204,16 +2205,18 @@ export class DatabaseStorage implements IStorage {
       )
       .orderBy(desc(giderler.olusturmaTarihi));
 
+    // Geçmişteki bozuk değerler (örn. Excel'den kaçan FaturaGUID) yeni yüklemelere
+    // firma üzerinden kopyalanmasın: yalnız whitelist'e uyan satırlar mapping olur.
+    const kategoriAdlari = (await this.getExpenseCategories()).map((c) => c.name);
     const map = new Map<string, { firma: string; sube: string; kategori: string }>();
-    
+
     for (const item of all) {
       if (!item.firma) continue;
+      const sube = normalizeSube(item.sube);
+      const kategori = normalizeKategori(item.kategori, kategoriAdlari);
+      if (!sube || !kategori) continue;
       if (!map.has(item.firma)) {
-         map.set(item.firma, { 
-             firma: item.firma, 
-             sube: item.sube!, 
-             kategori: item.kategori! 
-         });
+         map.set(item.firma, { firma: item.firma, sube, kategori });
       }
     }
 

@@ -228,6 +228,28 @@ export const subeler = [
   "Yönetim"
 ];
 
+// Gider şube/kategori değerleri whitelist DIŞINDA bir metin taşıyabiliyor: e-Fatura
+// portalının geniş formatlı Excel'inde H/I sütunları FaturaGUID/ZarfGUID'dir ve
+// sabit pozisyonlu okuyucu bunları şube/kategori sanıp yazar. Sonuç, Radix Select'in
+// eşleşmeyen value'da placeholder'ı bile gizlemesi nedeniyle "boş görünen ama dolu"
+// kayıtlardır — "eksik" filtresi onları göremez. Bu yüzden hem yazarken hem
+// filtrelerken ham metin DEĞİL, normalize edilmiş değer kullanılır.
+const trLower = (s: string) => s.toLocaleLowerCase("tr");
+
+/** Ham metni geçerli bir şube adına eşler; eşleşmezse null (= seçilmemiş sayılır). */
+export function normalizeSube(raw: unknown): string | null {
+  const s = raw == null ? "" : String(raw).trim();
+  if (!s) return null;
+  return subeler.find((x) => trLower(x) === trLower(s)) ?? null;
+}
+
+/** Ham metni verilen kategori listesindeki bir ada eşler; eşleşmezse null. */
+export function normalizeKategori(raw: unknown, gecerliAdlar: readonly string[]): string | null {
+  const s = raw == null ? "" : String(raw).trim();
+  if (!s) return null;
+  return gecerliAdlar.find((x) => trLower(x) === trLower(s)) ?? null;
+}
+
 // Araçlar tablosu
 export const araclar = pgTable("araclar", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

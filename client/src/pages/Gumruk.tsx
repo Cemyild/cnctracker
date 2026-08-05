@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { type Calisan, type Gider, type GumrukVerisi, subeler } from "@shared/schema";
+import { type Calisan, type Gider, type GumrukVerisi, subeler, normalizeSube, normalizeKategori } from "@shared/schema";
 import { isYakitFaturasi } from "@shared/yakit";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -589,20 +589,34 @@ type Arac = {
                     setSortConfig({key, direction});
   };
 
+  // "Seçilmemiş" testi: yalnız null/boş değil, LİSTEDE OLMAYAN değer de eksik sayılır.
+  // Excel'den kaçan FaturaGUID gibi tanınmayan metinler Select'te bomboş görünüyor
+  // ama string dolu olduğu için eski `!v` kontrolüne takılmıyordu.
+  const eksikKontrol = useMemo(() => {
+    const kategoriAdlari = (categories ?? []).map((c) => c.name);
+    return {
+      sube: (v: string | null) => normalizeSube(v) === null,
+      kategori: (v: string | null) =>
+        // Kategori listesi henüz yüklenmediyse whitelist testi yapılamaz; tüm liste
+        // yanlışlıkla "eksik" görünmesin diye boşluk kontrolüne düşülür.
+        kategoriAdlari.length === 0
+          ? !v || !String(v).trim()
+          : normalizeKategori(v, kategoriAdlari) === null,
+    };
+  }, [categories]);
+
   const sortedGiderler = useMemo(() => {
     if (!giderler) return [];
 
     // Yakıt tedarikçisi faturaları bu listede işlenmez — Araçlar sayfasında yönetilir
     const base = giderler.filter((g) => !isYakitFaturasi(g.firma));
 
-    // Eksik bilgi filtresi: null veya boş string "seçilmemiş" sayılır
-    const bos = (v: string | null) => !v || !String(v).trim();
     const filtered = eksikFilter === 'tum'
       ? base
       : base.filter((g) =>
-          eksikFilter === 'sube' ? bos(g.sube)
-          : eksikFilter === 'kategori' ? bos(g.kategori)
-          : bos(g.sube) || bos(g.kategori)
+          eksikFilter === 'sube' ? eksikKontrol.sube(g.sube)
+          : eksikFilter === 'kategori' ? eksikKontrol.kategori(g.kategori)
+          : eksikKontrol.sube(g.sube) || eksikKontrol.kategori(g.kategori)
         );
 
                     if (!sortConfig.key) return filtered;
@@ -655,18 +669,17 @@ type Arac = {
         ? String(sa).localeCompare(String(sb), 'tr', { numeric: true, sensitivity: 'base' })
         : String(sb).localeCompare(String(sa), 'tr', { numeric: true, sensitivity: 'base' });
     });
-  }, [giderler, sortConfig, eksikFilter]);
+  }, [giderler, sortConfig, eksikFilter, eksikKontrol]);
 
   // Filtre etiketlerinde gösterilecek eksik kayıt sayıları (filtreden bağımsız, tüm liste üzerinden)
   const eksikSayilari = useMemo(() => {
-    const bos = (v: string | null) => !v || !String(v).trim();
     const liste = (giderler ?? []).filter((g) => !isYakitFaturasi(g.firma));
     return {
-      sube: liste.filter((g) => bos(g.sube)).length,
-      kategori: liste.filter((g) => bos(g.kategori)).length,
-      herhangi: liste.filter((g) => bos(g.sube) || bos(g.kategori)).length,
+      sube: liste.filter((g) => eksikKontrol.sube(g.sube)).length,
+      kategori: liste.filter((g) => eksikKontrol.kategori(g.kategori)).length,
+      herhangi: liste.filter((g) => eksikKontrol.sube(g.sube) || eksikKontrol.kategori(g.kategori)).length,
     };
-  }, [giderler]);
+  }, [giderler, eksikKontrol]);
 
   // Listeden gizlenen yakıt faturası sayısı (bilgi şeridi için)
   const yakitSayisi = useMemo(
@@ -1631,7 +1644,10 @@ type Arac = {
                                             <TableCell className="px-2.5 py-1.5 text-right font-bold tabular-nums">{formatCurrencyFull(gider.tryTutar)}</TableCell>
                                             <TableCell className="px-1.5 py-1">
                                               <Select
-                                                value={gider.sube ?? ""}
+                                                // Tanınmayan değer "" olarak verilir; aksi halde Radix Select
+                                                // eşleşen SelectItem bulamayıp placeholder'ı da gizler ve hücre
+                                                // sebebi anlaşılmayacak şekilde bomboş görünür.
+                                                value={normalizeSube(gider.sube) ?? ""}
                                                 onValueChange={(val) => handleInlineUpdate(gider.id, 'sube', val)}
                                               >
                                                 <SelectTrigger className="h-7 w-full max-w-[120px] px-2 text-[11.5px]">
@@ -1646,7 +1662,7 @@ type Arac = {
                                             </TableCell>
                                             <TableCell className="px-1.5 py-1">
                                               <Select
-                                                value={gider.kategori ?? ""}
+                                                value={eksikKontrol.kategori(gider.kategori) ? "" : (gider.kategori ?? "")}
                                                 onValueChange={(val) => {
                                                   handleInlineUpdate(gider.id, 'kategori', val);
                                                   if (!ARAC_KATEGORILERI.includes(val)) {
