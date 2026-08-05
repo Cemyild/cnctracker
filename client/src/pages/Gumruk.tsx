@@ -2478,6 +2478,10 @@ function GiderBolmeModal({
   // 500+ satırlık gider tablosunu yeniden render ederdi.
   const [tutarlar, setTutarlar] = useState<Record<string, string>>({});
 
+  // Giriş modu yalnız ARAYÜZ meselesi: sunucuya her hâlükârda TL gider,
+  // veritabanı yüzde bilmez. Yüzde yalnız tutarı hesaplamanın bir yolu.
+  const [mod, setMod] = useState<'tl' | 'yuzde'>('tl');
+
   useEffect(() => {
     if (!gider) return;
     const mevcut: Record<string, string> = {};
@@ -2485,24 +2489,71 @@ function GiderBolmeModal({
       mevcut[d.sube] = String(Number(d.tutar));
     }
     setTutarlar(mevcut);
+    setMod('tl');
   }, [gider?.id]);
 
   const faturaToplam = Number(gider?.toplamTutar ?? 0);
-  const girilenToplam = subeler.reduce((acc, s) => acc + parseTutarInput(tutarlar[s] ?? ""), 0);
+
+  // Mod değişince girilen değerler karşılığına çevrilir — kullanıcı baştan yazmasın.
+  const modDegistir = (yeni: 'tl' | 'yuzde') => {
+    if (yeni === mod) return;
+    if (faturaToplam > 0) {
+      const cevrilmis: Record<string, string> = {};
+      for (const s of subeler) {
+        const deger = parseTutarInput(tutarlar[s] ?? "");
+        if (deger <= 0) continue;
+        cevrilmis[s] = yeni === 'yuzde'
+          ? ((deger / faturaToplam) * 100).toFixed(2)
+          : ((deger / 100) * faturaToplam).toFixed(2);
+      }
+      setTutarlar(cevrilmis);
+    }
+    setMod(yeni);
+  };
+
+  // Yüzde modunda satır tutarları yuvarlanır ve kuruş artığı EN BÜYÜK paya
+  // eklenir. Aksi halde %33,33×3 gibi girişlerde toplam fatura tutarını
+  // tutmaz ve sunucu kaydı reddeder.
+  const hesaplananTutarlar = useMemo(() => {
+    const ham = subeler.map((s) => ({ sube: s, deger: parseTutarInput(tutarlar[s] ?? "") }));
+    if (mod === 'tl') {
+      return ham.map((h) => ({ sube: h.sube, tutar: Number(h.deger.toFixed(2)) }));
+    }
+
+    const dolu = ham.filter((h) => h.deger > 0);
+    const yuzdeToplam = dolu.reduce((acc, h) => acc + h.deger, 0);
+    const hesaplanan = ham.map((h) => ({
+      sube: h.sube,
+      tutar: h.deger > 0 ? Number(((h.deger / 100) * faturaToplam).toFixed(2)) : 0,
+    }));
+
+    // Artığı ancak yüzdeler %100'ü gösteriyorsa dağıt; yarım kalmış girişte
+    // kullanıcıya yanlışlıkla "tutuyor" demeyelim.
+    if (Math.abs(yuzdeToplam - 100) <= 0.01) {
+      const toplam = hesaplanan.reduce((acc, h) => acc + h.tutar, 0);
+      const artik = Number((faturaToplam - toplam).toFixed(2));
+      if (artik !== 0) {
+        let enBuyuk = hesaplanan[0];
+        for (const h of hesaplanan) if (h.tutar > enBuyuk.tutar) enBuyuk = h;
+        enBuyuk.tutar = Number((enBuyuk.tutar + artik).toFixed(2));
+      }
+    }
+    return hesaplanan;
+  }, [tutarlar, mod, faturaToplam]);
+
+  const girilenToplam = hesaplananTutarlar.reduce((acc, h) => acc + h.tutar, 0);
+  const yuzdeToplam = subeler.reduce((acc, s) => acc + parseTutarInput(tutarlar[s] ?? ""), 0);
   const kalan = Number((faturaToplam - girilenToplam).toFixed(2));
   const dengeli = Math.abs(kalan) <= 0.01 && girilenToplam > 0;
   const bolunmus = (gider?.dagilimlar?.length ?? 0) > 0;
 
   const kaydet = () => {
-    const dagilimlar = subeler
-      .map((s) => ({ sube: s, tutar: parseTutarInput(tutarlar[s] ?? "") }))
-      .filter((d) => d.tutar > 0);
-    onKaydet(dagilimlar);
+    onKaydet(hesaplananTutarlar.filter((h) => h.tutar > 0));
   };
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent className="sm:max-w-[580px]">
         {/* DialogContent bir grid; min-w-0 olmadan uzun firma adı modalı şişirir */}
         <DialogHeader className="min-w-0">
           <DialogTitle>Şubelere Böl</DialogTitle>
@@ -2517,21 +2568,57 @@ function GiderBolmeModal({
             <span className="text-base font-bold tabular-nums">{formatCurrencyFull(faturaToplam)}</span>
           </div>
 
+          {/* Giriş modu — mevcut değerler karşılığına çevrilerek korunur */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Giriş:</span>
+            <div className="inline-flex overflow-hidden rounded-md border">
+              {([['tl', 'TL tutar'], ['yuzde', '% yüzde']] as const).map(([deger, etiket]) => (
+                <button
+                  key={deger}
+                  type="button"
+                  onClick={() => modDegistir(deger)}
+                  className={cn(
+                    "px-3 py-1 text-xs font-medium transition-colors",
+                    mod === deger
+                      ? "bg-violet-600 text-white"
+                      : "bg-background text-muted-foreground hover:bg-accent"
+                  )}
+                  data-testid={`button-bolme-mod-${deger}`}
+                >
+                  {etiket}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="space-y-2">
-            {subeler.map((s) => (
-              <div key={s} className="flex items-center gap-3">
-                <label htmlFor={`bolme-${s}`} className="w-[150px] shrink-0 text-sm">{s}</label>
-                <Input
-                  id={`bolme-${s}`}
-                  inputMode="decimal"
-                  placeholder="0,00"
-                  value={tutarlar[s] ?? ""}
-                  onChange={(e) => setTutarlar((prev) => ({ ...prev, [s]: e.target.value }))}
-                  className="h-8 text-right tabular-nums"
-                  data-testid={`input-bolme-${s}`}
-                />
-              </div>
-            ))}
+            {subeler.map((s, i) => {
+              const hesaplanan = hesaplananTutarlar[i]?.tutar ?? 0;
+              return (
+                <div key={s} className="flex items-center gap-3">
+                  <label htmlFor={`bolme-${s}`} className="w-[130px] shrink-0 text-sm">{s}</label>
+                  <div className="relative flex-1">
+                    <Input
+                      id={`bolme-${s}`}
+                      inputMode="decimal"
+                      placeholder={mod === 'yuzde' ? "0,00" : "0,00"}
+                      value={tutarlar[s] ?? ""}
+                      onChange={(e) => setTutarlar((prev) => ({ ...prev, [s]: e.target.value }))}
+                      className={cn("h-8 text-right tabular-nums", mod === 'yuzde' && "pr-6")}
+                      data-testid={`input-bolme-${s}`}
+                    />
+                    {mod === 'yuzde' && (
+                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                    )}
+                  </div>
+                  {/* Yüzde modunda karşılığı anında gösterilir — kullanıcı ne
+                      kaydedileceğini kaydetmeden önce görür. */}
+                  <span className="w-[110px] shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                    {mod === 'yuzde' && hesaplanan > 0 ? formatCurrencyFull(hesaplanan) : ""}
+                  </span>
+                </div>
+              );
+            })}
           </div>
 
           <div
@@ -2543,10 +2630,16 @@ function GiderBolmeModal({
             )}
           >
             <span className="text-sm font-medium">
-              {dengeli ? "Toplam tutuyor" : kalan > 0 ? "Dağıtılmayan" : "Fazla girildi"}
+              {dengeli
+                ? "Toplam tutuyor"
+                : mod === 'yuzde'
+                  ? `Yüzde toplamı %${yuzdeToplam.toFixed(2)} — %100 olmalı`
+                  : kalan > 0 ? "Dağıtılmayan" : "Fazla girildi"}
             </span>
             <span className="text-base font-bold tabular-nums">
-              {dengeli ? formatCurrencyFull(girilenToplam) : formatCurrencyFull(Math.abs(kalan))}
+              {dengeli
+                ? formatCurrencyFull(girilenToplam)
+                : mod === 'yuzde' ? "" : formatCurrencyFull(Math.abs(kalan))}
             </span>
           </div>
         </div>

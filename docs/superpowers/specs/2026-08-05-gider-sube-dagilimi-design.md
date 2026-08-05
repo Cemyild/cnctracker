@@ -18,7 +18,8 @@ Bazı gider faturaları tek bir şubeye ait değil. Somut örnek: çalışanlara
 
 Kullanıcıyla netleştirilen iki karar:
 
-1. **Pay tutarları elle girilir.** Çalışan sayısına göre otomatik oran veya sabit yüzde şablonu yok — kullanıcı Pluxee/Metropal'den gelen kişi listesine bakarak her şubenin TL tutarını yazar. Yüzde girişi de yok, yalnız TL.
+1. **Pay tutarları elle girilir.** Çalışan sayısına göre otomatik oran veya sabit yüzde şablonu yok — kullanıcı Pluxee/Metropal'den gelen kişi listesine bakarak payları kendisi yazar.
+   - *2026-08-05 eki:* TL'ye ek olarak **yüzde ile giriş** de eklendi (aşağıya bakın). Modal içinde TL ⇄ % geçişi yapılır, mevcut değerler karşılığına çevrilerek korunur.
 2. **Ana satır listede kalır.** Fatura ayrı satırlara parçalanmaz; şube hücresinde "Bölündü (N)" rozeti görünür, kırılım satır altında açılır. Fatura adedi ve Excel mutabakatı bozulmaz.
 
 ## Veri modeli
@@ -52,6 +53,15 @@ Tek gerçek kaynak ilkesi: iki ayrı alan saklanırsa biri güncellenip diğeri 
 - Kısmi bölme yok — ya tamamı dağıtılır ya hiç.
 - Doğrulama **hem client hem server** tarafında yapılır; server tek gerçek otorite.
 - Şube adı `normalizeSube` ile whitelist'ten geçirilir (bkz. 2026-08-05 GUID tuzağı düzeltmesi).
+
+## Yüzde ile giriş
+
+Giriş modu yalnız **arayüz** meselesidir: sunucuya her hâlükârda TL gider, `gider_sube_dagilimlari` yüzde bilmez. API ve şema değişmez.
+
+- Modalda `TL tutar` / `% yüzde` geçişi. Mod değişince girilen değerler karşılığına çevrilir (TL→% ve %→TL), kullanıcı baştan yazmaz.
+- Yüzde modunda her satırın TL karşılığı anında sağda gösterilir — kullanıcı ne kaydedileceğini kaydetmeden görür.
+- **Yuvarlama artığı en büyük paya eklenir.** `%33,33 + %33,33 + %33,34` girildiğinde satır tutarları toplamı ₺160.950,01 çıkar; fazla kuruş en büyük paydan düşülerek toplam faturaya eşitlenir. Bu olmadan sunucu kaydı reddederdi.
+- Artık dağıtımı **yalnız yüzde toplamı %100 iken** yapılır. `%33,33 × 3 = %99,99` gibi yarım kalmış girişte artık dağıtılmaz ve kullanıcıya "Yüzde toplamı %99,99 — %100 olmalı" uyarısı gösterilir; yanlışlıkla "tutuyor" denmez.
 
 ## API
 
@@ -89,5 +99,5 @@ Kategori kontrolü değişmez.
 
 - **Şube bazlı gider raporu.** Sistemde henüz yok. Bu tablo raporun veri temelini hazırlar ama raporun kendisi ayrı iş.
 - Çalışan sayısına göre otomatik oran önerisi.
-- Yüzde ile giriş.
+- Firma bazında kalıcı yüzde şablonu (bir kez tanımla, her ay otomatik uygula).
 - Dağılımın Excel'e aktarımı.
