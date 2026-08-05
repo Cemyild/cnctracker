@@ -255,6 +255,7 @@ const uploadParamsSchema = z.object({
   yil: z.string().regex(/^\d{4}$/).transform(Number).optional(),
   bulk: z.union([z.literal("true"), z.literal("false"), z.boolean()]).optional(),
   force: z.union([z.literal("true"), z.literal("false"), z.boolean()]).optional(),
+  tamListe: z.union([z.literal("true"), z.literal("false"), z.boolean()]).optional(),
   headerMapping: z.string().optional(),
 }).refine(d => (d.bulk === true || d.bulk === "true") || (d.ay && d.yil !== undefined), {
   message: "Bulk modunda değilse ay ve yıl zorunlu",
@@ -3711,9 +3712,10 @@ export async function registerRoutes(
       if (!parseResult.success) {
         return res.status(400).json({ error: "Geçersiz ay veya yıl değeri" });
       }
-      const { ay, yil, bulk, force, headerMapping: headerMappingRaw } = parseResult.data;
+      const { ay, yil, bulk, force, tamListe, headerMapping: headerMappingRaw } = parseResult.data;
       const isBulk = bulk === true || bulk === "true";
       const isForce = force === true || force === "true";
+      const isTamListe = tamListe === true || tamListe === "true";
 
       // 1a. Header mapping (canonical_target -> source_header_in_excel)
       let mapping: Record<string, string> = {};
@@ -4057,6 +4059,31 @@ export async function registerRoutes(
       // 10. Dosya kaydının recordCount'unu güncelle
       await storage.updateGumrukDosyaRecordCount(dosyaKaydi.id, eklenen);
 
+      // 10b. İptal tespiti (yalnızca "tam liste" işaretliyse).
+      // Yükleme akışı sadece INSERT yapar; kaynak sistemde İPTAL EDİLEN bir fatura
+      // uygulamada sonsuza dek kalır ve ciroyu şişirir. Dosya o dönemin TAMAMINI
+      // içeriyorsa, DB'de olup dosyada bulunmayan faturalar iptal adayıdır.
+      // Eşleştirme faturaNo bazında: dosyaNo birçok satırda boş olduğu için
+      // daha dar bir anahtar yanlış alarm üretirdi. faturaNo'su boş satırlar
+      // (transit dökümü gibi) kapsam dışı bırakılır.
+      let iptalAdaylari: { id: string; ay: string; yil: number; faturaNo: string | null; dosyaNo: string | null; firmaUnvan: string | null; malBedeli: string | null }[] = [];
+      if (isTamListe) {
+        const dosyadakiFaturalar = new Set(
+          veriler.map(v => (v.faturaNo ? String(v.faturaNo).trim() : "")).filter(Boolean)
+        );
+        const kapsam = Array.from(
+          new Map(ayYilPairs.map(p => [`${p.ay}|${p.yil}`, p])).values()
+        );
+        const mevcutKayitlar = await storage.getGumrukKayitlarByAyYillar(kapsam);
+        iptalAdaylari = mevcutKayitlar.filter(k => {
+          const fn = k.faturaNo ? String(k.faturaNo).trim() : "";
+          return fn !== "" && !dosyadakiFaturalar.has(fn);
+        });
+      }
+      const iptalToplamTutar = iptalAdaylari.reduce(
+        (t, k) => t + (k.malBedeli ? Number(k.malBedeli) : 0), 0
+      );
+
       // 11. Yanıtı oluştur (atlanan satırları en fazla 500 ile sınırla)
       const skippedRowsSample = skippedRows.slice(0, 500);
 
@@ -4072,11 +4099,43 @@ export async function registerRoutes(
         sheetCount: allSheetNames.length,
         sheetNames: allSheetNames,
         headerMapping: hasMapping ? mapping : undefined,
+        iptalAdayi: isTamListe ? iptalAdaylari.length : undefined,
+        iptalTutar: isTamListe ? Number(iptalToplamTutar.toFixed(2)) : undefined,
+        iptalAdaylari: isTamListe ? iptalAdaylari.slice(0, 500) : undefined,
       });
     } catch (error) {
       console.error("Excel yükleme hatası:", error);
       const errorMessage = error instanceof Error ? error.message : "Bilinmeyen hata";
       res.status(500).json({ error: `Excel yüklenirken bir hata oluştu: ${errorMessage} ` });
+    }
+  });
+
+  // İptal edilmiş kayıtları sil (tam liste yüklemesinde tespit edilenler).
+  // Otomatik silme YOK: "dosyada yok" tek başına iptal kanıtı değildir, raporun
+  // kapsamı da dar olabilir. Bu yüzden karar kullanıcıdadır ve silme ayrı bir
+  // uçtan, açık onayla yapılır.
+  app.post("/api/gumruk/kayitlari-sil", async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: any) => typeof x === "string") : [];
+      if (ids.length === 0) {
+        return res.status(400).json({ error: "Silinecek kayıt seçilmedi" });
+      }
+
+      // Nakliye eşleştirmesi olan satırlar FK yüzünden silinemez; onları
+      // atlayıp kullanıcıya bildir (sessizce 500 vermek yerine).
+      const bagliIdler = await storage.getNakliyeEslesmeGumrukIds(ids);
+      const silinebilir = ids.filter((id: string) => !bagliIdler.has(id));
+
+      const silinen = await storage.deleteGumrukVerileriByIds(silinebilir);
+      res.json({
+        success: true,
+        silinen,
+        atlanan: ids.length - silinebilir.length,
+        message: `${silinen} kayıt silindi${bagliIdler.size > 0 ? `, ${bagliIdler.size} kayıt nakliye eşleştirmesi olduğu için korundu` : ""}`,
+      });
+    } catch (error) {
+      console.error("Kayıt silme hatası:", error);
+      res.status(500).json({ error: "Kayıtlar silinirken bir hata oluştu" });
     }
   });
 

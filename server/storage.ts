@@ -75,6 +75,9 @@ export interface IStorage {
   createGumrukDosya(dosya: InsertGumrukDosya): Promise<GumrukDosya>;
   findGumrukDosyaByMd5(hash: string, tip?: string): Promise<GumrukDosya | null>;
   deleteGumrukVerileri(ay: string, yil: number): Promise<void>;
+  deleteGumrukVerileriByIds(ids: string[]): Promise<number>;
+  getNakliyeEslesmeGumrukIds(ids: string[]): Promise<Set<string>>;
+  getGumrukKayitlarByAyYillar(pairs: { ay: string; yil: number }[]): Promise<{ id: string; ay: string; yil: number; faturaNo: string | null; dosyaNo: string | null; firmaUnvan: string | null; malBedeli: string | null; topFaturaTutar: string | null }[]>;
   getGumrukAylari(): Promise<{ ay: string; yil: number; kayitSayisi: number }[]>;
   getExistingRowHashes(ay: string, yil: number): Promise<Set<string>>;
   getExistingKompozitKeysByAyYillar(pairs: { ay: string; yil: number }[]): Promise<Set<string>>;
@@ -659,6 +662,59 @@ export class DatabaseStorage implements IStorage {
     await db.delete(gumrukVerileri).where(
       and(eq(gumrukVerileri.ay, ay), eq(gumrukVerileri.yil, yil))
     );
+  }
+
+  async getNakliyeEslesmeGumrukIds(ids: string[]): Promise<Set<string>> {
+    const set = new Set<string>();
+    if (ids.length === 0) return set;
+    for (let i = 0; i < ids.length; i += 100) {
+      const rows = await db
+        .select({ gumrukVerisiId: nakliyeFaturaEslesme.gumrukVerisiId })
+        .from(nakliyeFaturaEslesme)
+        .where(inArray(nakliyeFaturaEslesme.gumrukVerisiId, ids.slice(i, i + 100)));
+      for (const r of rows) if (r.gumrukVerisiId) set.add(r.gumrukVerisiId);
+    }
+    return set;
+  }
+
+  async deleteGumrukVerileriByIds(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    // 100'lük parçalar: PostgreSQL parametre limiti (insertGumrukVerileri ile aynı gerekçe)
+    let silinen = 0;
+    for (let i = 0; i < ids.length; i += 100) {
+      const parca = ids.slice(i, i + 100);
+      const sonuc = await db
+        .delete(gumrukVerileri)
+        .where(inArray(gumrukVerileri.id, parca))
+        .returning({ id: gumrukVerileri.id });
+      silinen += sonuc.length;
+    }
+    return silinen;
+  }
+
+  async getGumrukKayitlarByAyYillar(pairs: { ay: string; yil: number }[]) {
+    if (pairs.length === 0) return [];
+    const distinctYillar = Array.from(new Set(pairs.map(p => p.yil)));
+    const distinctAylar = Array.from(new Set(pairs.map(p => p.ay)));
+    const rows = await db
+      .select({
+        id: gumrukVerileri.id,
+        ay: gumrukVerileri.ay,
+        yil: gumrukVerileri.yil,
+        faturaNo: gumrukVerileri.faturaNo,
+        dosyaNo: gumrukVerileri.dosyaNo,
+        firmaUnvan: gumrukVerileri.firmaUnvan,
+        malBedeli: gumrukVerileri.malBedeli,
+        topFaturaTutar: gumrukVerileri.topFaturaTutar,
+      })
+      .from(gumrukVerileri)
+      .where(and(
+        inArray(gumrukVerileri.yil, distinctYillar),
+        inArray(gumrukVerileri.ay, distinctAylar),
+      ));
+    // inArray çaprazı fazla ay/yıl kombinasyonu getirebilir; istenen çiftlere daralt
+    const izin = new Set(pairs.map(p => `${p.ay}|${p.yil}`));
+    return rows.filter(r => izin.has(`${r.ay}|${r.yil}`));
   }
 
   async getExistingRowHashes(ay: string, yil: number): Promise<Set<string>> {

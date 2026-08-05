@@ -410,6 +410,10 @@ export function ExcelUploadModal({
   const [selectedAy, setSelectedAy] = useState<string>("");
   const [selectedYil, setSelectedYil] = useState<string>(String(currentYear));
   const [isBulk, setIsBulk] = useState(false);
+  // "Tam liste" işaretliyse sunucu, dosyada bulunmayan mevcut kayıtları iptal
+  // adayı olarak döner; silme kullanıcı onayıyla ayrı uçtan yapılır.
+  const [isTamListe, setIsTamListe] = useState(false);
+  const [iptalSiliniyor, setIptalSiliniyor] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
@@ -619,6 +623,9 @@ export function ExcelUploadModal({
     }
     if (force) {
       formData.append("force", "true");
+    }
+    if (!hideDateSelectors && isTamListe) {
+      formData.append("tamListe", "true");
     }
     if (Object.keys(headerMapping).length > 0) {
       formData.append("headerMapping", JSON.stringify(headerMapping));
@@ -849,6 +856,40 @@ export function ExcelUploadModal({
     XLSX.writeFile(wb, `atlanan-satirlar-${Date.now()}.xlsx`);
   };
 
+  const handleIptalSil = async () => {
+    const adaylar = uploadResult?.iptalAdaylari;
+    if (!Array.isArray(adaylar) || adaylar.length === 0) return;
+    const tutar = typeof uploadResult.iptalTutar === "number"
+      ? ` (${uploadResult.iptalTutar.toLocaleString("tr-TR", { minimumFractionDigits: 2 })} ₺)`
+      : "";
+    if (!window.confirm(
+      `${adaylar.length} kayıt${tutar} kalıcı olarak silinecek.\n\n` +
+      `Bu işlem geri alınamaz. Yüklediğiniz listenin dönemin TAMAMINI içerdiğinden emin misiniz?`
+    )) return;
+
+    setIptalSiliniyor(true);
+    try {
+      const res = await fetch("/api/gumruk/kayitlari-sil", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: adaylar.map((k: any) => k.id) }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? "Silme başarısız");
+      toast({ title: "Silindi", description: body.message });
+      setUploadResult({ ...uploadResult, iptalAdayi: 0, iptalAdaylari: [], iptalTutar: 0 });
+      onSuccess();
+    } catch (error) {
+      toast({
+        title: "Hata",
+        description: error instanceof Error ? error.message : "Kayıtlar silinemedi",
+        variant: "destructive",
+      });
+    } finally {
+      setIptalSiliniyor(false);
+    }
+  };
+
   const handleDownloadMultiSkipped = () => {
     if (!multiResults) return;
     const wb = XLSX.utils.book_new();
@@ -888,6 +929,7 @@ export function ExcelUploadModal({
     setSelectedYil(String(currentYear));
     setFiles([]);
     setIsBulk(false);
+    setIsTamListe(false);
     setPreview(null);
     setMultiPreview(null);
     setUploadResult(null);
@@ -997,6 +1039,24 @@ export function ExcelUploadModal({
                     <Label htmlFor="bulk-mode" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
                       Dosya tüm yılı içeriyor (Otomatik Tarih)
                     </Label>
+                  </div>
+
+                  <div className="flex items-start space-x-2">
+                    <Checkbox
+                      id="tam-liste"
+                      checked={isTamListe}
+                      onCheckedChange={(checked) => setIsTamListe(checked as boolean)}
+                      className="mt-0.5"
+                    />
+                    <div className="space-y-1">
+                      <Label htmlFor="tam-liste" className="text-sm font-medium leading-none">
+                        Bu dosya dönemin tamamını içeriyor (iptal kontrolü yap)
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Uygulamada olup bu listede bulunmayan faturaları tespit eder — genelde
+                        sonradan iptal edilmiş faturalardır. Sadece bildirir, otomatik silmez.
+                      </p>
+                    </div>
                   </div>
 
                   {!isBulk && (
@@ -1573,6 +1633,48 @@ export function ExcelUploadModal({
                   </Badge>
                 )}
               </div>
+
+              {uploadResult?.iptalAdayi !== undefined && uploadResult.iptalAdayi > 0 && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    <div className="mb-2 font-medium">
+                      Uygulamada olup bu listede bulunmayan {uploadResult.iptalAdayi} fatura var
+                      {typeof uploadResult.iptalTutar === "number" && (
+                        <> ({uploadResult.iptalTutar.toLocaleString("tr-TR", { minimumFractionDigits: 2 })} ₺)</>
+                      )}
+                      .
+                    </div>
+                    <div className="text-xs mb-3">
+                      Bunlar büyük olasılıkla sonradan iptal edilmiş faturalardır ve uygulamadaki
+                      ciroyu şişirir. Listenin dönemin tamamını içerdiğinden eminseniz silebilirsiniz.
+                    </div>
+                    {Array.isArray(uploadResult.iptalAdaylari) && (
+                      <div className="max-h-40 overflow-y-auto rounded border bg-background/50 p-2 mb-3 text-xs font-mono">
+                        {uploadResult.iptalAdaylari.slice(0, 50).map((k: any) => (
+                          <div key={k.id} className="truncate">
+                            {k.faturaNo} · {k.firmaUnvan ?? "-"} · {k.malBedeli ?? "0"} ₺
+                          </div>
+                        ))}
+                        {uploadResult.iptalAdaylari.length > 50 && (
+                          <div className="text-muted-foreground">
+                            … ve {uploadResult.iptalAdaylari.length - 50} kayıt daha
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={iptalSiliniyor}
+                      onClick={handleIptalSil}
+                      data-testid="button-delete-iptal"
+                    >
+                      {iptalSiliniyor ? "Siliniyor…" : `${uploadResult.iptalAdayi} kaydı sil`}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
 
               {uploadResult?.skippedCount !== undefined &&
                 uploadResult.skippedCount > 0 &&
