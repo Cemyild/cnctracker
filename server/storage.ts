@@ -2182,20 +2182,19 @@ export class DatabaseStorage implements IStorage {
             branch = "İstanbul - İHL";
         }
 
-        // Gümrük adından şube çıkmadıysa İŞLEM TİPİNE bak. Bu alan bazı
-        // işlemlerde yapısal olarak boştur, veri girişi eksikliği değildir:
-        // Serbest Bölge giriş/çıkış kayıtlarının TAMAMINDA (3.503 dosya) boş,
-        // çünkü bu işlemler bir gümrük müdürlüğünden geçmez.
+        // Gümrük adı boşsa İŞLEM TİPİNE bak. Bu alan bazı kayıtlarda yapısal
+        // olarak boştur, veri girişi eksikliği değildir:
+        //  - Serbest Bölge giriş/çıkış (3.503 dosya): işlem bir gümrük
+        //    müdürlüğünden geçmez, tipin TAMAMINDA boş.
+        //  - Geri kalan gümrüksüz kayıtlar (402 İthalat/İhracat + 6 "Diğer"):
+        //    beyanname değil, onay/hizmet faturası. Üçünde de dosya no, tescil
+        //    no ve rejim kodu istisnasız boş, fatura no ise istisnasız dolu —
+        //    beyanname bu üç alan olmadan var olamaz.
+        // Şube atamaları kullanıcı kararıdır: Bursa Serbest Bölgesi Gemlik
+        // ilçesindedir; beyanname dışı işlemler merkeze (Bursa) yazılır.
         if (branch === "Belirsiz") {
             const tip = (g.tip || "").toLocaleLowerCase("tr");
-            if (tip.startsWith("serbest b")) {
-                // Bursa Serbest Bölgesi Gemlik ilçesindedir (kullanıcı kararı)
-                branch = "Gemlik";
-            } else if (tip === "diğer") {
-                // Gümrük beyannamesi değil (banka/nakliye/hizmet faturaları);
-                // dosya no ve tescil no taşımazlar (kullanıcı kararı)
-                branch = "Bursa";
-            }
+            branch = tip.startsWith("serbest b") ? "Gemlik" : "Bursa";
         }
 
         const gelir = parseFloat(g.malBedeli || "0");
