@@ -1952,19 +1952,51 @@ export class DatabaseStorage implements IStorage {
     if (ay && ay !== "ALL") giderFilters.push(eq(giderler.ay, ay));
 
     const giderlerResult = await db.select({
+        id: giderler.id,
         sube: giderler.sube,
         kategori: giderler.kategori,
         malBedeli: giderler.malBedeli,
+        toplamTutar: giderler.toplamTutar,
     }).from(giderler).where(and(...giderFilters));
 
+    // Şubelere bölünmüş faturaların payları (yemek kartı, paylaşılan kira vb.)
+    const dagilimByGider = new Map<string, { sube: string; tutar: string }[]>();
+    if (giderlerResult.length > 0) {
+        const paylar = await db
+            .select()
+            .from(giderSubeDagilimlari)
+            .where(inArray(giderSubeDagilimlari.giderId, giderlerResult.map((g) => g.id)));
+        for (const p of paylar) {
+            const liste = dagilimByGider.get(p.giderId) ?? [];
+            liste.push({ sube: p.sube, tutar: p.tutar });
+            dagilimByGider.set(p.giderId, liste);
+        }
+    }
+
     const branchGumrukCosts = new Map<string, number>();
+    const ekle = (sube: string, tutar: number) =>
+        branchGumrukCosts.set(sube, (branchGumrukCosts.get(sube) || 0) + tutar);
+
     giderlerResult.forEach(g => {
         // ARAÇ YAKIT kategorisini hariç tut
         if (g.kategori?.toUpperCase() === "ARAÇ YAKIT") return;
 
-        const branch = g.sube || "Belirsiz";
-        const tutar = parseFloat(g.malBedeli || "0");
-        branchGumrukCosts.set(branch, (branchGumrukCosts.get(branch) || 0) + tutar);
+        const malBedeli = parseFloat(g.malBedeli || "0");
+        const paylar = dagilimByGider.get(g.id);
+        const toplamTutar = parseFloat(g.toplamTutar || "0");
+
+        // Bölünmüş fatura: rapor KDV HARİÇ çalışır, dağılım ise KDV DAHİL pay
+        // tutar. Mal bedeli pay oranında dağıtılır (bkz. shared/schema.ts).
+        if (paylar && paylar.length > 0 && toplamTutar > 0) {
+            for (const p of paylar) {
+                ekle(p.sube, malBedeli * (parseFloat(p.tutar) / toplamTutar));
+            }
+            return;
+        }
+
+        // normalizeSube: tanınmayan değer (Excel'den kaçmış GUID vb.) sahte bir
+        // şube satırı üretmesin, "Belirsiz"e düşsün.
+        ekle(normalizeSube(g.sube) || "Belirsiz", malBedeli);
     });
 
     // 3. Get Araç Giderleri by Branch (Yakıt, Kasko, Trafik)
