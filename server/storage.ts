@@ -2018,6 +2018,25 @@ export class DatabaseStorage implements IStorage {
 
     const branchAracCosts = new Map<string, number>();
 
+    // Yakıt araç giderleri KDV DAHİL kaydedilir (Halis Petrol Excel'indeki
+    // "Net Tutar" sütunu KDV dahildir), oysa rapor KDV HARİÇ çalışır —
+    // giderGumruk mal bedelinden gelir. Aynı tabana indirmek için oran
+    // sabit 1,20 varsayılmaz, o yılın gerçek faturalarından türetilir:
+    // KDV oranı değişirse sabit bölen sessizce yanlış sonuç verirdi.
+    const yakitFaturalari = await db
+        .select({ malBedeli: giderler.malBedeli, toplamTutar: giderler.toplamTutar })
+        .from(giderler)
+        .where(and(eq(giderler.yil, yil), sql`upper(${giderler.firma}) LIKE '%HAL_S PETROL%'`));
+
+    const fatMalBedeli = yakitFaturalari.reduce((a, f) => a + parseFloat(f.malBedeli || "0"), 0);
+    const fatToplamTutar = yakitFaturalari.reduce((a, f) => a + parseFloat(f.toplamTutar || "0"), 0);
+    const yakitKdvHaricOran = fatToplamTutar > 0 ? fatMalBedeli / fatToplamTutar : 1;
+
+    // Sigorta primlerine (trafik/kasko) bu oran UYGULANMAZ: sigorta primi
+    // KDV'ye tabi değildir, zaten KDV hariç tutardır.
+    const kdvHaricAracTutar = (tutar: number, kategori: string | null) =>
+        (kategori ?? "").toLocaleUpperCase("tr") === "YAKIT" ? tutar * yakitKdvHaricOran : tutar;
+
     // a) Manual vehicle expenses (filter by year)
     const yilStr = yil.toString();
     aracGiderlerResult.forEach(g => {
@@ -2033,7 +2052,7 @@ export class DatabaseStorage implements IStorage {
         }
 
         const branch = aracSubeMap.get(g.aracId) || "Belirsiz";
-        const tutar = parseFloat(g.tutar || "0");
+        const tutar = kdvHaricAracTutar(parseFloat(g.tutar || "0"), g.kategori);
         branchAracCosts.set(branch, (branchAracCosts.get(branch) || 0) + tutar);
     });
 
