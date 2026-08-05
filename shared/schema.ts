@@ -424,6 +424,38 @@ export const insertGiderlerSchema = createInsertSchema(giderler).omit({
 export type InsertGiderler = z.infer<typeof insertGiderlerSchema>;
 export type Gider = typeof giderler.$inferSelect;
 
+// Bir gider faturasının şubelere dağıtımı. Yemek kartı yüklemesi (Pluxee/Metropal),
+// paylaşılan kira/elektrik gibi faturalar tek şubeye ait değildir; `giderler.sube`
+// tek değerli olduğu için bunlar sonsuza kadar "şubesi eksik" kalıyordu.
+// Ana gider satırı BOZULMAZ — dağıtım burada yaşar, fatura adedi ve Excel
+// mutabakatı korunur. Payların toplamı faturanın toplamTutar'ına eşit olmak
+// zorundadır (server tarafında doğrulanır).
+export const giderSubeDagilimlari = pgTable("gider_sube_dagilimlari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  giderId: varchar("gider_id").notNull().references(() => giderler.id, { onDelete: "cascade" }),
+  sube: text("sube").notNull(),
+  // KDV DAHİL pay. Mal bedeli ve KDV payları saklanmaz, oransal türetilir —
+  // tek gerçek kaynak. (Pluxee PEF2026000236606'da toplam < mal bedeli olduğu
+  // için sabit KDV oranı varsayan bir formül yanlış sonuç verirdi.)
+  tutar: decimal("tutar", { precision: 15, scale: 2 }).notNull(),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  uniqueIndex("gider_sube_dagilim_idx").on(table.giderId, table.sube),
+]);
+
+export const insertGiderSubeDagilimSchema = createInsertSchema(giderSubeDagilimlari).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+
+export type InsertGiderSubeDagilim = z.infer<typeof insertGiderSubeDagilimSchema>;
+export type GiderSubeDagilim = typeof giderSubeDagilimlari.$inferSelect;
+
+/** Listede gösterilen gider: dağılım bilgisiyle zenginleştirilmiş satır. */
+export type GiderWithDagilim = Gider & {
+  dagilimlar?: { sube: string; tutar: string }[];
+};
+
 // Sigorta Poliçeleri tablosu
 export const sigortaPoliceleri = pgTable("sigorta_policeleri", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

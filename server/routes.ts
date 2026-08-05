@@ -3205,6 +3205,83 @@ export async function registerRoutes(
     }
   });
 
+  // Gider Şube Dağılımı — bir faturayı birden çok şubeye paylaştırma.
+  // Dağıtım atomik bir bütündür: payların toplamı faturanın toplam tutarına
+  // eşit olmak zorunda. Kısmi dağıtım kabul edilmez, aksi halde şube bazlı
+  // toplamlar faturanın kendisiyle tutmaz.
+  app.put("/api/giderler/:id/dagilim", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const dagilimSchema = z.object({
+        dagilimlar: z.array(z.object({
+          sube: z.string(),
+          tutar: z.union([z.number(), z.string()]),
+        })).min(1, "En az bir şube payı gerekli"),
+      });
+
+      const parsed = dagilimSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Geçersiz dağılım verisi", detay: parsed.error.errors });
+      }
+
+      const gider = await storage.getGiderById(id);
+      if (!gider) return res.status(404).json({ error: "Bulunamadı" });
+
+      // Şube adları whitelist'ten geçirilir — tanınmayan metin (GUID vb.) girmez
+      const temizlenmis: { sube: string; tutar: string }[] = [];
+      const gorulenSubeler = new Set<string>();
+      for (const d of parsed.data.dagilimlar) {
+        const sube = normalizeSube(d.sube);
+        if (!sube) {
+          return res.status(400).json({ error: `Geçersiz şube: ${d.sube}` });
+        }
+        if (gorulenSubeler.has(sube)) {
+          return res.status(400).json({ error: `Aynı şube birden çok kez girilmiş: ${sube}` });
+        }
+        gorulenSubeler.add(sube);
+
+        const tutar = Number(d.tutar);
+        if (!Number.isFinite(tutar) || tutar <= 0) {
+          return res.status(400).json({ error: `${sube} için geçersiz tutar` });
+        }
+        temizlenmis.push({ sube, tutar: tutar.toFixed(2) });
+      }
+
+      const faturaToplam = Number(gider.toplamTutar ?? 0);
+      const payToplam = temizlenmis.reduce((acc, d) => acc + Number(d.tutar), 0);
+      // Kuruş yuvarlaması için 0,01 tolerans
+      if (Math.abs(payToplam - faturaToplam) > 0.01) {
+        return res.status(400).json({
+          error: "Payların toplamı fatura tutarına eşit olmalı",
+          faturaToplam,
+          payToplam,
+          fark: Number((faturaToplam - payToplam).toFixed(2)),
+        });
+      }
+
+      const kaydedilen = await storage.setGiderDagilimlari(id, temizlenmis);
+      res.json({ dagilimlar: kaydedilen });
+    } catch (error) {
+      console.error("Gider dağılımı kaydedilirken hata:", error);
+      res.status(500).json({ error: "Dağılım kaydedilemedi" });
+    }
+  });
+
+  app.delete("/api/giderler/:id/dagilim", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const gider = await storage.getGiderById(id);
+      if (!gider) return res.status(404).json({ error: "Bulunamadı" });
+
+      await storage.deleteGiderDagilimlari(id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Gider dağılımı silinirken hata:", error);
+      res.status(500).json({ error: "Dağılım silinemedi" });
+    }
+  });
+
   // Plakaya göre giderleri getir (Araçlar sayfası için)
   app.get("/api/giderler/by-plaka/:plaka", async (req, res) => {
     try {

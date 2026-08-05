@@ -39,6 +39,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   nakliyeFaturaEslesme, type NakliyeFaturaEslesme, type InsertNakliyeFaturaEslesme,
   parasutSatisFaturalari, type ParasutSatisFaturasi, type InsertParasutSatisFaturasi,
   normalizeSube, normalizeKategori,
+  giderSubeDagilimlari, type GiderSubeDagilim, type GiderWithDagilim,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
@@ -127,12 +128,18 @@ export interface IStorage {
   updateCalisan(id: string, veri: Partial<InsertCalisan>): Promise<Calisan>;
 
   // Giderler
-  getGiderler(ay?: string, yil?: number): Promise<Gider[]>;
+  getGiderler(ay?: string, yil?: number): Promise<GiderWithDagilim[]>;
   getGiderlerByPlaka(plaka: string): Promise<Gider[]>;
+  getGiderById(id: string): Promise<Gider | null>;
   insertGiderler(veriler: InsertGiderler[]): Promise<Gider[]>;
   deleteGiderler(ay: string, yil: number): Promise<void>;
   updateGider(id: string, veri: Partial<InsertGiderler>): Promise<Gider>;
   updateGiderlerBulk(ids: string[], veri: Partial<InsertGiderler>): Promise<number>;
+
+  // Gider şube dağılımları (bir faturanın birden çok şubeye paylaştırılması)
+  getGiderDagilimlari(giderId: string): Promise<GiderSubeDagilim[]>;
+  setGiderDagilimlari(giderId: string, dagilimlar: { sube: string; tutar: string }[]): Promise<GiderSubeDagilim[]>;
+  deleteGiderDagilimlari(giderId: string): Promise<void>;
   getYakitFaturalari(): Promise<(Gider & { dagitilanTutar: number })[]>;
   getGiderStats(yil?: number, ay?: string): Promise<{ toplamCount: number; toplamMalBedeli: number; toplamKdv: number; toplamTryTutar: number }>;
   getHistoricalMappings(): Promise<{ firma: string; sube: string; kategori: string }[]>;
@@ -1367,17 +1374,75 @@ export class DatabaseStorage implements IStorage {
   // ==========================================================
   // GIDERLER IMPLEMENTATION
   // ==========================================================
-  async getGiderler(ay?: string, yil?: number): Promise<Gider[]> {
+  async getGiderler(ay?: string, yil?: number): Promise<GiderWithDagilim[]> {
     const filters = [];
     if (ay && ay !== "toplam") filters.push(eq(giderler.ay, ay));
     if (yil) filters.push(eq(giderler.yil, yil));
 
     const tarihOrder = sql`to_date(${giderler.tarih}, 'DD.MM.YYYY') DESC NULLS LAST`;
 
-    if (filters.length > 0) {
-      return await db.select().from(giderler).where(and(...filters)).orderBy(tarihOrder);
+    const satirlar = filters.length > 0
+      ? await db.select().from(giderler).where(and(...filters)).orderBy(tarihOrder)
+      : await db.select().from(giderler).orderBy(tarihOrder);
+
+    return await this.attachDagilimlar(satirlar);
+  }
+
+  // Şube dağılımlarını satır satır sorgulamak N+1 üretir; tek inArray + Map join.
+  private async attachDagilimlar(satirlar: Gider[]): Promise<GiderWithDagilim[]> {
+    if (satirlar.length === 0) return [];
+
+    const dagilimlar = await db
+      .select()
+      .from(giderSubeDagilimlari)
+      .where(inArray(giderSubeDagilimlari.giderId, satirlar.map((s) => s.id)));
+
+    if (dagilimlar.length === 0) return satirlar;
+
+    const byGider = new Map<string, { sube: string; tutar: string }[]>();
+    for (const d of dagilimlar) {
+      const liste = byGider.get(d.giderId) ?? [];
+      liste.push({ sube: d.sube, tutar: d.tutar });
+      byGider.set(d.giderId, liste);
     }
-    return await db.select().from(giderler).orderBy(tarihOrder);
+
+    return satirlar.map((s) => {
+      const liste = byGider.get(s.id);
+      return liste ? { ...s, dagilimlar: liste } : s;
+    });
+  }
+
+  async getGiderDagilimlari(giderId: string): Promise<GiderSubeDagilim[]> {
+    return await db
+      .select()
+      .from(giderSubeDagilimlari)
+      .where(eq(giderSubeDagilimlari.giderId, giderId));
+  }
+
+  // Dağıtımı bütünüyle değiştirir (sil + ekle). Kısmi güncelleme yok: payların
+  // toplamı fatura tutarına eşit olmak zorunda olduğu için dağıtım atomik bir
+  // bütündür, tek tek satır güncellemek ara durumda tutarsızlık bırakır.
+  async setGiderDagilimlari(
+    giderId: string,
+    dagilimlar: { sube: string; tutar: string }[]
+  ): Promise<GiderSubeDagilim[]> {
+    return await db.transaction(async (tx) => {
+      await tx.delete(giderSubeDagilimlari).where(eq(giderSubeDagilimlari.giderId, giderId));
+      if (dagilimlar.length === 0) return [];
+      return await tx
+        .insert(giderSubeDagilimlari)
+        .values(dagilimlar.map((d) => ({ giderId, sube: d.sube, tutar: d.tutar })))
+        .returning();
+    });
+  }
+
+  async deleteGiderDagilimlari(giderId: string): Promise<void> {
+    await db.delete(giderSubeDagilimlari).where(eq(giderSubeDagilimlari.giderId, giderId));
+  }
+
+  async getGiderById(id: string): Promise<Gider | null> {
+    const [satir] = await db.select().from(giderler).where(eq(giderler.id, id));
+    return satir ?? null;
   }
 
   async getGiderlerByPlaka(plaka: string): Promise<Gider[]> {

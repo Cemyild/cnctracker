@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { type Calisan, type Gider, type GumrukVerisi, subeler, normalizeSube, normalizeKategori } from "@shared/schema";
+import { type Calisan, type Gider, type GiderWithDagilim, type GumrukVerisi, subeler, normalizeSube, normalizeKategori } from "@shared/schema";
 import { isYakitFaturasi } from "@shared/yakit";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -27,7 +27,8 @@ import {
   Trash2,
   Calculator,
   Plus,
-  Fuel
+  Fuel,
+  ChevronRight
 } from "lucide-react";
 import { GiderEditModal } from "@/components/GiderEditModal";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +51,8 @@ import {
   TableFooter 
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -177,6 +179,22 @@ type Arac = {
   model: string | null;
 };
 
+// Şube Select'inde bölme akışını başlatan özel değer. Gerçek bir şube adı
+// olmadığı için whitelist'e çarpmaz; onValueChange'te ayıklanır.
+const BOLME_SECENEK = "__sube_bol__";
+
+// Kullanıcı "74.726,50" da yazabilir "74726.50" da. Excel yükleyicideki
+// safeParseFloat ile aynı kural: binlik nokta atılır, ondalık virgül noktaya döner.
+function parseTutarInput(ham: string): number {
+  const s = String(ham ?? "").trim();
+  if (!s) return 0;
+  const temiz = s.includes(",")
+    ? s.replace(/\./g, "").replace(",", ".")
+    : s.replace(/\s/g, "");
+  const n = parseFloat(temiz.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
         export default function Gumruk() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
         const [selectedAy, setSelectedAy] = useState<string>(""); // Satışlar "Ay Bazlı Detay" filtresi
@@ -233,6 +251,76 @@ type Arac = {
                                 description: "Güncelleme sırasında hata oluştu",
                                 variant: "destructive",
                             });
+                        }
+                    };
+
+                    // Bir faturayı birden çok şubeye paylaştırma. Ana gider satırı bozulmaz;
+                    // dağıtım ayrı tabloda yaşar, böylece fatura adedi ve Excel mutabakatı korunur.
+                    const [bolmeGider, setBolmeGider] = useState<GiderWithDagilim | null>(null);
+                    const [bolmeKaydediliyor, setBolmeKaydediliyor] = useState(false);
+                    const [acikDagilimIds, setAcikDagilimIds] = useState<Set<string>>(new Set());
+
+                    const toggleDagilimAcik = (id: string) => {
+                        setAcikDagilimIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id); else next.add(id);
+                            return next;
+                        });
+                    };
+
+                    const handleBolmeKaydet = async (dagilimlar: { sube: string; tutar: number }[]) => {
+                        if (!bolmeGider) return;
+
+                        if (dagilimlar.length === 0) {
+                            toast({ title: "Hata", description: "En az bir şubeye tutar girin", variant: "destructive" });
+                            return;
+                        }
+
+                        setBolmeKaydediliyor(true);
+                        try {
+                            const response = await fetch(`/api/giderler/${bolmeGider.id}/dagilim`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ dagilimlar }),
+                            });
+
+                            if (!response.ok) {
+                                const hata = await response.json().catch(() => ({}));
+                                throw new Error(hata.error ?? "Dağılım kaydedilemedi");
+                            }
+
+                            toast({
+                                title: "Başarılı",
+                                description: `Fatura ${dagilimlar.length} şubeye bölündü`,
+                                duration: 2000,
+                            });
+                            setBolmeGider(null);
+                            refetchGiderler();
+                        } catch (error) {
+                            toast({
+                                title: "Hata",
+                                description: error instanceof Error ? error.message : "Dağılım kaydedilemedi",
+                                variant: "destructive",
+                            });
+                        } finally {
+                            setBolmeKaydediliyor(false);
+                        }
+                    };
+
+                    const handleBolmeKaldir = async () => {
+                        if (!bolmeGider) return;
+                        setBolmeKaydediliyor(true);
+                        try {
+                            const response = await fetch(`/api/giderler/${bolmeGider.id}/dagilim`, { method: 'DELETE' });
+                            if (!response.ok) throw new Error("Bölme kaldırılamadı");
+
+                            toast({ title: "Başarılı", description: "Bölme kaldırıldı", duration: 2000 });
+                            setBolmeGider(null);
+                            refetchGiderler();
+                        } catch (error) {
+                            toast({ title: "Hata", description: "Bölme kaldırılamadı", variant: "destructive" });
+                        } finally {
+                            setBolmeKaydediliyor(false);
                         }
                     };
 
@@ -335,7 +423,7 @@ type Arac = {
 
 
                     // Gider Data Queries
-                    const {data: giderler, isLoading: giderlerLoading, isError: giderlerError, refetch: refetchGiderler } = useQuery<Gider[]>({
+                    const {data: giderler, isLoading: giderlerLoading, isError: giderlerError, refetch: refetchGiderler } = useQuery<GiderWithDagilim[]>({
                       queryKey: ["/api/giderler", selectedGiderAy, selectedGiderYil],
                     queryFn: async () => {
                       const res = await fetch(`/api/giderler?ay=${selectedGiderAy}&yil=${selectedGiderYil}`, { credentials: "include" });
@@ -595,7 +683,9 @@ type Arac = {
   const eksikKontrol = useMemo(() => {
     const kategoriAdlari = (categories ?? []).map((c) => c.name);
     return {
-      sube: (v: string | null) => normalizeSube(v) === null,
+      // Şubelere bölünmüş fatura eksik sayılmaz — tek bir şubesi olmaması normaldir.
+      sube: (g: GiderWithDagilim) =>
+        g.dagilimlar && g.dagilimlar.length > 0 ? false : normalizeSube(g.sube) === null,
       kategori: (v: string | null) =>
         // Kategori listesi henüz yüklenmediyse whitelist testi yapılamaz; tüm liste
         // yanlışlıkla "eksik" görünmesin diye boşluk kontrolüne düşülür.
@@ -614,9 +704,9 @@ type Arac = {
     const filtered = eksikFilter === 'tum'
       ? base
       : base.filter((g) =>
-          eksikFilter === 'sube' ? eksikKontrol.sube(g.sube)
+          eksikFilter === 'sube' ? eksikKontrol.sube(g)
           : eksikFilter === 'kategori' ? eksikKontrol.kategori(g.kategori)
-          : eksikKontrol.sube(g.sube) || eksikKontrol.kategori(g.kategori)
+          : eksikKontrol.sube(g) || eksikKontrol.kategori(g.kategori)
         );
 
                     if (!sortConfig.key) return filtered;
@@ -675,9 +765,9 @@ type Arac = {
   const eksikSayilari = useMemo(() => {
     const liste = (giderler ?? []).filter((g) => !isYakitFaturasi(g.firma));
     return {
-      sube: liste.filter((g) => eksikKontrol.sube(g.sube)).length,
+      sube: liste.filter((g) => eksikKontrol.sube(g)).length,
       kategori: liste.filter((g) => eksikKontrol.kategori(g.kategori)).length,
-      herhangi: liste.filter((g) => eksikKontrol.sube(g.sube) || eksikKontrol.kategori(g.kategori)).length,
+      herhangi: liste.filter((g) => eksikKontrol.sube(g) || eksikKontrol.kategori(g.kategori)).length,
     };
   }, [giderler, eksikKontrol]);
 
@@ -705,7 +795,7 @@ type Arac = {
   const displayGiderler = useMemo(() => {
     if (!gorunumIds) return sortedGiderler;
     const byId = new Map((giderler ?? []).map((g) => [g.id, g]));
-    return gorunumIds.map((id) => byId.get(id)).filter((g): g is Gider => !!g);
+    return gorunumIds.map((id) => byId.get(id)).filter((g): g is GiderWithDagilim => !!g);
   }, [gorunumIds, giderler, sortedGiderler]);
 
   // Seçim, görünen listeyle sınırlı kalsın: görünüm değişince veya kayıtlar
@@ -1622,8 +1712,8 @@ type Arac = {
                                         </TableRow>
                                       ) : (
                                         displayGiderler.map((gider, idx) => (
+                                          <Fragment key={gider.id}>
                                           <TableRow
-                                            key={gider.id}
                                             className={`${selectedGiderIds.has(gider.id) ? 'bg-accent/60' : idx % 2 === 0 ? 'bg-white dark:bg-background' : 'bg-slate-50 dark:bg-muted/30'} border-b transition-colors hover:bg-accent/50`}
                                           >
                                             <TableCell className="px-2.5 py-1.5">
@@ -1643,22 +1733,49 @@ type Arac = {
                                             <TableCell className="px-2.5 py-1.5 text-muted-foreground">{gider.paraBirimi}</TableCell>
                                             <TableCell className="px-2.5 py-1.5 text-right font-bold tabular-nums">{formatCurrencyFull(gider.tryTutar)}</TableCell>
                                             <TableCell className="px-1.5 py-1">
-                                              <Select
-                                                // Tanınmayan değer "" olarak verilir; aksi halde Radix Select
-                                                // eşleşen SelectItem bulamayıp placeholder'ı da gizler ve hücre
-                                                // sebebi anlaşılmayacak şekilde bomboş görünür.
-                                                value={normalizeSube(gider.sube) ?? ""}
-                                                onValueChange={(val) => handleInlineUpdate(gider.id, 'sube', val)}
-                                              >
-                                                <SelectTrigger className="h-7 w-full max-w-[120px] px-2 text-[11.5px]">
-                                                  <SelectValue placeholder="Seçiniz" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                  {subeler.map((s) => (
-                                                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                                                  ))}
-                                                </SelectContent>
-                                              </Select>
+                                              {gider.dagilimlar && gider.dagilimlar.length > 0 ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => toggleDagilimAcik(gider.id)}
+                                                  className="flex h-7 w-full max-w-[120px] items-center gap-1 rounded-md border border-violet-300 bg-violet-50 px-2 text-[11.5px] font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-900/40"
+                                                  title="Şube dağılımını göster"
+                                                  data-testid={`badge-bolundu-${gider.id}`}
+                                                >
+                                                  <ChevronRight
+                                                    className={cn(
+                                                      "h-3 w-3 shrink-0 transition-transform",
+                                                      acikDagilimIds.has(gider.id) && "rotate-90"
+                                                    )}
+                                                  />
+                                                  <span className="truncate">Bölündü ({gider.dagilimlar.length})</span>
+                                                </button>
+                                              ) : (
+                                                <Select
+                                                  // Tanınmayan değer "" olarak verilir; aksi halde Radix Select
+                                                  // eşleşen SelectItem bulamayıp placeholder'ı da gizler ve hücre
+                                                  // sebebi anlaşılmayacak şekilde bomboş görünür.
+                                                  value={normalizeSube(gider.sube) ?? ""}
+                                                  onValueChange={(val) => {
+                                                    if (val === BOLME_SECENEK) {
+                                                      setBolmeGider(gider);
+                                                      return;
+                                                    }
+                                                    handleInlineUpdate(gider.id, 'sube', val);
+                                                  }}
+                                                >
+                                                  <SelectTrigger className="h-7 w-full max-w-[120px] px-2 text-[11.5px]">
+                                                    <SelectValue placeholder="Seçiniz" />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    {subeler.map((s) => (
+                                                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                                                    ))}
+                                                    <SelectItem value={BOLME_SECENEK} className="mt-1 border-t font-medium text-violet-700 dark:text-violet-300">
+                                                      Şubelere böl…
+                                                    </SelectItem>
+                                                  </SelectContent>
+                                                </Select>
+                                              )}
                                             </TableCell>
                                             <TableCell className="px-1.5 py-1">
                                               <Select
@@ -1705,6 +1822,33 @@ type Arac = {
                                               </Button>
                                             </TableCell>
                                           </TableRow>
+                                          {gider.dagilimlar && gider.dagilimlar.length > 0 && acikDagilimIds.has(gider.id) && (
+                                            <TableRow className="border-b bg-violet-50/40 hover:bg-violet-50/60 dark:bg-violet-950/20 dark:hover:bg-violet-950/30">
+                                              <TableCell colSpan={13} className="px-2.5 py-2">
+                                                <div className="ml-8 space-y-1">
+                                                  {gider.dagilimlar.map((d) => (
+                                                    <div key={d.sube} className="flex items-center gap-2 text-[11.5px]">
+                                                      <span className="text-muted-foreground">└─</span>
+                                                      <span className="w-[150px] font-medium">{d.sube}</span>
+                                                      <span className="tabular-nums font-semibold">{formatCurrencyFull(d.tutar)}</span>
+                                                      <span className="text-muted-foreground">
+                                                        (%{((Number(d.tutar) / Number(gider.toplamTutar || 1)) * 100).toFixed(1)})
+                                                      </span>
+                                                    </div>
+                                                  ))}
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setBolmeGider(gider)}
+                                                    className="ml-6 text-[11.5px] font-medium text-violet-700 underline hover:text-violet-900 dark:text-violet-300"
+                                                    data-testid={`button-bolme-duzenle-${gider.id}`}
+                                                  >
+                                                    Dağılımı düzenle
+                                                  </button>
+                                                </div>
+                                              </TableCell>
+                                            </TableRow>
+                                          )}
+                                          </Fragment>
                                         ))
                                       )}
                                     </TableBody>
@@ -1891,6 +2035,14 @@ type Arac = {
                                 refetchGiderler();
                                 refetchGiderStats();
                               }}
+                            />
+
+                            <GiderBolmeModal
+                              gider={bolmeGider}
+                              kaydediliyor={bolmeKaydediliyor}
+                              onKaydet={handleBolmeKaydet}
+                              onKaldir={handleBolmeKaldir}
+                              onClose={() => setBolmeGider(null)}
                             />
                           </TabsContent>
 
@@ -2303,6 +2455,119 @@ function downloadCsv(filename: string, content: string) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Bir gider faturasını şubelere paylaştırma modalı.
+// Kural: payların toplamı faturanın toplam tutarına eşit olmak zorunda (±1 kuruş).
+// Kısmi dağıtıma izin verilmez — aksi halde şube toplamları faturayla tutmaz.
+function GiderBolmeModal({
+  gider,
+  kaydediliyor,
+  onKaydet,
+  onKaldir,
+  onClose,
+}: {
+  gider: GiderWithDagilim | null;
+  kaydediliyor: boolean;
+  onKaydet: (dagilimlar: { sube: string; tutar: number }[]) => void;
+  onKaldir: () => void;
+  onClose: () => void;
+}) {
+  const open = !!gider;
+  // Input state modalın kendisinde durur: parent'ta olsaydı her tuş vuruşu
+  // 500+ satırlık gider tablosunu yeniden render ederdi.
+  const [tutarlar, setTutarlar] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!gider) return;
+    const mevcut: Record<string, string> = {};
+    for (const d of gider.dagilimlar ?? []) {
+      mevcut[d.sube] = String(Number(d.tutar));
+    }
+    setTutarlar(mevcut);
+  }, [gider?.id]);
+
+  const faturaToplam = Number(gider?.toplamTutar ?? 0);
+  const girilenToplam = subeler.reduce((acc, s) => acc + parseTutarInput(tutarlar[s] ?? ""), 0);
+  const kalan = Number((faturaToplam - girilenToplam).toFixed(2));
+  const dengeli = Math.abs(kalan) <= 0.01 && girilenToplam > 0;
+  const bolunmus = (gider?.dagilimlar?.length ?? 0) > 0;
+
+  const kaydet = () => {
+    const dagilimlar = subeler
+      .map((s) => ({ sube: s, tutar: parseTutarInput(tutarlar[s] ?? "") }))
+      .filter((d) => d.tutar > 0);
+    onKaydet(dagilimlar);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-[520px]">
+        {/* DialogContent bir grid; min-w-0 olmadan uzun firma adı modalı şişirir */}
+        <DialogHeader className="min-w-0">
+          <DialogTitle>Şubelere Böl</DialogTitle>
+          <DialogDescription className="min-w-0 truncate" title={`${gider?.firma ?? ""} · ${gider?.faturaNo ?? ""}`}>
+            {gider?.firma} · {gider?.faturaNo}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between rounded-lg border bg-muted/40 px-3 py-2">
+            <span className="text-sm text-muted-foreground">Fatura toplamı (KDV dahil)</span>
+            <span className="text-base font-bold tabular-nums">{formatCurrencyFull(faturaToplam)}</span>
+          </div>
+
+          <div className="space-y-2">
+            {subeler.map((s) => (
+              <div key={s} className="flex items-center gap-3">
+                <label htmlFor={`bolme-${s}`} className="w-[150px] shrink-0 text-sm">{s}</label>
+                <Input
+                  id={`bolme-${s}`}
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  value={tutarlar[s] ?? ""}
+                  onChange={(e) => setTutarlar((prev) => ({ ...prev, [s]: e.target.value }))}
+                  className="h-8 text-right tabular-nums"
+                  data-testid={`input-bolme-${s}`}
+                />
+              </div>
+            ))}
+          </div>
+
+          <div
+            className={cn(
+              "flex items-baseline justify-between rounded-lg border px-3 py-2",
+              dengeli
+                ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30"
+                : "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30"
+            )}
+          >
+            <span className="text-sm font-medium">
+              {dengeli ? "Toplam tutuyor" : kalan > 0 ? "Dağıtılmayan" : "Fazla girildi"}
+            </span>
+            <span className="text-base font-bold tabular-nums">
+              {dengeli ? formatCurrencyFull(girilenToplam) : formatCurrencyFull(Math.abs(kalan))}
+            </span>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:justify-between">
+          {bolunmus ? (
+            <Button variant="ghost" onClick={onKaldir} disabled={kaydediliyor} className="text-destructive hover:text-destructive" data-testid="button-bolme-kaldir">
+              Bölmeyi kaldır
+            </Button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose} disabled={kaydediliyor}>İptal</Button>
+            <Button onClick={kaydet} disabled={!dengeli || kaydediliyor} data-testid="button-bolme-kaydet">
+              {kaydediliyor && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Kaydet
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // Firma drill-down dialog: aylık hacim + işlem grafiği
