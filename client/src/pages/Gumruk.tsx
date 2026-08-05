@@ -28,7 +28,8 @@ import {
   Calculator,
   Plus,
   Fuel,
-  ChevronRight
+  ChevronRight,
+  Search
 } from "lucide-react";
 import { GiderEditModal } from "@/components/GiderEditModal";
 import { Badge } from "@/components/ui/badge";
@@ -213,6 +214,11 @@ function parseTutarInput(ham: string): number {
                     const [clearMonthOpen, setClearMonthOpen] = useState(false);
                     const [selectedGiderIds, setSelectedGiderIds] = useState<Set<string>>(new Set());
                     const [eksikFilter, setEksikFilter] = useState<'tum' | 'sube' | 'kategori' | 'herhangi'>('tum');
+                    // Gider Listesi filtreleri. "__hepsi__" / "__bos__" / "__bolunmus__" gerçek
+                    // bir şube veya kategori adı olamayacağı için ayraç değer olarak kullanılır.
+                    const [firmaAra, setFirmaAra] = useState("");
+                    const [subeFilter, setSubeFilter] = useState("__hepsi__");
+                    const [kategoriFilter, setKategoriFilter] = useState("__hepsi__");
                     // Sabitlenmiş görünüm: listedeki satır sırası/üyeliği. null = yeniden hesaplanacak.
                     const [gorunumIds, setGorunumIds] = useState<string[] | null>(null);
                     const [undoTarget, setUndoTarget] = useState<{ id: string; filename: string; kayitSayisi: number } | null>(null);
@@ -701,13 +707,47 @@ function parseTutarInput(ham: string): number {
     // Yakıt tedarikçisi faturaları bu listede işlenmez — Araçlar sayfasında yönetilir
     const base = giderler.filter((g) => !isYakitFaturasi(g.firma));
 
-    const filtered = eksikFilter === 'tum'
+    const eksikGecen = eksikFilter === 'tum'
       ? base
       : base.filter((g) =>
           eksikFilter === 'sube' ? eksikKontrol.sube(g)
           : eksikFilter === 'kategori' ? eksikKontrol.kategori(g.kategori)
           : eksikKontrol.sube(g) || eksikKontrol.kategori(g.kategori)
         );
+
+    // Firma araması Türkçe duyarsız (İ/ı tuzağı için toLocaleLowerCase("tr")),
+    // fatura numarasında da arar — kullanıcı ikisini de yapıştırabiliyor.
+    const q = firmaAra.trim().toLocaleLowerCase("tr");
+    const filtered = eksikGecen.filter((g) => {
+      if (q) {
+        const firma = (g.firma ?? "").toLocaleLowerCase("tr");
+        const fatura = (g.faturaNo ?? "").toLocaleLowerCase("tr");
+        if (!firma.includes(q) && !fatura.includes(q)) return false;
+      }
+
+      if (subeFilter !== "__hepsi__") {
+        const bolunmus = (g.dagilimlar?.length ?? 0) > 0;
+        if (subeFilter === "__bolunmus__") {
+          if (!bolunmus) return false;
+        } else if (subeFilter === "__bos__") {
+          if (!eksikKontrol.sube(g)) return false;
+        } else {
+          // Bölünmüş fatura, payı olan HER şubenin filtresinde görünür
+          const eslesti = bolunmus
+            ? g.dagilimlar!.some((d) => d.sube === subeFilter)
+            : normalizeSube(g.sube) === subeFilter;
+          if (!eslesti) return false;
+        }
+      }
+
+      if (kategoriFilter !== "__hepsi__") {
+        if (kategoriFilter === "__bos__") {
+          if (!eksikKontrol.kategori(g.kategori)) return false;
+        } else if (g.kategori !== kategoriFilter) return false;
+      }
+
+      return true;
+    });
 
                     if (!sortConfig.key) return filtered;
 
@@ -759,7 +799,23 @@ function parseTutarInput(ham: string): number {
         ? String(sa).localeCompare(String(sb), 'tr', { numeric: true, sensitivity: 'base' })
         : String(sb).localeCompare(String(sa), 'tr', { numeric: true, sensitivity: 'base' });
     });
-  }, [giderler, sortConfig, eksikFilter, eksikKontrol]);
+  }, [giderler, sortConfig, eksikFilter, eksikKontrol, firmaAra, subeFilter, kategoriFilter]);
+
+  // Filtre sonucunun toplamı — kullanıcı "bu şubeye/kategoriye ne harcadım"
+  // sorusunu listeyi dışa aktarmadan cevaplayabilsin.
+  const filtreToplami = useMemo(
+    () => sortedGiderler.reduce((acc, g) => acc + Number(g.tryTutar ?? 0), 0),
+    [sortedGiderler]
+  );
+
+  const filtreAktif =
+    firmaAra.trim() !== "" || subeFilter !== "__hepsi__" || kategoriFilter !== "__hepsi__";
+
+  const filtreleriTemizle = () => {
+    setFirmaAra("");
+    setSubeFilter("__hepsi__");
+    setKategoriFilter("__hepsi__");
+  };
 
   // Filtre etiketlerinde gösterilecek eksik kayıt sayıları (filtreden bağımsız, tüm liste üzerinden)
   const eksikSayilari = useMemo(() => {
@@ -782,7 +838,7 @@ function parseTutarInput(ham: string): number {
   // kullanıcı eksik listede çalışırken satırlar yerinde durur, plaka da seçilebilir.
   useEffect(() => {
     setGorunumIds(null);
-  }, [eksikFilter, sortConfig, selectedGiderAy, selectedGiderYil]);
+  }, [eksikFilter, sortConfig, selectedGiderAy, selectedGiderYil, firmaAra, subeFilter, kategoriFilter]);
 
   useEffect(() => {
     if (gorunumIds === null && !giderlerLoading && giderler) {
@@ -1591,8 +1647,71 @@ function parseTutarInput(ham: string): number {
                                     </Select>
                                     <span className="text-[12.5px] tabular-nums text-muted-foreground">
                                       {displayGiderler.length} kayıt
+                                      {filtreAktif && (
+                                        <> · <strong className="font-semibold text-foreground">{formatCurrencyFull(filtreToplami)}</strong></>
+                                      )}
                                     </span>
                                   </div>
+                                </div>
+
+                                {/* Firma / şube / kategori filtreleri */}
+                                <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5">
+                                  <div className="relative">
+                                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                                    <Input
+                                      value={firmaAra}
+                                      onChange={(e) => setFirmaAra(e.target.value)}
+                                      placeholder="Firma veya fatura no…"
+                                      className="h-8 w-[240px] pl-8 text-[12px]"
+                                      data-testid="input-gider-firma-ara"
+                                    />
+                                  </div>
+
+                                  <Select value={subeFilter} onValueChange={setSubeFilter}>
+                                    <SelectTrigger
+                                      className={cn("h-8 w-[180px] px-2.5 text-[12px]", subeFilter !== "__hepsi__" && "border-primary font-semibold")}
+                                      data-testid="select-gider-sube-filter"
+                                    >
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__hepsi__">Tüm şubeler</SelectItem>
+                                      {subeler.map((s) => (
+                                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                                      ))}
+                                      <SelectItem value="__bolunmus__">Şubelere bölünmüş</SelectItem>
+                                      <SelectItem value="__bos__">Şubesi seçilmemiş</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+
+                                  <Select value={kategoriFilter} onValueChange={setKategoriFilter}>
+                                    <SelectTrigger
+                                      className={cn("h-8 w-[190px] px-2.5 text-[12px]", kategoriFilter !== "__hepsi__" && "border-primary font-semibold")}
+                                      data-testid="select-gider-kategori-filter"
+                                    >
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className="max-h-[320px]">
+                                      <SelectItem value="__hepsi__">Tüm kategoriler</SelectItem>
+                                      {categories?.map((c) => (
+                                        <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                                      ))}
+                                      <SelectItem value="__bos__">Kategorisi seçilmemiş</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+
+                                  {filtreAktif && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={filtreleriTemizle}
+                                      className="h-8 px-2.5 text-[12px] text-muted-foreground"
+                                      data-testid="button-gider-filtre-temizle"
+                                    >
+                                      <XIcon className="mr-1 h-3.5 w-3.5" />
+                                      Filtreleri temizle
+                                    </Button>
+                                  )}
                                 </div>
                                 {yakitSayisi > 0 && (
                                   <div className="flex flex-wrap items-center gap-2 border-b bg-emerald-50/60 px-5 py-2 text-[12px] dark:bg-emerald-950/20" data-testid="gider-yakit-banner">

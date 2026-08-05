@@ -247,7 +247,10 @@ export default function Raporlar() {
                                                 <p className="mt-1 text-xs text-muted-foreground">{periodLabel} · gelir ile gider kalemlerinin şube kırılımı</p>
                                             </div>
                                             <div className="flex flex-wrap gap-3.5">
-                                                {[["Gelir", "#0ea5e9"], ["Personel", "#f97316"], ["Gümrük", "#7c3aed"], ["Araç", "#10b981"]].map(([l, c]) => (
+                                                {/* "Giderler" = Gümrük ▸ Giderler sekmesindeki fatura kalemleri
+                                                    (kira, yemek, kargo, yazılım...). Eskiden "Gümrük" yazıyordu;
+                                                    modül adı kolon adına sızmıştı ve gümrük işlemi sanılıyordu. */}
+                                                {[["Gelir", "#0ea5e9"], ["Personel", "#f97316"], ["Giderler", "#7c3aed"], ["Araç", "#10b981"]].map(([l, c]) => (
                                                     <span key={l} className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-slate-600">
                                                         <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: c }} />{l}
                                                     </span>
@@ -268,7 +271,7 @@ export default function Raporlar() {
                                                         <LabelList dataKey="gelir" position="top" formatter={(v: any) => formatCurrencyShort(v)} style={{ fontSize: 10.5, fontWeight: 800, fill: "#0284c7" }} />
                                                     </Bar>
                                                     <Bar dataKey="giderPersonel" name="Personel" stackId="gider" fill="#f97316" maxBarSize={42} />
-                                                    <Bar dataKey="giderGumruk" name="Gümrük" stackId="gider" fill="#7c3aed" maxBarSize={42} />
+                                                    <Bar dataKey="giderGumruk" name="Giderler" stackId="gider" fill="#7c3aed" maxBarSize={42} />
                                                     <Bar dataKey="giderArac" name="Araç" stackId="gider" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={42}>
                                                         <LabelList dataKey="giderArac" position="top" content={<GiderTotalLabel />} />
                                                     </Bar>
@@ -351,7 +354,7 @@ export default function Raporlar() {
                                                     <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Şube</TableHead>
                                                     <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Gelir</TableHead>
                                                     <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Personel</TableHead>
-                                                    <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Gümrük</TableHead>
+                                                    <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500" title="Gümrük ▸ Giderler sekmesindeki fatura kalemleri (KDV hariç)">Giderler</TableHead>
                                                     <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Araç</TableHead>
                                                     <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Toplam Gider</TableHead>
                                                     <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Net Kâr</TableHead>
