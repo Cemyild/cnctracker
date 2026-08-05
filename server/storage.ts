@@ -2240,25 +2240,113 @@ export class DatabaseStorage implements IStorage {
     return finalResult;
   }
 
+  // Bir aracın tüm giderleri, üç kaynaktan birleştirilir:
+  //   1) arac_giderler  — Araçlar ▸ Yakıt Yükle ile araç bazına dağıtılan yakıt
+  //   2) araclar        — trafik ve kasko primleri
+  //   3) giderler.plaka — Gider Listesi'nde bu plakaya atanmış faturalar
+  //
+  // Eski hali sigorta_policeleri.sigortali alanında plaka arıyordu; o alan
+  // firma/kişi ünvanı tutar ("MURR ELEKTRONİK SAN.VE"), plaka formatına uyan
+  // tek kayıt yok — bu yüzden sekme her plakada boş dönüyordu.
+  //
+  // Tutarlar KDV HARİÇ: Şube Kârlılığı raporuyla aynı taban. Yakıt kayıtları
+  // KDV dahil saklandığı için o yılın Halis Petrol faturalarından türetilen
+  // oranla indirgenir; sigorta primleri KDV'ye tabi olmadığından dokunulmaz.
   async getVehicleExpenses(plaka: string): Promise<any[]> {
-    // Get Sigorta Policeleri for this vehicle
-    // We search the 'sigortali' or 'brans' field for the plate? 
-    // In current data, plates might be in 'sigortali' or specialized table.
-    // The user had a seed_vehicles script with plates.
-    // Let's assume we search sigortali field for plaka or use a like pattern.
-    
-    const policeler = await db.select()
-        .from(sigortaPoliceleri)
-        .where(sql`${sigortaPoliceleri.sigortali} ILIKE ${'%' + plaka + '%'}`);
-        
-    return policeler.map(p => ({
-        id: p.id,
-        policeNo: p.policeNo,
-        brans: p.brans,
-        prim: p.netPrim,
-        tarih: p.tanzimTarihi,
-        sirket: p.sirket
-    }));
+    const [arac] = await db.select().from(araclar).where(eq(araclar.plaka, plaka));
+    if (!arac) return [];
+
+    // Yıl bazlı KDV hariç oranı (sabit 1,20 varsayılmaz — bkz. getBranchProfitability)
+    const yakitFaturalari = await db
+      .select({ yil: giderler.yil, malBedeli: giderler.malBedeli, toplamTutar: giderler.toplamTutar })
+      .from(giderler)
+      .where(sql`upper(${giderler.firma}) LIKE '%HAL_S PETROL%'`);
+
+    const yilToplam = new Map<number, { mal: number; toplam: number }>();
+    for (const f of yakitFaturalari) {
+      const y = yilToplam.get(f.yil) ?? { mal: 0, toplam: 0 };
+      y.mal += parseFloat(f.malBedeli || "0");
+      y.toplam += parseFloat(f.toplamTutar || "0");
+      yilToplam.set(f.yil, y);
+    }
+    const kdvHaricOran = (yil: number) => {
+      const y = yilToplam.get(yil);
+      return y && y.toplam > 0 ? y.mal / y.toplam : 1;
+    };
+
+    const kalemler: {
+      tarih: string; tur: string; aciklama: string; kaynak: string; tutar: number;
+    }[] = [];
+
+    // 1) Araç gider kayıtları (yakıt/bakım) — tarih YYYY-MM-DD
+    const giderKayitlari = await db
+      .select()
+      .from(aracGiderler)
+      .where(eq(aracGiderler.aracId, arac.id));
+
+    for (const g of giderKayitlari) {
+      const yil = parseInt((g.tarih || "").slice(0, 4)) || new Date().getFullYear();
+      const yakitMi = (g.kategori ?? "").toLocaleUpperCase("tr") === "YAKIT";
+      const ham = parseFloat(g.tutar || "0");
+      kalemler.push({
+        tarih: g.tarih,
+        tur: g.kategori || "Diğer",
+        aciklama: g.aciklama || "",
+        kaynak: "Araç Gideri",
+        tutar: yakitMi ? ham * kdvHaricOran(yil) : ham,
+      });
+    }
+
+    // 2) Trafik ve kasko primleri. Poliçe dönemi bitiş tarihinden bir yıl geri
+    //    sayılarak bulunur (araclar tablosunda başlangıç tarihi tutulmuyor).
+    const policeDonemi = (bitis: string | null) => {
+      if (!bitis) return null;
+      const b = new Date(bitis);
+      if (Number.isNaN(b.getTime())) return null;
+      b.setFullYear(b.getFullYear() - 1);
+      return b.toISOString().split("T")[0];
+    };
+
+    const trafikBaslangic = policeDonemi(arac.trafikBitisTarihi);
+    if (trafikBaslangic && arac.trafikSigortaFiyat) {
+      kalemler.push({
+        tarih: trafikBaslangic,
+        tur: "Trafik Sigortası",
+        aciklama: [arac.trafikSigortaSirketi, arac.trafikPoliceNo].filter(Boolean).join(" · "),
+        kaynak: "Poliçe",
+        tutar: parseFloat(arac.trafikSigortaFiyat),
+      });
+    }
+
+    const kaskoBaslangic = policeDonemi(arac.kaskoBitisTarihi);
+    if (kaskoBaslangic && arac.kaskoSigortaFiyat) {
+      kalemler.push({
+        tarih: kaskoBaslangic,
+        tur: "Kasko",
+        aciklama: [arac.kaskoSigortaSirketi, arac.kaskoPoliceNo].filter(Boolean).join(" · "),
+        kaynak: "Poliçe",
+        tutar: parseFloat(arac.kaskoSigortaFiyat),
+      });
+    }
+
+    // 3) Gider Listesi'nde bu plakaya atanmış faturalar (ARAÇ BAKIM, ARAÇ ŞARJ...)
+    const plakaliGiderler = await db
+      .select()
+      .from(giderler)
+      .where(eq(giderler.plaka, plaka));
+
+    for (const g of plakaliGiderler) {
+      kalemler.push({
+        // giderler.tarih dd.mm.yyyy — sıralama için YYYY-MM-DD'ye çevrilir
+        tarih: (g.tarih || "").split(".").reverse().join("-"),
+        tur: g.kategori || "Fatura",
+        aciklama: [g.firma, g.faturaNo].filter(Boolean).join(" · "),
+        kaynak: "Gider Listesi",
+        tutar: parseFloat(g.malBedeli || "0"),
+      });
+    }
+
+    return kalemler.sort((a, b) => (b.tarih || "").localeCompare(a.tarih || ""));
   }
 
   async getUpcomingPolicies(deadlineDays: number): Promise<any[]> {

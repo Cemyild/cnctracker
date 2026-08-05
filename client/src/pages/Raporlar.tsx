@@ -88,6 +88,32 @@ export default function Raporlar() {
 
     const periodLabel = `${selectedYear} · ${selectedMonth === "ALL" ? "Tüm Yıl" : selectedMonth}`;
 
+    // Araç gider sekmesi: toplam ve tür kırılımı
+    const vehicleToplam = useMemo(
+        () => (vehicleExpenses ?? []).reduce((acc, v) => acc + (Number(v.tutar) || 0), 0),
+        [vehicleExpenses]
+    );
+
+    const vehicleTurToplam = useMemo(() => {
+        const m: Record<string, number> = {};
+        for (const v of vehicleExpenses ?? []) {
+            m[v.tur] = (m[v.tur] || 0) + (Number(v.tutar) || 0);
+        }
+        return m;
+    }, [vehicleExpenses]);
+
+    const vehicleTurListesi = useMemo(
+        () => Object.entries(vehicleTurToplam).sort((a, b) => b[1] - a[1]),
+        [vehicleTurToplam]
+    );
+
+    // Depoda tarih YYYY-MM-DD; ekranda dd/mm/yyyy — new Date() kullanılmaz,
+    // timezone kayması geçmişte off-by-one hatalara yol açtı.
+    const formatTarihTR = (t: string) => {
+        const p = String(t || "").split("-");
+        return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : (t || "—");
+    };
+
     // KPI'lar
     const kpis = branchTotals ? [
         { label: "Toplam Ciro", value: formatCurrencyFull(branchTotals.gelir), sub: `${branchData?.length || 0} şube · mal bedeli`, color: "#0ea5e9" },
@@ -382,7 +408,7 @@ export default function Raporlar() {
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                     <h3 className="text-[15px] font-extrabold">Plaka Bazlı Harcama Analizi</h3>
-                                    <p className="mt-1 text-xs text-muted-foreground">Seçilen aracın tüm sigorta ve kasko giderleri</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">Seçilen aracın yakıt, sigorta ve faturalı giderleri · KDV hariç</p>
                                 </div>
                                 <Select value={selectedVehicle} onValueChange={setSelectedVehicle}>
                                     <SelectTrigger className="h-[38px] w-[200px]"><SelectValue placeholder="Plaka Seçiniz" /></SelectTrigger>
@@ -401,11 +427,12 @@ export default function Raporlar() {
                                 <div className="flex h-40 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-sky-500" /></div>
                             ) : (
                                 <div className="mt-5 space-y-5">
-                                    <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
+                                    <div className="grid grid-cols-1 gap-3.5 md:grid-cols-4">
                                         {[
-                                            { label: "Toplam Masraf", value: formatCur(vehicleExpenses?.reduce((acc, p) => acc + parseFloat(p.prim || "0"), 0) || 0) },
-                                            { label: "Kayıtlı Poliçe", value: `${vehicleExpenses?.length || 0} Adet` },
-                                            { label: "Son İşlem", value: vehicleExpenses?.length ? vehicleExpenses[0].tarih : "—" },
+                                            { label: "Toplam Masraf", value: formatCur(vehicleToplam) },
+                                            { label: "Yakıt", value: formatCur(vehicleTurToplam["Yakıt"] || 0) },
+                                            { label: "Sigorta", value: formatCur((vehicleTurToplam["Trafik Sigortası"] || 0) + (vehicleTurToplam["Kasko"] || 0)) },
+                                            { label: "Kayıt", value: `${vehicleExpenses?.length || 0} adet` },
                                         ].map((k) => (
                                             <div key={k.label} className="rounded-[13px] border border-sky-100 bg-sky-50 p-4 dark:border-sky-950/40 dark:bg-sky-950/20">
                                                 <div className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "#0369a1" }}>{k.label}</div>
@@ -414,41 +441,62 @@ export default function Raporlar() {
                                         ))}
                                     </div>
 
+                                    {/* Tür kırılımı: hangi kalem ne kadar tutuyor */}
+                                    {vehicleTurListesi.length > 0 && (
+                                        <div className="rounded-[13px] border bg-card p-4">
+                                            <div className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Gider Türüne Göre</div>
+                                            <div className="mt-3 flex flex-col gap-2">
+                                                {vehicleTurListesi.map(([tur, tutar], i) => (
+                                                    <div key={tur} className="flex items-center gap-3">
+                                                        <span className="w-[130px] flex-shrink-0 text-[12.5px] font-semibold text-slate-700 dark:text-slate-300">{tur}</span>
+                                                        <span className="relative h-5 flex-1 overflow-hidden rounded-[6px] bg-slate-100 dark:bg-slate-800">
+                                                            <span className="block h-full rounded-[6px]" style={{ width: `${vehicleToplam ? (tutar / vehicleToplam) * 100 : 0}%`, background: PALETTE[i % PALETTE.length] }} />
+                                                        </span>
+                                                        <span className="w-[120px] flex-shrink-0 text-right text-[12.5px] font-extrabold tabular-nums">{formatCur(tutar)}</span>
+                                                        <span className="w-[52px] flex-shrink-0 text-right text-[12px] tabular-nums text-muted-foreground">{pct(vehicleToplam ? tutar / vehicleToplam : 0)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="overflow-hidden rounded-[13px] border">
+                                        <div className="max-h-[440px] overflow-y-auto">
                                         <Table>
                                             <TableHeader>
                                                 <TableRow className="hover:bg-transparent">
                                                     <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tarih</TableHead>
-                                                    <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Poliçe No</TableHead>
                                                     <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tür</TableHead>
-                                                    <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Şirket</TableHead>
-                                                    <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tutar (Prim)</TableHead>
+                                                    <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Açıklama</TableHead>
+                                                    <TableHead className="text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Kaynak</TableHead>
+                                                    <TableHead className="text-right text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Tutar</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
                                                 {vehicleExpenses?.map((v, i) => {
-                                                    const isKasko = String(v.brans || "").toLocaleLowerCase("tr").includes("kasko");
+                                                    const isSigorta = v.tur === "Kasko" || v.tur === "Trafik Sigortası";
                                                     return (
                                                         <TableRow key={i}>
-                                                            <TableCell className="text-slate-600">{v.tarih}</TableCell>
-                                                            <TableCell className="font-bold" style={{ color: "#0284c7" }}>{v.policeNo}</TableCell>
+                                                            <TableCell className="whitespace-nowrap text-slate-600 tabular-nums">{formatTarihTR(v.tarih)}</TableCell>
                                                             <TableCell>
-                                                                <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={isKasko ? { background: "#ede9fe", color: "#6d28d9" } : { background: "#e0f2fe", color: "#0369a1" }}>
-                                                                    {v.brans || "N/A"}
+                                                                <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={isSigorta ? { background: "#ede9fe", color: "#6d28d9" } : { background: "#e0f2fe", color: "#0369a1" }}>
+                                                                    {v.tur}
                                                                 </span>
                                                             </TableCell>
-                                                            <TableCell className="text-slate-700">{v.sirket}</TableCell>
-                                                            <TableCell className="text-right font-extrabold tabular-nums">{formatCur(parseFloat(v.prim || "0"))}</TableCell>
+                                                            <TableCell className="max-w-[320px] truncate text-slate-700 dark:text-slate-300" title={v.aciklama}>{v.aciklama || "—"}</TableCell>
+                                                            <TableCell className="text-[12px] text-muted-foreground">{v.kaynak}</TableCell>
+                                                            <TableCell className="text-right font-extrabold tabular-nums">{formatCur(v.tutar)}</TableCell>
                                                         </TableRow>
                                                     );
                                                 })}
                                                 {vehicleExpenses?.length === 0 && (
                                                     <TableRow>
-                                                        <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">Kayıtlı masraf bulunamadı.</TableCell>
+                                                        <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">Bu araca ait gider kaydı bulunamadı.</TableCell>
                                                     </TableRow>
                                                 )}
                                             </TableBody>
                                         </Table>
+                                        </div>
                                     </div>
                                 </div>
                             )}
