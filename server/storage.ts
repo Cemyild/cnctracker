@@ -1929,6 +1929,7 @@ export class DatabaseStorage implements IStorage {
         eleman: gumrukVerileri.girisElemani,
         malBedeli: gumrukVerileri.malBedeli,
         gumruk: gumrukVerileri.gumruk,
+        tip: gumrukVerileri.tip,
     }).from(gumrukVerileri).where(and(...filters));
 
     // Get Employees to map element -> branch
@@ -2172,8 +2173,27 @@ export class DatabaseStorage implements IStorage {
             branch = "Muratbey";
         } else if (erenkoyGumrukleri.some(eg => gumrukUpper.includes(eg)) || gumrukUpper.includes("ERENKÖY")) {
             branch = "İstanbul - Erenköy";
-        } else if (istIhlGumrukleri.some(ig => gumrukUpper.includes(ig)) || gumrukUpper.includes("İHL") || gumrukUpper.includes("HAVAALANI")) {
+        } else if (istIhlGumrukleri.some(ig => gumrukUpper.includes(ig)) || gumrukUpper.includes("İHL") || gumrukUpper.includes("HAVAALANI") || gumrukUpper.includes("İSTANBUL HAVALİMANI")) {
+            // "İSTANBUL HAVALİMANI" ön eki, kayıtlarda sonu kesik gelen
+            // "...GÜMRÜK MÜDÜRLÜĞ" varyantını da yakalar. ("HAVAALANI" ile
+            // "HAVALİMANI" ayrı yazımlar — ikisi de kontrol edilir.)
             branch = "İstanbul - İHL";
+        }
+
+        // Gümrük adından şube çıkmadıysa İŞLEM TİPİNE bak. Bu alan bazı
+        // işlemlerde yapısal olarak boştur, veri girişi eksikliği değildir:
+        // Serbest Bölge giriş/çıkış kayıtlarının TAMAMINDA (3.503 dosya) boş,
+        // çünkü bu işlemler bir gümrük müdürlüğünden geçmez.
+        if (branch === "Belirsiz") {
+            const tip = (g.tip || "").toLocaleLowerCase("tr");
+            if (tip.startsWith("serbest b")) {
+                // Bursa Serbest Bölgesi Gemlik ilçesindedir (kullanıcı kararı)
+                branch = "Gemlik";
+            } else if (tip === "diğer") {
+                // Gümrük beyannamesi değil (banka/nakliye/hizmet faturaları);
+                // dosya no ve tescil no taşımazlar (kullanıcı kararı)
+                branch = "Bursa";
+            }
         }
 
         const gelir = parseFloat(g.malBedeli || "0");
