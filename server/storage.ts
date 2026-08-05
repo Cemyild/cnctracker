@@ -41,6 +41,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   normalizeSube, normalizeKategori,
   giderSubeDagilimlari, type GiderSubeDagilim, type GiderWithDagilim,
 } from "@shared/schema";
+import { isYakitFaturasi } from "@shared/yakit";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as XLSX from "xlsx";
@@ -1953,6 +1954,7 @@ export class DatabaseStorage implements IStorage {
 
     const giderlerResult = await db.select({
         id: giderler.id,
+        firma: giderler.firma,
         sube: giderler.sube,
         kategori: giderler.kategori,
         malBedeli: giderler.malBedeli,
@@ -1978,7 +1980,13 @@ export class DatabaseStorage implements IStorage {
         branchGumrukCosts.set(sube, (branchGumrukCosts.get(sube) || 0) + tutar);
 
     giderlerResult.forEach(g => {
-        // ARAÇ YAKIT kategorisini hariç tut
+        // Yakıt ÇİFT SAYILMASIN: Halis Petrol faturası hem burada (giderler)
+        // hem arac_giderler'de (Araçlar ▸ Yakıt Yükle ile araç bazlı dağıtım)
+        // durur; ikincisi zaten giderArac olarak rapora giriyor.
+        // Kategori kontrolü tek başına yetmiyordu — bu faturalar Gider
+        // Listesi'nde gizli olduğu için kullanıcı onlara kategori atayamıyor,
+        // dolayısıyla 13'ü kategorisiz kalıp korumayı deliyordu.
+        if (isYakitFaturasi(g.firma)) return;
         if (g.kategori?.toUpperCase() === "ARAÇ YAKIT") return;
 
         const malBedeli = parseFloat(g.malBedeli || "0");
