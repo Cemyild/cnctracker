@@ -5,6 +5,7 @@ import { apiRequest, getQueryFn, queryClient } from "@/lib/queryClient";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import PortalLogin from "./PortalLogin";
 import PortalSidebar from "./PortalSidebar";
+import PanelSayfasi from "./PanelSayfasi";
 import YeniTalepSayfasi from "./YeniTalepSayfasi";
 import TaleplerimSayfasi from "./TaleplerimSayfasi";
 import GelenTaleplerSayfasi from "./GelenTaleplerSayfasi";
@@ -38,6 +39,7 @@ export function muhasebeGorunumu(rol: PortalMe["rol"]): boolean {
 }
 
 const SAYFA_BASLIKLARI: Record<string, string> = {
+  "/portal/panel": "Panel",
   "/portal/yeni-talep": "Yeni Talep",
   "/portal/taleplerim": "Taleplerim",
   "/portal/gelen-talepler": "Gelen Talepler",
@@ -80,7 +82,8 @@ function PortalIcerik({ me }: { me: PortalMe }) {
     queryClient.setQueryData(["/api/portal/me"], null);
   };
 
-  const varsayilanRota = muhasebeGorunumu(me.rol) ? "/portal/gelen-talepler" : me.rol === "operasyon" ? "/portal/kasam" : "/portal/yeni-talep";
+  // Her rol panele açılır; iş ekranlarına menüden geçilir.
+  const varsayilanRota = "/portal/panel";
   const baslik = SAYFA_BASLIKLARI[location] ?? "Ödemeler Portalı";
 
   return (
@@ -97,6 +100,9 @@ function PortalIcerik({ me }: { me: PortalMe }) {
         <main className="flex-1 overflow-auto p-6">
           <div className="w-full">
             <Switch>
+              <Route path="/portal/panel">
+                <PanelSayfasi me={me} />
+              </Route>
               {me.rol === "temsilci" && (
                 <Route path="/portal/yeni-talep">
                   <YeniTalepSayfasi me={me} />

@@ -6,7 +6,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut, Wallet, CalendarCheck, Building, BarChart3, Trash2 } from "lucide-react";
+import { FilePlus2, ListChecks, Inbox, Warehouse, Banknote, Building2, LogOut, Wallet, CalendarCheck, Building, BarChart3, Trash2, LayoutDashboard } from "lucide-react";
 import { type PortalMe } from "./PortalApp";
 import { type Rozetler, type SayfaAnahtari } from "./useTalepBildirimleri";
 
@@ -17,12 +17,17 @@ type MenuOgesi = {
   rozetAnahtari?: SayfaAnahtari;
 };
 
+// Açılış ekranı — her rolün menüsünde ilk sırada.
+const PANEL_OGESI: MenuOgesi = { title: "Panel", href: "/portal/panel", icon: LayoutDashboard };
+
 const TEMSILCI_MENU: MenuOgesi[] = [
+  PANEL_OGESI,
   { title: "Yeni Talep", href: "/portal/yeni-talep", icon: FilePlus2 },
   { title: "Taleplerim", href: "/portal/taleplerim", icon: ListChecks, rozetAnahtari: "taleplerim" },
 ];
 
 const MUHASEBE_MENU: MenuOgesi[] = [
+  PANEL_OGESI,
   { title: "Gelen Talepler", href: "/portal/gelen-talepler", icon: Inbox, rozetAnahtari: "gelenTalepler" },
   { title: "Depo Ödemeleri", href: "/portal/depo", icon: Warehouse, rozetAnahtari: "depo" },
   { title: "Doğrudan Ödeme", href: "/portal/dogrudan-odeme", icon: Banknote },
@@ -32,6 +37,7 @@ const MUHASEBE_MENU: MenuOgesi[] = [
 ];
 
 const OPERASYON_MENU: MenuOgesi[] = [
+  PANEL_OGESI,
   { title: "Kasam", href: "/portal/kasam", icon: Wallet },
   { title: "Kapanışlarım", href: "/portal/kapanislarim", icon: CalendarCheck },
 ];
