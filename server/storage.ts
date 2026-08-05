@@ -2121,7 +2121,9 @@ export class DatabaseStorage implements IStorage {
         "İSKENDERUN GÜMRÜK MÜDÜRLÜĞÜ",
         "DENİZLİ GÜMRÜK MÜDÜRLÜĞÜ",
         "ANTAKYA GÜMRÜK MÜDÜRLÜĞÜ",
-        "HOPA GÜMRÜK MÜDÜRLÜĞÜ"
+        "HOPA GÜMRÜK MÜDÜRLÜĞÜ",
+        "TAŞUCU GÜMRÜK MÜDÜRLÜĞÜ",
+        "YALOVA GÜMRÜK MÜDÜRLÜĞÜ"
     ];
 
     // Customs mapping for İstanbul - İHL
