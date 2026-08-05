@@ -78,12 +78,21 @@ export default function Raporlar() {
         }), { gelir: 0, giderPersonel: 0, giderGumruk: 0, giderArac: 0, toplamGider: 0, kar: 0 });
     }, [branchData]);
 
-    // En kârlı şube + kâra göre sıralı (ranking)
+    // Net kâra göre sıralı (kârlılık sıralaması).
+    // marj null = TANIMSIZ. Geliri olmayan bir birimin (Yönetim) marjı sıfır
+    // değildir, hesaplanamaz — %0,0 göstermek "başabaş" izlenimi veriyordu.
     const ranked = useMemo(() => {
         if (!branchData) return [];
         return [...branchData]
-            .map((b) => ({ ...b, marj: b.gelir ? (b.kar || 0) / b.gelir : 0 }))
+            .map((b) => ({ ...b, marj: b.gelir ? (b.kar || 0) / b.gelir : null }))
             .sort((a, b) => (b.kar || 0) - (a.kar || 0));
+    }, [branchData]);
+
+    // Detay tablosu en çok gelirden en aza sıralanır (kârlılık sıralamasından
+    // ayrı: orada ölçüt net kâr, burada ciro).
+    const byGelir = useMemo(() => {
+        if (!branchData) return [];
+        return [...branchData].sort((a, b) => (b.gelir || 0) - (a.gelir || 0));
     }, [branchData]);
 
     const periodLabel = `${selectedYear} · ${selectedMonth === "ALL" ? "Tüm Yıl" : selectedMonth}`;
@@ -315,25 +324,56 @@ export default function Raporlar() {
                                 <div className="rounded-[16px] border bg-card p-5">
                                     <div className="flex items-baseline justify-between gap-3">
                                         <h3 className="text-[15px] font-extrabold">Şube Kârlılık Sıralaması</h3>
-                                        <p className="text-xs text-muted-foreground">Net kâra göre sıralı · marj % ile</p>
+                                        <p className="text-xs text-muted-foreground">Çubuk net kârı gösterir · orta çizginin solu zarar</p>
                                     </div>
                                     <div className="mt-4 flex flex-col gap-3.5">
                                         {ranked.length === 0 && <div className="py-4 text-center text-sm text-muted-foreground">Veri yok</div>}
                                         {(() => {
-                                            const maxKar = Math.max(...ranked.map((b) => b.kar || 0), 1);
+                                            // Ölçek MUTLAK değerin en büyüğü: zarar da kâr kadar yer kaplasın.
+                                            // Eski hali Math.max(0, ...) ile negatifi kırpıyordu; Yönetim'in
+                                            // ₺31M zararı bomboş çubuk olarak görünüyor, Bursa'nın küçük
+                                            // kârından ayırt edilemiyordu.
+                                            const olcek = Math.max(...ranked.map((b) => Math.abs(b.kar || 0)), 1);
                                             return ranked.map((b, i) => {
                                                 const origIdx = branchData?.findIndex((x) => x.sube === b.sube) ?? i;
                                                 const color = PALETTE[origIdx % PALETTE.length];
-                                                const w = Math.max(0, ((b.kar || 0) / maxKar) * 100);
+                                                const kar = b.kar || 0;
+                                                const zarar = kar < 0;
+                                                // Her yarı %50 genişlik; sıfır tam ortada.
+                                                const w = (Math.abs(kar) / olcek) * 50;
+                                                const barRenk = zarar ? "#dc2626" : color;
                                                 return (
                                                     <div key={b.sube} className="flex items-center gap-3.5">
                                                         <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[7px] text-xs font-extrabold" style={{ background: RANK_BG[i] || "#f1f5f9", color: RANK_FG[i] || "#64748b" }}>{i + 1}</span>
-                                                        <span className="w-[96px] flex-shrink-0 text-[13.5px] font-bold text-slate-800">{b.sube}</span>
-                                                        <span className="relative h-6 flex-1 overflow-hidden rounded-[7px] bg-slate-100">
-                                                            <span className="block h-full rounded-[7px]" style={{ width: `${w}%`, background: `linear-gradient(90deg, ${color}22, ${color})` }} />
+                                                        <span className="w-[96px] flex-shrink-0 text-[13.5px] font-bold text-slate-800 dark:text-slate-200">{b.sube}</span>
+                                                        <span className="relative h-6 flex-1 rounded-[7px] bg-slate-100 dark:bg-slate-800" title={`${b.sube}: ${formatCur(kar)}`}>
+                                                            {/* Sıfır çizgisi */}
+                                                            <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-slate-300 dark:bg-slate-600" />
+                                                            <span
+                                                                className="absolute top-0 h-full"
+                                                                style={{
+                                                                    width: `${w}%`,
+                                                                    ...(zarar ? { right: "50%" } : { left: "50%" }),
+                                                                    background: zarar
+                                                                        ? `linear-gradient(270deg, ${barRenk}, ${barRenk}22)`
+                                                                        : `linear-gradient(90deg, ${barRenk}22, ${barRenk})`,
+                                                                    borderRadius: zarar ? "7px 0 0 7px" : "0 7px 7px 0",
+                                                                }}
+                                                            />
                                                         </span>
-                                                        <span className="w-[150px] flex-shrink-0 text-right text-[13.5px] font-extrabold tabular-nums">{formatCur(b.kar)}</span>
-                                                        <span className="w-[64px] flex-shrink-0 rounded-md py-1 text-center text-[12px] font-extrabold tabular-nums" style={{ color, background: `${color}14` }}>{pct(b.marj)}</span>
+                                                        <span
+                                                            className="w-[150px] flex-shrink-0 text-right text-[13.5px] font-extrabold tabular-nums"
+                                                            style={{ color: zarar ? "#dc2626" : undefined }}
+                                                        >
+                                                            {formatCur(kar)}
+                                                        </span>
+                                                        <span
+                                                            className="w-[64px] flex-shrink-0 rounded-md py-1 text-center text-[12px] font-extrabold tabular-nums"
+                                                            style={{ color: b.marj === null ? "#94a3b8" : color, background: b.marj === null ? "#94a3b814" : `${color}14` }}
+                                                            title={b.marj === null ? "Gelir olmadığı için marj hesaplanamaz" : "Net kâr / gelir"}
+                                                        >
+                                                            {b.marj === null ? "—" : pct(b.marj)}
+                                                        </span>
                                                     </div>
                                                 );
                                             });
@@ -345,7 +385,7 @@ export default function Raporlar() {
                                 <div className="overflow-hidden rounded-[16px] border bg-card">
                                     <div className="flex items-baseline justify-between border-b px-5 py-4">
                                         <h3 className="text-[15px] font-extrabold">Şube Bazlı Detay Tablosu</h3>
-                                        <span className="text-xs text-muted-foreground">{periodLabel}</span>
+                                        <span className="text-xs text-muted-foreground">Gelire göre sıralı · {periodLabel}</span>
                                     </div>
                                     <div className="overflow-x-auto">
                                         <Table>
@@ -362,15 +402,19 @@ export default function Raporlar() {
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
-                                                {branchData?.map((row, idx) => {
-                                                    const marj = row.gelir ? (row.kar || 0) / row.gelir : 0;
+                                                {byGelir.map((row, idx) => {
+                                                    // marj null = gelirsiz birim (Yönetim); "—" gösterilir
+                                                    const marj = row.gelir ? (row.kar || 0) / row.gelir : null;
                                                     const karColor = (row.kar || 0) >= 0 ? "#16a34a" : "#dc2626";
+                                                    // Renk, şubenin orijinal sırasından alınır ki donut ve
+                                                    // grafiklerdeki rengiyle aynı kalsın.
+                                                    const origIdx = branchData?.findIndex((x) => x.sube === row.sube) ?? idx;
                                                     return (
-                                                        <TableRow key={idx}>
+                                                        <TableRow key={row.sube}>
                                                             <TableCell>
                                                                 <span className="flex items-center gap-2.5">
-                                                                    <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: PALETTE[idx % PALETTE.length] }} />
-                                                                    <span className="text-[13px] font-bold text-slate-800">{row.sube}</span>
+                                                                    <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: PALETTE[origIdx % PALETTE.length] }} />
+                                                                    <span className="text-[13px] font-bold text-slate-800 dark:text-slate-200">{row.sube}</span>
                                                                 </span>
                                                             </TableCell>
                                                             <TableCell className="text-right font-semibold tabular-nums" style={{ color: "#0284c7" }}>{formatCur(row.gelir)}</TableCell>
@@ -379,7 +423,13 @@ export default function Raporlar() {
                                                             <TableCell className="text-right tabular-nums text-slate-600">{formatCur(row.giderArac)}</TableCell>
                                                             <TableCell className="text-right tabular-nums text-slate-500">{formatCur(row.toplamGider)}</TableCell>
                                                             <TableCell className="text-right font-extrabold tabular-nums" style={{ color: karColor }}>{formatCur(row.kar)}</TableCell>
-                                                            <TableCell className="text-right font-extrabold tabular-nums" style={{ color: karColor }}>{pct(marj)}</TableCell>
+                                                            <TableCell
+                                                                className="text-right font-extrabold tabular-nums"
+                                                                style={{ color: marj === null ? "#94a3b8" : karColor }}
+                                                                title={marj === null ? "Gelir olmadığı için marj hesaplanamaz" : undefined}
+                                                            >
+                                                                {marj === null ? "—" : pct(marj)}
+                                                            </TableCell>
                                                         </TableRow>
                                                     );
                                                 })}
