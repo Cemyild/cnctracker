@@ -1139,16 +1139,42 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(aracGiderler, eq(araclar.id, aracGiderler.aracId))
       .groupBy(araclar.id);
 
+    // arac_giderler yalnızca Yakıt Yükle akışından beslenir; elektrikli araçların
+    // ARAÇ ŞARJ'ı ve tüm filonun ARAÇ BAKIM'ı Gider Listesi'nde plakaya atanır.
+    // Bu ikinci kaynak eklenmezse şarjla giden Tesla'nın yıllık gideri 0 görünür.
+    // Halis Petrol faturaları hariç: yakıtları zaten arac_giderler'e dağıtılmış olur,
+    // ileride birine plaka atanırsa çift sayılmasın (LIKE '%HAL_S PETROL%' → İ/I duyarsız).
+    const plakaGiderleri = await db
+      .select({
+        plaka: giderler.plaka,
+        toplam: sql<string>`coalesce(sum(${giderler.toplamTutar}), 0)`,
+        ytd: sql<string>`coalesce(sum(CASE WHEN ${giderler.yil} = ${currentYear} THEN ${giderler.toplamTutar} ELSE 0 END), 0)`,
+      })
+      .from(giderler)
+      .where(and(
+        isNotNull(giderler.plaka),
+        ne(giderler.plaka, ""),
+        sql`upper(coalesce(${giderler.firma}, '')) NOT LIKE '%HAL_S PETROL%'`,
+      ))
+      .groupBy(giderler.plaka);
+
+    const plakaMap = new Map<string, { toplam: number; ytd: number }>();
+    for (const p of plakaGiderleri) {
+      if (!p.plaka) continue;
+      plakaMap.set(p.plaka, { toplam: Number(p.toplam), ytd: Number(p.ytd) });
+    }
+
     return result.map(({ arac, toplamGider, ytdGider }) => {
       const trafikFiyat = Number(arac.trafikSigortaFiyat || 0);
       const kaskoFiyat = Number(arac.kaskoSigortaFiyat || 0);
       const amortismanAylik = (trafikFiyat + kaskoFiyat) / 12;
       const amortismanGiderYtd = amortismanAylik * currentMonth;
-      const seneBasindanBeriGider = Number(ytdGider);
+      const faturaGideri = plakaMap.get(arac.plaka) ?? { toplam: 0, ytd: 0 };
+      const seneBasindanBeriGider = Number(ytdGider) + faturaGideri.ytd;
 
       return {
         ...arac,
-        toplamGider: Number(toplamGider),
+        toplamGider: Number(toplamGider) + faturaGideri.toplam,
         seneBasindanBeriGider: seneBasindanBeriGider,
         amortismanGiderYtd: amortismanGiderYtd,
         toplamMaliyet: seneBasindanBeriGider + amortismanGiderYtd,

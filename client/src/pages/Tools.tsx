@@ -1228,7 +1228,7 @@ export default function Tools() {
             { label: "Sigortası Yaklaşan", value: String(yaklasan), sub: "8–30 gün içinde", color: "#f59e0b", valColor: "#0f172a" },
             { label: "Kritik", value: String(kritik), sub: "≤7 gün kaldı", color: "#dc2626", valColor: "#dc2626" },
             { label: "Yıllık Sigorta", value: formatCurrencyFull(yillikSig), sub: "trafik + kasko", color: "#7c3aed", valColor: "#0f172a" },
-            { label: "Yıllık Gider", value: formatCurrencyFull(yillikGider), sub: "yakıt, bakım, sigorta", color: "#0f766e", valColor: "#0f172a" },
+            { label: "Yıllık Gider", value: formatCurrencyFull(yillikGider), sub: "yakıt, şarj, bakım", color: "#0f766e", valColor: "#0f172a" },
         ];
     }, [filteredAraclar]);
 
