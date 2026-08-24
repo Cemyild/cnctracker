@@ -150,6 +150,18 @@ const KESILEMEZ_DURUMLAR = new Set(["dogrulama_hatasi", "hata", "revizyon_gerekl
  * Beyanname bazında gruplanmış faturaların önizlemesini üretir.
  * Paraşüt'e HİÇBİR ŞEY YAZMAZ — hem UI hem kuru çalıştırma için.
  *
+ * BİR BEYANNAME DOSYASI = BİR SATIŞ FATURASI (iş kuralı).
+ *
+ * Aynı dosya numarasına düşen bütün navlun faturaları TEK müşteri faturasında
+ * birleşir; her navlun faturası o faturanın bir KALEMİ olur (canlı örnek:
+ * 26-10654 -> GAF...2031 + GIB...088 tek faturada, 26.000 + 13.000). Gruplama
+ * anahtarı ekrandaki `ilgiliDosyaNo`'dur; aşağıdaki `gruplar` Map'i bunu
+ * yapısal olarak garanti eder — aynı dosya için ikinci bir DosyaOnizleme
+ * üretilemez. İkinci bir tur yeni kalemlerle geldiğinde ise
+ * `getSatisFaturasiByDosyaNo` engeli devreye girer ve dosya bir daha
+ * faturalanmaz; bu yüzden kesme anını kullanıcı seçer (otomatik tur satış
+ * faturası kesmez, bkz. senkron.ts).
+ *
  * EŞLEŞMENİN TEK DOĞRULUK KAYNAĞI EKRANDIR (nakliye_verileri.ilgiliDosyaNo).
  *
  * Neden: iki ayrı eşleştirici vardı ve sessizce ayrıştılar (canlıda ölçüldü:

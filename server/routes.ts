@@ -1027,9 +1027,11 @@ export async function registerRoutes(
 
   // Satış faturası taslağını ELLE kes.
   //
-  // Neden gerekli: boru hattı günde bir kez (06:45) çalışıyor. Kullanıcı gün
-  // içinde bir konteyner numarasını düzeltip eşleşmeyi kurduğunda faturanın
-  // ertesi sabaha kalmaması için bu uç var.
+  // SATIŞ FATURASININ PARAŞÜT'E ÇIKTIĞI TEK YOL BURASIDIR. 06:45 boru hattı
+  // yalnız çeker/eşleştirir, fatura kesmez (bkz. senkron.ts). Sebep: bir
+  // beyanname dosyası için TEK fatura kesilir; kalemlerin tamamının gelmesini
+  // beklemek gerekir ve o anı kullanıcı bilir. UI'daki "Bekleyenleri Faturala"
+  // düğmesi gövdesiz POST atarak hazır olan tüm dosyaları keser.
   //
   //   { }                        → hazır olan TÜM dosyalar
   //   { dosyaNo }                → yalnızca o dosya

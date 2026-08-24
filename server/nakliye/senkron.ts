@@ -3,7 +3,6 @@ import { parasutAktifMi } from "../parasut/client";
 import { parasuttanCek } from "./parasutOkuma";
 import { parasutaYaz, parasuttaVarMi } from "./parasutYazma";
 import { eslestirmeCalistir } from "./eslestirme";
-import { tamamlananDosyalariFaturala } from "./satisFaturasi";
 
 export type SenkronSonuc = {
   cekilen: { yeni: number; atlanan: number };
@@ -21,7 +20,17 @@ let calisiyorMu = false;
  * 1) Paraşüt'teki alış faturalarını çek (e-Fatura kanalı) + e-belge PDF'leri
  * 2) Doğrulamayı geçmiş e-Arşiv faturalarını Paraşüt'e alış faturası olarak yaz
  * 3) Beyanname/transit eşleştirmesini çalıştır
- * 4) Tamamlanan dosyalar için müşteriye satış faturası TASLAĞI oluştur
+ *
+ * SATIŞ FATURASI BU TURDA KESİLMEZ — kasıtlı.
+ *
+ * Eskiden 4. adım olarak müşteri faturası taslağı da otomatik oluşturuluyordu.
+ * Sorun: tur günde bir kez (06:45) çalışıyor ve o an bir beyanname dosyasının
+ * navlun faturalarının YALNIZ BİR KISMI gelmiş olabiliyor. Tur o kısmı
+ * faturalayınca dosya "taslak zaten var" engeline giriyor ve sonradan gelen
+ * kalemler aynı faturaya EKLENEMİYOR. Bir beyanname dosyası için tek fatura
+ * kesilmesi iş kuralı olduğundan, kesme anını kullanıcı seçer: kalemler
+ * birikir, kullanıcı "Bekleyenleri Faturala" dediğinde hepsi TEK faturada
+ * birleşir (POST /api/nakliye/satis-faturasi-kes).
  *
  * RESMİLEŞTİRME YAPILMAZ. e_invoices / e_archives çağrılmaz, GİB'e hiçbir şey
  * gönderilmez — bu adım kasıtlı olarak kullanıcıda kalır. Sistemin
@@ -118,8 +127,9 @@ export async function senkronCalistir(): Promise<SenkronSonuc> {
     // 3) Eşleştir
     const eslestirme = await eslestirmeCalistir();
 
-    // 4) Satış faturası taslakları
-    const faturalama = await tamamlananDosyalariFaturala();
+    // 4) SATIŞ FATURASI KESİLMEZ — bkz. fonksiyon başlığı. Alan, arayüzü ve
+    // dönüş tipini bozmamak için sıfırla doldurulur; kesme işi elle uçta.
+    const faturalama = { olusturulan: 0, kuyruk: 0, hatalar: [] as string[] };
 
     return {
       cekilen,
