@@ -190,7 +190,8 @@ function DurumRozetleri({
     const elleDonem = alis === "elle";
     const alisIslendi = alis === "islendi";
     // Eşleşme kurulmuş ama müşteri faturası yoksa elle kesme düğmesi gösterilir.
-    const kesilebilir = !elleDonem && Boolean(inv.ilgiliDosyaNo) && (satis === "bekliyor" || satis === "hata");
+    const kesilebilir = !elleDonem && Boolean(inv.ilgiliDosyaNo)
+        && (satis === "bekliyor" || satis === "hata" || satis === "silinmis");
 
     const rozet = (
         etiket: string,
@@ -240,12 +241,16 @@ function DurumRozetleri({
                         : "Paraşüt'e henüz işlenmedi",
             )}
             {satis === "olusturuldu"
-                ? rozet("Satış", true, "yesil", `Müşteri faturası oluşturuldu (${inv.parasutSalesInvoiceId})`)
+                // Yeşil = Paraşüt'te DOĞRULANMIŞ. "Paraşüt'ü Kontrol Et" her
+                // turda taslağın hâlâ durduğunu sınar; silinmişse rozet düşer.
+                ? rozet("Satış", true, "yesil", `Müşteri faturası Paraşüt'te duruyor (${inv.parasutSalesInvoiceId})`)
                 : satis === "hata"
                     ? rozet("Satış", false, "kirmizi", `Hata: ${inv.parasutSatisHata || "bilinmiyor"}`)
-                    : satis === "eslesme_yok"
-                        ? rozet("Satış", false, "gri", "Beyanname eşleşmesi bekleniyor")
-                        : rozet("Satış", false, "sari", "Beyanname eşleşti, müşteri faturası bekliyor")}
+                    : satis === "silinmis"
+                        ? rozet("Satış", false, "kirmizi", `Kesilmişti ama Paraşüt'te bulunamadı (fatura ${inv.parasutSalesInvoiceId}) — taslak silinmiş. Yeniden kesilebilir.`)
+                        : satis === "eslesme_yok"
+                            ? rozet("Satış", false, "gri", "Beyanname eşleşmesi bekleniyor")
+                            : rozet("Satış", false, "sari", "Beyanname eşleşti, müşteri faturası bekliyor")}
 
             {kesilebilir && onFaturaKes && (
                 <button
@@ -700,15 +705,25 @@ export default function Nakliye() {
             if (!response.ok) throw new Error(sonuc?.error || "Kontrol başarısız");
 
             const y = sonuc.parasutaYazilan || {};
+            const d = sonuc.satisDogrulama || {};
             const baglanan = (y.mevcuttu || 0) + (y.basarili || 0);
+
+            // İki taraf ayrı ayrı bildirilir: ALIŞ bağlama (gelen fatura) ve
+            // SATIŞ doğrulama (kestiğimiz fatura Paraşüt'te duruyor mu).
+            const parcalar: string[] = [];
+            if (baglanan) parcalar.push(`${baglanan} gelen fatura Paraşüt kaydına bağlandı`);
+            if (y.elleBekleyen) parcalar.push(`${y.elleBekleyen} fatura Paraşüt'te bulunamadı — "İçeri Al" yapılmış mı?`);
+            if (d.silinmis) parcalar.push(`${d.silinmis} satış faturası Paraşüt'te silinmiş — yeniden kesilebilir`);
+            if (!parcalar.length) {
+                parcalar.push(d.kontrol
+                    ? `Her şey güncel — ${d.kontrol} satış faturası Paraşüt'te doğrulandı.`
+                    : "Bekleyen fatura yok, hepsi güncel.");
+            }
+
             toast({
                 title: "Paraşüt kontrolü tamamlandı",
-                description: baglanan
-                    ? `${baglanan} fatura Paraşüt kaydına bağlandı` +
-                      (y.elleBekleyen ? `, ${y.elleBekleyen} tanesi hâlâ bekliyor.` : ".")
-                    : y.elleBekleyen
-                        ? `${y.elleBekleyen} fatura Paraşüt'te bulunamadı — "İçeri Al" yapılmış mı?`
-                        : "Bekleyen fatura yok, hepsi güncel.",
+                variant: d.silinmis ? "destructive" : undefined,
+                description: parcalar.join(". ") + ".",
             });
             fetchSavedInvoices();
         } catch (error) {

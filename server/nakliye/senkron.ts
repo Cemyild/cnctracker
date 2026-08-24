@@ -3,6 +3,7 @@ import { parasutAktifMi } from "../parasut/client";
 import { parasuttanCek } from "./parasutOkuma";
 import { parasutaYaz, parasuttaVarMi } from "./parasutYazma";
 import { eslestirmeCalistir } from "./eslestirme";
+import { satisFaturalariniDogrula } from "./satisFaturasi";
 
 export type SenkronSonuc = {
   cekilen: { yeni: number; atlanan: number };
@@ -10,6 +11,8 @@ export type SenkronSonuc = {
   parasutaYazilan: { basarili: number; mevcuttu: number; hatali: number; elleBekleyen: number };
   eslestirme: { taranan: number; eslesen: number; kuyruk: number };
   faturalama: { olusturulan: number; kuyruk: number; hatalar: string[] };
+  /** Kestiğimiz satış faturaları Paraşüt'te hâlâ duruyor mu? */
+  satisDogrulama: { kontrol: number; silinmis: number };
 };
 
 let calisiyorMu = false;
@@ -131,11 +134,23 @@ export async function senkronCalistir(): Promise<SenkronSonuc> {
     // dönüş tipini bozmamak için sıfırla doldurulur; kesme işi elle uçta.
     const faturalama = { olusturulan: 0, kuyruk: 0, hatalar: [] as string[] };
 
+    // 5) Kestiğimiz satış faturaları Paraşüt'te hâlâ duruyor mu? Bu adım
+    // yalnız OKUR ve kendi kaydımızı düzeltir; Paraşüt'e hiçbir şey yazmaz.
+    let satisDogrulama = { kontrol: 0, silinmis: 0 };
+    try {
+      satisDogrulama = await satisFaturalariniDogrula();
+    } catch (e) {
+      // Doğrulama bir kolaylıktır; başarısız olması turun geri kalanını
+      // (çekme/hizalama/eşleştirme) geçersiz kılmamalı.
+      console.error("Satış faturası doğrulaması yapılamadı:", e instanceof Error ? e.message : e);
+    }
+
     return {
       cekilen,
       parasutaYazilan: { basarili, mevcuttu, hatali, elleBekleyen },
       eslestirme,
       faturalama,
+      satisDogrulama,
     };
   } finally {
     calisiyorMu = false;

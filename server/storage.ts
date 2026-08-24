@@ -4567,9 +4567,21 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(gumrukVerileri).where(inArray(gumrukVerileri.id, ids));
   }
 
+  // YALNIZ YAŞAYAN TASLAK ENGELDİR.
+  //
+  // Bu sorgu faturalamada "bu dosya için taslak zaten var" engelini kurar.
+  // Durum filtresi olmadan 'hata' ve 'silinmis' kayıtlar da engel sayılıyordu:
+  // bir kez hata alan dosya bir daha faturalanamıyor, Paraşüt'te silinen taslak
+  // ise dosyayı sonsuza dek kilitliyordu (canlıda 2026-08-24: 3 ENYTEKS hata
+  // kaydı ve 5 silinmiş taslak elle temizlenmek zorunda kaldı).
+  //
+  // Eski kayıtlar SİLİNMEZ — denetim izi olarak durur, yalnız engel saymayız.
   async getSatisFaturasiByDosyaNo(dosyaNo: string): Promise<ParasutSatisFaturasi | undefined> {
     const [row] = await db.select().from(parasutSatisFaturalari)
-      .where(eq(parasutSatisFaturalari.gumrukDosyaNo, dosyaNo));
+      .where(and(
+        eq(parasutSatisFaturalari.gumrukDosyaNo, dosyaNo),
+        eq(parasutSatisFaturalari.durum, "taslak"),
+      ));
     return row;
   }
 

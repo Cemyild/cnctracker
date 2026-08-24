@@ -4364,7 +4364,18 @@ export async function registerRoutes(
       ]);
 
       const alisMap = new Map(parasutFaturalari.map((f) => [f.faturaNo, f]));
-      const satisMap = new Map(satisFaturalari.map((s) => [s.gumrukDosyaNo, s]));
+
+      // Bir dosyanın birden çok satış kaydı olabilir: hata → silinmiş →
+      // yeniden taslak. Rozet YAŞAYAN taslağı göstermeli; düz Map kurulumunda
+      // sıralamaya göre eski bir 'silinmis' kayıt yeni taslağı gölgeleyip
+      // rozeti yanlışlıkla "bekliyor" gösterirdi.
+      const satisMap = new Map<string, typeof satisFaturalari[number]>();
+      for (const s of satisFaturalari) {
+        const mevcut = satisMap.get(s.gumrukDosyaNo);
+        if (!mevcut || (s.durum === "taslak" && mevcut.durum !== "taslak")) {
+          satisMap.set(s.gumrukDosyaNo, s);
+        }
+      }
 
       const zenginlestirilmis = veriler.map((v) => {
         const alis = v.faturaNo ? alisMap.get(v.faturaNo) : undefined;
@@ -4399,13 +4410,18 @@ export async function registerRoutes(
           belgeTipi: alis?.belgeTipi ?? null,
           // Satış: bu faturaya karşılık müşteriye fatura oluşturuldu mu?
           // Beyanname eşleşmesi yoksa henüz sıra gelmemiştir.
+          // "silinmis": biz kesmiştik ama Paraşüt'te bulunamadı (kullanıcı
+          // taslağı silmiş). "bekliyor"dan ayrı tutulur — ikisi aynı görünürse
+          // kullanıcı hiç kesilmemiş sanır ve neden kaybolduğunu araştıramaz.
           parasutSatisDurum: !v.ilgiliDosyaNo
             ? "eslesme_yok"
             : satis?.durum === "taslak"
               ? "olusturuldu"
               : satis?.durum === "hata"
                 ? "hata"
-                : "bekliyor",
+                : satis?.durum === "silinmis"
+                  ? "silinmis"
+                  : "bekliyor",
           parasutSalesInvoiceId: satis?.parasutSalesInvoiceId ?? null,
           parasutSatisHata: satis?.hataMesaji ?? null,
         };

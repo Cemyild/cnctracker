@@ -152,6 +152,70 @@ export function kesilmisOnbellegiTemizle(): void {
   kesilmisOnbellek = null;
 }
 
+/**
+ * Kestiğimiz satış faturaları Paraşüt'te DURUYOR MU? Duranları doğrular,
+ * silinmiş olanları işaretler.
+ *
+ * NEDEN GEREKLİ: SATIŞ rozeti `parasut_satis_faturalari` kaydımızdan türüyor,
+ * yani "sistem kesti mi?" sorusunu cevaplıyor — "Paraşüt'te duruyor mu?"
+ * sorusunu değil. Kullanıcı Paraşüt'te bir taslağı silince kaydımız yerinde
+ * kalıyor ve rozet yeşil kalmaya devam ediyor. Canlıda oldu (2026-08-24):
+ * 21 kayıt "kesildi" görünürken 5'i Paraşüt'te yoktu; fark ancak elle
+ * karşılaştırmayla bulundu.
+ *
+ * Silinen kayıt SİLİNMEZ, `durum: "silinmis"` olarak işaretlenir — denetim izi
+ * korunur. Rozet bunu kendiliğinden "bekliyor"a çevirir ve satırda "Fatura Kes"
+ * düğmesi yeniden görünür (bkz. routes.ts rozet türetmesi).
+ *
+ * TEK TEK GET YAPILMAZ: 24 kayıt için 24 istek yerine sayfalı liste ile ~2
+ * istek. Paraşüt limiti 10 istek/10 saniye olduğu için bu fark önemli.
+ */
+export async function satisFaturalariniDogrula(): Promise<{ kontrol: number; silinmis: number }> {
+  const kayitlar = (await storage.getSatisFaturalari()).filter(
+    (s) => s.durum === "taslak" && s.parasutSalesInvoiceId,
+  );
+  if (kayitlar.length === 0) return { kontrol: 0, silinmis: 0 };
+
+  const mevcut = new Set<string>();
+  const yil = new Date().getFullYear();
+  for (let sayfa = 1; sayfa <= 40; sayfa++) {
+    const cevap = await parasutIstek<any>("/sales_invoices", {
+      query: {
+        // Sistem Temmuz 2026'da devreye girdi ve kestiği her faturanın
+        // issue_date'i kesim günüdür — hepsi bu pencerede.
+        "filter[issue_date][gteq]": `${yil - 1}-01-01`,
+        "filter[issue_date][lteq]": `${yil}-12-31`,
+        "page[size]": "25",
+        "page[number]": String(sayfa),
+      },
+    });
+    const { veri } = jsonApiCoz(cevap);
+    if (veri.length === 0) break;
+    for (const d of veri) mevcut.add(String(d.id));
+    if (veri.length < 25) break;
+  }
+
+  // GÜVENLİK EŞİĞİ: tarama hiç sonuç vermediyse "Paraşüt'te gerçekten fatura
+  // yok" ile "sorgu/yetki bozuldu"yu ayırt edemeyiz. İkincisinde her kaydı
+  // silinmiş işaretlemek bütün rozetleri yalancı kırmızıya çevirirdi.
+  // Şüphede hiçbir şey değiştirmeyiz.
+  if (mevcut.size === 0) {
+    console.error("Satış faturası doğrulaması: Paraşüt taraması boş döndü — hiçbir kayıt işaretlenmedi");
+    return { kontrol: kayitlar.length, silinmis: 0 };
+  }
+
+  let silinmis = 0;
+  for (const s of kayitlar) {
+    if (mevcut.has(String(s.parasutSalesInvoiceId))) continue;
+    await storage.updateSatisFaturasi(s.id, {
+      durum: "silinmis",
+      hataMesaji: `Paraşüt'te bulunamadı (fatura ${s.parasutSalesInvoiceId}) — taslak silinmiş olabilir`,
+    });
+    silinmis++;
+  }
+  return { kontrol: kayitlar.length, silinmis };
+}
+
 /** Fatura kesilemeyecek durumdaki (doğrulaması düşmüş) kayıtlar. */
 const KESILEMEZ_DURUMLAR = new Set(["dogrulama_hatasi", "hata", "revizyon_gerekli"]);
 
