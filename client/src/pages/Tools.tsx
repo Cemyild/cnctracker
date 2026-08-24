@@ -36,7 +36,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { cn, formatCurrencyFull } from "@/lib/utils";
 import { type Arac, insertAracSchema, type AracGider, insertAracGiderSchema, type Gider } from "@shared/schema";
-import { subYears, parse } from "date-fns";
+import { parse } from "date-fns";
+import { sigortaTahakkukDokumu } from "@shared/sigortaTahakkuk";
 
 // --- HELPERS ---
 
@@ -668,36 +669,30 @@ function ExpensesTab({ arac }: { arac: Arac }) {
         enabled: !!arac.plaka,
     });
 
-    // Sigorta giderlerini araç verisinden oluştur
-    const sigortaExpenses: UnifiedExpense[] = [];
-
-    if (arac.trafikSigortaFiyat && Number(arac.trafikSigortaFiyat) > 0 && arac.trafikBitisTarihi) {
-        const bitisTarihi = parse(arac.trafikBitisTarihi, "yyyy-MM-dd", new Date());
-        const baslangicTarihi = subYears(bitisTarihi, 1);
-        sigortaExpenses.push({
-            id: `sigorta-trafik-${arac.id}`,
-            tarih: format(baslangicTarihi, "yyyy-MM-dd"),
+    // Sigorta giderleri: prim tek seferde ödenir ama 12 ayı karşılar, bu yüzden
+    // poliçe dönemine aylık tahakkuk satırları olarak yayılır. Tek toplu satır
+    // primin ödendiği ayı şişirip kalan 11 ayı bedava gösteriyordu.
+    // Ortak kural: shared/sigortaTahakkuk.ts
+    const sigortaExpenses: UnifiedExpense[] = [
+        ...sigortaTahakkukDokumu(arac.trafikBitisTarihi, arac.trafikSigortaFiyat).map(k => ({
+            id: `sigorta-trafik-${arac.id}-${k.ayKey}`,
+            tarih: `${k.ayKey}-01`,
             kategori: "Sigorta",
-            aciklama: `Trafik Sigortası - ${arac.trafikSigortaSirketi || ""}`,
-            tutar: Number(arac.trafikSigortaFiyat),
-            kaynak: 'Sigorta',
+            aciklama: [`Trafik Sigortası`, arac.trafikSigortaSirketi].filter(Boolean).join(" - ") + ` (${k.taksitNo}/12)`,
+            tutar: k.tutar,
+            kaynak: 'Sigorta' as const,
             canDelete: false,
-        });
-    }
-
-    if (arac.kaskoSigortaFiyat && Number(arac.kaskoSigortaFiyat) > 0 && arac.kaskoBitisTarihi) {
-        const bitisTarihi = parse(arac.kaskoBitisTarihi, "yyyy-MM-dd", new Date());
-        const baslangicTarihi = subYears(bitisTarihi, 1);
-        sigortaExpenses.push({
-            id: `sigorta-kasko-${arac.id}`,
-            tarih: format(baslangicTarihi, "yyyy-MM-dd"),
+        })),
+        ...sigortaTahakkukDokumu(arac.kaskoBitisTarihi, arac.kaskoSigortaFiyat).map(k => ({
+            id: `sigorta-kasko-${arac.id}-${k.ayKey}`,
+            tarih: `${k.ayKey}-01`,
             kategori: "Sigorta",
-            aciklama: `Kasko - ${arac.kaskoSigortaSirketi || ""}`,
-            tutar: Number(arac.kaskoSigortaFiyat),
-            kaynak: 'Sigorta',
+            aciklama: [`Kasko`, arac.kaskoSigortaSirketi].filter(Boolean).join(" - ") + ` (${k.taksitNo}/12)`,
+            tutar: k.tutar,
+            kaynak: 'Sigorta' as const,
             canDelete: false,
-        });
-    }
+        })),
+    ];
 
     // Tüm giderleri birleştir
     const allExpenses: UnifiedExpense[] = [

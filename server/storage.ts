@@ -47,6 +47,7 @@ import * as fs from "fs/promises";
 import * as XLSX from "xlsx";
 import { db } from "./db";
 import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count, notInArray, gte, lte } from "drizzle-orm";
+import { sigortaTahakkukDokumu } from "@shared/sigortaTahakkuk";
 import { buildDedupKey } from "./dedup";
 
 // Ödemeler Portalı: talep + ilişkili beyanname/kullanıcı/belgeler tek yanıtta
@@ -1165,10 +1166,16 @@ export class DatabaseStorage implements IStorage {
     }
 
     return result.map(({ arac, toplamGider, ytdGider }) => {
-      const trafikFiyat = Number(arac.trafikSigortaFiyat || 0);
-      const kaskoFiyat = Number(arac.kaskoSigortaFiyat || 0);
-      const amortismanAylik = (trafikFiyat + kaskoFiyat) / 12;
-      const amortismanGiderYtd = amortismanAylik * currentMonth;
+      // Sigorta primi poliçe dönemine tahakkuk ettirilir. Eski hesap
+      // (trafik+kasko)/12 * geçen ay idi; poliçenin Ocak–Aralık işlediğini
+      // varsaydığı için yıl ortasında yenilenen araçta olmayan gideri yazıyor,
+      // geçen yıl başlamış poliçenin bu yıla düşen kısmını ise atlıyordu.
+      const amortismanGiderYtd = [
+        ...sigortaTahakkukDokumu(arac.trafikBitisTarihi, arac.trafikSigortaFiyat),
+        ...sigortaTahakkukDokumu(arac.kaskoBitisTarihi, arac.kaskoSigortaFiyat),
+      ]
+        .filter(k => k.yil === currentYear && k.ay <= currentMonth)
+        .reduce((acc, k) => acc + k.tutar, 0);
       const faturaGideri = plakaMap.get(arac.plaka) ?? { toplam: 0, ytd: 0 };
       const seneBasindanBeriGider = Number(ytdGider) + faturaGideri.ytd;
 
@@ -2083,42 +2090,28 @@ export class DatabaseStorage implements IStorage {
         branchAracCosts.set(branch, (branchAracCosts.get(branch) || 0) + tutar);
     });
 
-    // b) Kasko and Trafik insurance from araçlar
+    // b) Trafik ve kasko primleri — poliçe dönemine AYLIK TAHAKKUK ile.
+    //    Eskiden primin tamamı poliçenin başladığı aya yazılıyor, üstelik
+    //    "başlangıç yılı === rapor yılı" koşulu yüzünden geçen yıl yenilenmiş
+    //    poliçe bu yılın raporuna hiç düşmüyordu (2025-11 başlangıçlı 5 Renault
+    //    2026 kârlılığında 0 TL görünüyordu). Artık prim/12 poliçe dönemindeki
+    //    her aya yazılır; bkz. shared/sigortaTahakkuk.ts
+    const AY_ADLARI = ["ocak", "subat", "mart", "nisan", "mayis", "haziran",
+                       "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"];
+    const ayIndex = ay && ay !== "ALL" ? AY_ADLARI.indexOf(ay.toLowerCase()) : -1;
+    // ayIndex === -1 → ay filtresi yok (eski davranış: tanınmayan ay adı da filtrelemezdi)
+    const hedefAy = ayIndex === -1 ? null : ayIndex + 1;
+
     araclarList.forEach(a => {
         const branch = a.sube || "Belirsiz";
-
-        // Trafik Sigortası
-        if (a.trafikBitisTarihi && a.trafikSigortaFiyat) {
-            const bitisTarihi = new Date(a.trafikBitisTarihi);
-            const baslangicTarihi = new Date(bitisTarihi);
-            baslangicTarihi.setFullYear(baslangicTarihi.getFullYear() - 1);
-
-            if (baslangicTarihi.getFullYear() === yil) {
-                if (ay && ay !== "ALL") {
-                    const ayIndex = ["ocak", "subat", "mart", "nisan", "mayis", "haziran",
-                                   "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"].indexOf(ay.toLowerCase());
-                    if (ayIndex !== -1 && baslangicTarihi.getMonth() !== ayIndex) return;
-                }
-                const tutar = parseFloat(a.trafikSigortaFiyat || "0");
-                branchAracCosts.set(branch, (branchAracCosts.get(branch) || 0) + tutar);
-            }
-        }
-
-        // Kasko
-        if (a.kaskoBitisTarihi && a.kaskoSigortaFiyat) {
-            const bitisTarihi = new Date(a.kaskoBitisTarihi);
-            const baslangicTarihi = new Date(bitisTarihi);
-            baslangicTarihi.setFullYear(baslangicTarihi.getFullYear() - 1);
-
-            if (baslangicTarihi.getFullYear() === yil) {
-                if (ay && ay !== "ALL") {
-                    const ayIndex = ["ocak", "subat", "mart", "nisan", "mayis", "haziran",
-                                   "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik"].indexOf(ay.toLowerCase());
-                    if (ayIndex !== -1 && baslangicTarihi.getMonth() !== ayIndex) return;
-                }
-                const tutar = parseFloat(a.kaskoSigortaFiyat || "0");
-                branchAracCosts.set(branch, (branchAracCosts.get(branch) || 0) + tutar);
-            }
+        const kalemler = [
+            ...sigortaTahakkukDokumu(a.trafikBitisTarihi, a.trafikSigortaFiyat),
+            ...sigortaTahakkukDokumu(a.kaskoBitisTarihi, a.kaskoSigortaFiyat),
+        ];
+        for (const k of kalemler) {
+            if (k.yil !== yil) continue;
+            if (hedefAy !== null && k.ay !== hedefAy) continue;
+            branchAracCosts.set(branch, (branchAracCosts.get(branch) || 0) + k.tutar);
         }
     });
 
@@ -2323,37 +2316,31 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
-    // 2) Trafik ve kasko primleri. Poliçe dönemi bitiş tarihinden bir yıl geri
-    //    sayılarak bulunur (araclar tablosunda başlangıç tarihi tutulmuyor).
-    const policeDonemi = (bitis: string | null) => {
-      if (!bitis) return null;
-      const b = new Date(bitis);
-      if (Number.isNaN(b.getTime())) return null;
-      b.setFullYear(b.getFullYear() - 1);
-      return b.toISOString().split("T")[0];
+    // 2) Trafik ve kasko primleri, poliçe dönemine yayılmış 12 aylık tahakkuk
+    //    satırları olarak. Tek toplu satır, primin ödendiği ayı şişirip diğer
+    //    11 ayı bedava gösteriyordu; bkz. shared/sigortaTahakkuk.ts
+    const primKalemleri = (
+      tur: string,
+      bitis: string | null,
+      prim: string | null,
+      sirket: string | null,
+      policeNo: string | null,
+    ) => {
+      for (const k of sigortaTahakkukDokumu(bitis, prim)) {
+        kalemler.push({
+          tarih: `${k.ayKey}-01`,
+          tur,
+          aciklama: [sirket, policeNo, `${k.taksitNo}/12 tahakkuk`].filter(Boolean).join(" · "),
+          kaynak: "Poliçe",
+          tutar: k.tutar,
+        });
+      }
     };
 
-    const trafikBaslangic = policeDonemi(arac.trafikBitisTarihi);
-    if (trafikBaslangic && arac.trafikSigortaFiyat) {
-      kalemler.push({
-        tarih: trafikBaslangic,
-        tur: "Trafik Sigortası",
-        aciklama: [arac.trafikSigortaSirketi, arac.trafikPoliceNo].filter(Boolean).join(" · "),
-        kaynak: "Poliçe",
-        tutar: parseFloat(arac.trafikSigortaFiyat),
-      });
-    }
-
-    const kaskoBaslangic = policeDonemi(arac.kaskoBitisTarihi);
-    if (kaskoBaslangic && arac.kaskoSigortaFiyat) {
-      kalemler.push({
-        tarih: kaskoBaslangic,
-        tur: "Kasko",
-        aciklama: [arac.kaskoSigortaSirketi, arac.kaskoPoliceNo].filter(Boolean).join(" · "),
-        kaynak: "Poliçe",
-        tutar: parseFloat(arac.kaskoSigortaFiyat),
-      });
-    }
+    primKalemleri("Trafik Sigortası", arac.trafikBitisTarihi, arac.trafikSigortaFiyat,
+                  arac.trafikSigortaSirketi, arac.trafikPoliceNo);
+    primKalemleri("Kasko", arac.kaskoBitisTarihi, arac.kaskoSigortaFiyat,
+                  arac.kaskoSigortaSirketi, arac.kaskoPoliceNo);
 
     // 3) Gider Listesi'nde bu plakaya atanmış faturalar (ARAÇ BAKIM, ARAÇ ŞARJ...)
     const plakaliGiderler = await db
