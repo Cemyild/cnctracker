@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, RefreshCcw, Save, Trash2, X, ArrowUpDown, ArrowUp, ArrowDown, Check, ChevronsUpDown, Truck } from "lucide-react";
+import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, RefreshCcw, Save, Trash2, X, ArrowUpDown, ArrowUp, ArrowDown, Check, ChevronsUpDown, Truck, Link2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -292,6 +292,7 @@ export default function Nakliye() {
     const [updating, setUpdating] = useState(false);
     // Fatura kesme işlemi süren dosya no ("__TUMU__" = toplu işlem)
     const [kesilenDosya, setKesilenDosya] = useState<string | null>(null);
+    const [parasutKontrol, setParasutKontrol] = useState(false);
 
     const { toast } = useToast();
 
@@ -675,6 +676,53 @@ export default function Nakliye() {
         }
     };
 
+    /**
+     * Paraşüt boru hattını elle tetikler (çek → alış hizala → eşleştir).
+     *
+     * Neden gerekli: e-Fatura'ları sistem Paraşüt'e YAZMAZ; kullanıcı "İçeri Al"
+     * ile alır, sistem sonra Paraşüt'te arayıp kaydı bağlar ve ALIŞ rozeti
+     * yeşile döner. O arama boru hattında, yani günde bir kez (06:45) çalışıyordu.
+     * Kullanıcı gün içinde içeri aldığında rozet ertesi sabaha kadar sarı
+     * kalıyor ve "aktarmadım" gibi görünüyordu — oysa yalnızca "henüz bakmadım"
+     * demekti (canlıda görüldü: GAF2026000001966 / GAF2026000002031).
+     *
+     * SATIŞ FATURASI KESMEZ — o iş "Bekleyenleri Faturala" düğmesinde.
+     */
+    const handleParasutKontrol = async () => {
+        setParasutKontrol(true);
+        try {
+            const response = await fetch("/api/nakliye/senkron", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({}),
+            });
+            const sonuc = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(sonuc?.error || "Kontrol başarısız");
+
+            const y = sonuc.parasutaYazilan || {};
+            const baglanan = (y.mevcuttu || 0) + (y.basarili || 0);
+            toast({
+                title: "Paraşüt kontrolü tamamlandı",
+                description: baglanan
+                    ? `${baglanan} fatura Paraşüt kaydına bağlandı` +
+                      (y.elleBekleyen ? `, ${y.elleBekleyen} tanesi hâlâ bekliyor.` : ".")
+                    : y.elleBekleyen
+                        ? `${y.elleBekleyen} fatura Paraşüt'te bulunamadı — "İçeri Al" yapılmış mı?`
+                        : "Bekleyen fatura yok, hepsi güncel.",
+            });
+            fetchSavedInvoices();
+        } catch (error) {
+            console.error("Paraşüt kontrol hatası:", error);
+            toast({
+                variant: "destructive",
+                title: "Hata",
+                description: error instanceof Error ? error.message : "Kontrol başarısız.",
+            });
+        } finally {
+            setParasutKontrol(false);
+        }
+    };
+
     const handleDeleteInvoice = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         if (!confirm("Bu faturayı silmek istediğinize emin misiniz?")) return;
@@ -867,10 +915,25 @@ export default function Nakliye() {
                                 variant="outline"
                                 className="h-[38px] gap-2 font-semibold"
                                 onClick={handleMatchWithGumruk}
-                                disabled={matching || uploading}
+                                disabled={matching || uploading || parasutKontrol}
                             >
                                 {matching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                                 {matching ? "Eşleşiyor..." : "Gümrük ile Eşleştir"}
+                            </Button>
+
+                            {/* e-Fatura'yı Paraşüt'te "İçeri Al" ile aldıktan sonra ALIŞ rozetini
+                                tazeler. Boru hattı bunu günde bir kez yapıyor; bu düğme öne alır. */}
+                            <Button
+                                variant="outline"
+                                className="h-[38px] gap-2 font-semibold"
+                                onClick={handleParasutKontrol}
+                                disabled={parasutKontrol || matching || uploading || kesilenDosya !== null}
+                                title="Paraşüt'te İçeri Al ile aktardığınız faturaları arayıp kayda bağlar (ALIŞ rozetini tazeler). Satış faturası kesmez."
+                            >
+                                {parasutKontrol
+                                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                                    : <Link2 className="h-4 w-4" />}
+                                {parasutKontrol ? "Kontrol ediliyor..." : "Paraşüt'ü Kontrol Et"}
                             </Button>
 
                             {/* Hazır olan tüm dosyalar için Paraşüt'te taslak oluşturur.
@@ -879,7 +942,7 @@ export default function Nakliye() {
                                 variant="outline"
                                 className="h-[38px] gap-2 font-semibold"
                                 onClick={handleTumunuFaturala}
-                                disabled={kesilenDosya !== null || matching || uploading}
+                                disabled={kesilenDosya !== null || matching || uploading || parasutKontrol}
                                 title="Beyanname eşleşmesi tamamlanmış dosyalar için Paraşüt'te satış faturası taslağı oluştur"
                             >
                                 {kesilenDosya === "__TUMU__"
