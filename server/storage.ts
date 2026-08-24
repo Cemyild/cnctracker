@@ -4567,20 +4567,23 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(gumrukVerileri).where(inArray(gumrukVerileri.id, ids));
   }
 
-  // YALNIZ YAŞAYAN TASLAK ENGELDİR.
+  // YALNIZ PARAŞÜT'TE YAŞAYAN FATURA ENGELDİR.
   //
-  // Bu sorgu faturalamada "bu dosya için taslak zaten var" engelini kurar.
+  // Bu sorgu faturalamada "bu dosya için fatura zaten var" engelini kurar.
   // Durum filtresi olmadan 'hata' ve 'silinmis' kayıtlar da engel sayılıyordu:
   // bir kez hata alan dosya bir daha faturalanamıyor, Paraşüt'te silinen taslak
   // ise dosyayı sonsuza dek kilitliyordu (canlıda 2026-08-24: 3 ENYTEKS hata
   // kaydı ve 5 silinmiş taslak elle temizlenmek zorunda kaldı).
+  //
+  // 'resmilesti' MUTLAKA engeldir: resmileşmiş fatura GİB'e gitmiştir, ikincisi
+  // mükerrer fatura demektir. 'taslak' da engeldir — Paraşüt'te duruyor.
   //
   // Eski kayıtlar SİLİNMEZ — denetim izi olarak durur, yalnız engel saymayız.
   async getSatisFaturasiByDosyaNo(dosyaNo: string): Promise<ParasutSatisFaturasi | undefined> {
     const [row] = await db.select().from(parasutSatisFaturalari)
       .where(and(
         eq(parasutSatisFaturalari.gumrukDosyaNo, dosyaNo),
-        eq(parasutSatisFaturalari.durum, "taslak"),
+        inArray(parasutSatisFaturalari.durum, ["taslak", "resmilesti"]),
       ));
     return row;
   }
@@ -4589,8 +4592,29 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(parasutSatisFaturalari);
   }
 
+  // UPSERT — düz INSERT değil.
+  //
+  // gumruk_dosya_no üzerinde unique index var (bir dosya = bir satış faturası).
+  // Bir dosya bir kez 'hata' ya da 'silinmis' duruma düştükten sonra yeniden
+  // faturalanabilmeli; düz INSERT o noktada unique ihlaliyle patlardı ve
+  // dosya kalıcı olarak kilitlenirdi (2026-08-24: 3 ENYTEKS hata kaydı elle
+  // silinmek zorunda kaldı). Çakışmada kayıt YENİLENİR, ikinci satır açılmaz.
   async insertSatisFaturasi(s: InsertParasutSatisFaturasi): Promise<ParasutSatisFaturasi> {
-    const [row] = await db.insert(parasutSatisFaturalari).values(s).returning();
+    const [row] = await db.insert(parasutSatisFaturalari).values(s)
+      .onConflictDoUpdate({
+        target: parasutSatisFaturalari.gumrukDosyaNo,
+        set: {
+          parasutSalesInvoiceId: s.parasutSalesInvoiceId ?? null,
+          contactId: s.contactId ?? null,
+          netToplam: s.netToplam ?? null,
+          paraBirimi: s.paraBirimi ?? "TRY",
+          kalemSayisi: s.kalemSayisi ?? null,
+          durum: s.durum ?? "taslak",
+          parasutFaturaNo: s.parasutFaturaNo ?? null,
+          hataMesaji: s.hataMesaji ?? null,
+        },
+      })
+      .returning();
     return row;
   }
 

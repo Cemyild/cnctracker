@@ -1419,10 +1419,23 @@ export const parasutSatisFaturalari = pgTable("parasut_satis_faturalari", {
   netToplam: decimal("net_toplam", { precision: 15, scale: 2 }),
   paraBirimi: text("para_birimi").default("TRY"),
   kalemSayisi: integer("kalem_sayisi"),
-  durum: text("durum").notNull().default("taslak"), // taslak | hata
+  // taslak     → Paraşüt'te taslak olarak duruyor, henüz resmileştirilmedi
+  // resmilesti → Paraşüt'te fatura numarası aldı (e-belge kesildi), iş bitti
+  // silinmis   → biz kesmiştik ama Paraşüt'te bulunamadı (kullanıcı silmiş)
+  // hata       → kesilemedi
+  durum: text("durum").notNull().default("taslak"),
+  /**
+   * Resmileştirilince Paraşüt'ün verdiği fatura numarası ("CN12026000000016").
+   * Taslakta boştur — resmileşmenin tek güvenilir göstergesi budur
+   * (Paraşüt taslakta `invoice_no` alanını boş string bırakır).
+   */
+  parasutFaturaNo: text("parasut_fatura_no"),
   hataMesaji: text("hata_mesaji"),
   olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
 }, (table) => [
+  // BİR DOSYA = BİR SATIŞ FATURASI. Bu kısıt iş kuralının veritabanı
+  // karşılığıdır; aynı dosya için ikinci kayıt açılamaz. Bu yüzden yeniden
+  // faturalama INSERT değil UPSERT ile yapılır (bkz. insertSatisFaturasi).
   uniqueIndex("parasut_satis_dosya_no_idx").on(table.gumrukDosyaNo),
 ]);
 

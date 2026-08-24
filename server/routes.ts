@@ -4410,19 +4410,31 @@ export async function registerRoutes(
           belgeTipi: alis?.belgeTipi ?? null,
           // Satış: bu faturaya karşılık müşteriye fatura oluşturuldu mu?
           // Beyanname eşleşmesi yoksa henüz sıra gelmemiştir.
-          // "silinmis": biz kesmiştik ama Paraşüt'te bulunamadı (kullanıcı
-          // taslağı silmiş). "bekliyor"dan ayrı tutulur — ikisi aynı görünürse
-          // kullanıcı hiç kesilmemiş sanır ve neden kaybolduğunu araştıramaz.
+          // SATIŞ TARAFININ İLERLEME SKALASI:
+          //   eslesme_yok → beyanname eşleşmesi yok, sıra gelmedi
+          //   bekliyor    → eşleşti ama fatura kesilmedi
+          //   taslak      → Paraşüt'te taslak duruyor, RESMİLEŞTİRİLMEDİ
+          //   resmilesti  → fatura numarası aldı, müşteriye gitti (İŞ BİTTİ)
+          //   silinmis    → kesmiştik ama Paraşüt'te yok (kullanıcı silmiş)
+          //   hata        → kesilemedi
+          //
+          // "taslak" ile "resmilesti" ayrı tutulur: taslak kalan fatura
+          // muhasebe açısından kesilmemiş sayılır, kullanıcının onu görüp
+          // resmileştirmesi gerekir. İkisi aynı renkte olsaydı taslakta unutulan
+          // faturalar tamamlanmış görünürdü.
           parasutSatisDurum: !v.ilgiliDosyaNo
             ? "eslesme_yok"
-            : satis?.durum === "taslak"
-              ? "olusturuldu"
-              : satis?.durum === "hata"
-                ? "hata"
-                : satis?.durum === "silinmis"
-                  ? "silinmis"
-                  : "bekliyor",
+            : satis?.durum === "resmilesti"
+              ? "resmilesti"
+              : satis?.durum === "taslak"
+                ? "taslak"
+                : satis?.durum === "hata"
+                  ? "hata"
+                  : satis?.durum === "silinmis"
+                    ? "silinmis"
+                    : "bekliyor",
           parasutSalesInvoiceId: satis?.parasutSalesInvoiceId ?? null,
+          parasutFaturaNo: satis?.parasutFaturaNo ?? null,
           parasutSatisHata: satis?.hataMesaji ?? null,
         };
       });

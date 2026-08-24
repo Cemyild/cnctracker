@@ -196,11 +196,14 @@ function DurumRozetleri({
     const rozet = (
         etiket: string,
         tamam: boolean,
-        renk: "yesil" | "gri" | "kirmizi" | "sari",
+        renk: "yesil" | "gri" | "kirmizi" | "sari" | "mavi",
         baslik: string,
     ) => {
         const renkler = {
             yesil: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-900/50",
+            // Taslak kendine ait bir renk: "bekliyor"un sarısıyla karışırsa
+            // Paraşüt'te duran fatura ile hiç kesilmemiş fatura ayırt edilemez.
+            mavi: "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:border-sky-900/50",
             sari: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-900/50",
             kirmizi: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900/50",
             gri: "bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-900/40 dark:text-slate-400 dark:border-slate-700",
@@ -240,17 +243,22 @@ function DurumRozetleri({
                         ? "e-Fatura — Paraşüt'te \"İçeri Al\" ile aktarmanız gerekiyor (sistem yazmaz)"
                         : "Paraşüt'e henüz işlenmedi",
             )}
-            {satis === "olusturuldu"
-                // Yeşil = Paraşüt'te DOĞRULANMIŞ. "Paraşüt'ü Kontrol Et" her
-                // turda taslağın hâlâ durduğunu sınar; silinmişse rozet düşer.
-                ? rozet("Satış", true, "yesil", `Müşteri faturası Paraşüt'te duruyor (${inv.parasutSalesInvoiceId})`)
-                : satis === "hata"
-                    ? rozet("Satış", false, "kirmizi", `Hata: ${inv.parasutSatisHata || "bilinmiyor"}`)
-                    : satis === "silinmis"
-                        ? rozet("Satış", false, "kirmizi", `Kesilmişti ama Paraşüt'te bulunamadı (fatura ${inv.parasutSalesInvoiceId}) — taslak silinmiş. Yeniden kesilebilir.`)
-                        : satis === "eslesme_yok"
-                            ? rozet("Satış", false, "gri", "Beyanname eşleşmesi bekleniyor")
-                            : rozet("Satış", false, "sari", "Beyanname eşleşti, müşteri faturası bekliyor")}
+            {/* YEŞİL = İŞ BİTTİ: fatura resmileşti, numarasını aldı, müşteriye gitti.
+                MAVİ = Paraşüt'te taslak duruyor; resmileştirme kullanıcıda.
+                Durumlar "Paraşüt'ü Kontrol Et" turunda Paraşüt'ten doğrulanır. */}
+            {satis === "resmilesti"
+                ? rozet("Satış", true, "yesil",
+                    `Fatura kesildi ve müşteriye gönderildi — No: ${inv.parasutFaturaNo || "?"}`)
+                : satis === "taslak"
+                    ? rozet("Taslak", false, "mavi",
+                        `Paraşüt'te TASLAK olarak duruyor (kayıt ${inv.parasutSalesInvoiceId}) — henüz resmileştirilmedi, fatura numarası yok`)
+                    : satis === "hata"
+                        ? rozet("Satış", false, "kirmizi", `Hata: ${inv.parasutSatisHata || "bilinmiyor"}`)
+                        : satis === "silinmis"
+                            ? rozet("Satış", false, "kirmizi", `Kesilmişti ama Paraşüt'te bulunamadı (kayıt ${inv.parasutSalesInvoiceId}) — taslak silinmiş. Yeniden kesilebilir.`)
+                            : satis === "eslesme_yok"
+                                ? rozet("Satış", false, "gri", "Beyanname eşleşmesi bekleniyor")
+                                : rozet("Satış", false, "sari", "Beyanname eşleşti, müşteri faturası bekliyor")}
 
             {kesilebilir && onFaturaKes && (
                 <button
@@ -713,6 +721,7 @@ export default function Nakliye() {
             const parcalar: string[] = [];
             if (baglanan) parcalar.push(`${baglanan} gelen fatura Paraşüt kaydına bağlandı`);
             if (y.elleBekleyen) parcalar.push(`${y.elleBekleyen} fatura Paraşüt'te bulunamadı — "İçeri Al" yapılmış mı?`);
+            if (d.resmilesen) parcalar.push(`${d.resmilesen} satış faturası resmileşmiş — artık yeşil`);
             if (d.silinmis) parcalar.push(`${d.silinmis} satış faturası Paraşüt'te silinmiş — yeniden kesilebilir`);
             if (!parcalar.length) {
                 parcalar.push(d.kontrol
@@ -1090,7 +1099,18 @@ export default function Nakliye() {
                             <TableBody>
                                 {sortedInvoices.length > 0 ? (
                                     sortedInvoices.map((inv) => (
-                                        <TableRow key={inv.id} className="cursor-pointer" onClick={() => setSelectedInvoice(inv)}>
+                                        // İŞİ BİTMİŞ SATIR YEŞİL: müşteri faturası resmileşip
+                                        // numarasını almışsa satır bir bakışta ayırt edilir.
+                                        // Taslakta kalanlar normal zeminde kalır ki gözden kaçmasın.
+                                        <TableRow
+                                            key={inv.id}
+                                            className={`cursor-pointer ${
+                                                inv.parasutSatisDurum === "resmilesti"
+                                                    ? "bg-emerald-50/60 hover:bg-emerald-100/60 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30"
+                                                    : ""
+                                            }`}
+                                            onClick={() => setSelectedInvoice(inv)}
+                                        >
                                             <TableCell className="px-2.5 py-1.5 font-bold tabular-nums" style={{ color: "#0284c7" }}>
                                                 {inv.pdfYolu ? (
                                                     // Fatura numarasına tıklanınca kaynak PDF yeni sekmede açılır.

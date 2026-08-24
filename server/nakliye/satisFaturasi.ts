@@ -170,13 +170,23 @@ export function kesilmisOnbellegiTemizle(): void {
  * TEK TEK GET YAPILMAZ: 24 kayıt için 24 istek yerine sayfalı liste ile ~2
  * istek. Paraşüt limiti 10 istek/10 saniye olduğu için bu fark önemli.
  */
-export async function satisFaturalariniDogrula(): Promise<{ kontrol: number; silinmis: number }> {
+export async function satisFaturalariniDogrula(): Promise<{
+  kontrol: number; resmilesen: number; silinmis: number;
+}> {
   const kayitlar = (await storage.getSatisFaturalari()).filter(
-    (s) => s.durum === "taslak" && s.parasutSalesInvoiceId,
+    (s) => (s.durum === "taslak" || s.durum === "resmilesti") && s.parasutSalesInvoiceId,
   );
-  if (kayitlar.length === 0) return { kontrol: 0, silinmis: 0 };
+  if (kayitlar.length === 0) return { kontrol: 0, resmilesen: 0, silinmis: 0 };
 
-  const mevcut = new Set<string>();
+  // id → invoice_no. Boş string = Paraşüt'te hâlâ TASLAK.
+  //
+  // RESMİLEŞMENİN GÖSTERGESİ `invoice_no`: Paraşüt taslakta bu alanı boş
+  // bırakır, resmileştirilince ("CN12026000000016" gibi) numara verir.
+  // Canlıda ölçüldü (2026-08-25): 24 kaydın 16'sı numaralı, 8'i boştu ve
+  // bu, kullanıcının Paraşüt ekranında gördüğü TASLAK/GÖNDERİLDİ ayrımıyla
+  // birebir örtüştü. `active_e_document` ilişkisi liste yanıtında gelmediği
+  // için (ayrıca include gerekiyor) tek istekle okunabilen gösterge budur.
+  const mevcut = new Map<string, string>();
   const yil = new Date().getFullYear();
   for (let sayfa = 1; sayfa <= 40; sayfa++) {
     const cevap = await parasutIstek<any>("/sales_invoices", {
@@ -191,7 +201,9 @@ export async function satisFaturalariniDogrula(): Promise<{ kontrol: number; sil
     });
     const { veri } = jsonApiCoz(cevap);
     if (veri.length === 0) break;
-    for (const d of veri) mevcut.add(String(d.id));
+    for (const d of veri) {
+      mevcut.set(String(d.id), String(d.attributes?.invoice_no || "").trim());
+    }
     if (veri.length < 25) break;
   }
 
@@ -201,19 +213,42 @@ export async function satisFaturalariniDogrula(): Promise<{ kontrol: number; sil
   // Şüphede hiçbir şey değiştirmeyiz.
   if (mevcut.size === 0) {
     console.error("Satış faturası doğrulaması: Paraşüt taraması boş döndü — hiçbir kayıt işaretlenmedi");
-    return { kontrol: kayitlar.length, silinmis: 0 };
+    return { kontrol: kayitlar.length, resmilesen: 0, silinmis: 0 };
   }
 
+  let resmilesen = 0;
   let silinmis = 0;
+
   for (const s of kayitlar) {
-    if (mevcut.has(String(s.parasutSalesInvoiceId))) continue;
-    await storage.updateSatisFaturasi(s.id, {
-      durum: "silinmis",
-      hataMesaji: `Paraşüt'te bulunamadı (fatura ${s.parasutSalesInvoiceId}) — taslak silinmiş olabilir`,
-    });
-    silinmis++;
+    const id = String(s.parasutSalesInvoiceId);
+
+    if (!mevcut.has(id)) {
+      if (s.durum === "silinmis") continue;
+      await storage.updateSatisFaturasi(s.id, {
+        durum: "silinmis",
+        hataMesaji: `Paraşüt'te bulunamadı (fatura ${id}) — taslak silinmiş olabilir`,
+      });
+      silinmis++;
+      continue;
+    }
+
+    const faturaNo = mevcut.get(id) || "";
+
+    if (faturaNo && s.durum !== "resmilesti") {
+      await storage.updateSatisFaturasi(s.id, {
+        durum: "resmilesti",
+        parasutFaturaNo: faturaNo,
+        hataMesaji: null,
+      });
+      resmilesen++;
+    } else if (!faturaNo && s.durum === "resmilesti") {
+      // Resmileşme geri alınmış (fatura iptal edilip taslağa döndürülmüş).
+      // Nadir ama mümkün; rozet gerçeği göstermeli.
+      await storage.updateSatisFaturasi(s.id, { durum: "taslak", parasutFaturaNo: null });
+    }
   }
-  return { kontrol: kayitlar.length, silinmis };
+
+  return { kontrol: kayitlar.length, resmilesen, silinmis };
 }
 
 /** Fatura kesilemeyecek durumdaki (doğrulaması düşmüş) kayıtlar. */

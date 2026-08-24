@@ -11,8 +11,8 @@ export type SenkronSonuc = {
   parasutaYazilan: { basarili: number; mevcuttu: number; hatali: number; elleBekleyen: number };
   eslestirme: { taranan: number; eslesen: number; kuyruk: number };
   faturalama: { olusturulan: number; kuyruk: number; hatalar: string[] };
-  /** Kestiğimiz satış faturaları Paraşüt'te hâlâ duruyor mu? */
-  satisDogrulama: { kontrol: number; silinmis: number };
+  /** Kestiğimiz satış faturaları Paraşüt'te ne durumda? (duruyor / resmileşti / silinmiş) */
+  satisDogrulama: { kontrol: number; resmilesen: number; silinmis: number };
 };
 
 let calisiyorMu = false;
@@ -136,7 +136,7 @@ export async function senkronCalistir(): Promise<SenkronSonuc> {
 
     // 5) Kestiğimiz satış faturaları Paraşüt'te hâlâ duruyor mu? Bu adım
     // yalnız OKUR ve kendi kaydımızı düzeltir; Paraşüt'e hiçbir şey yazmaz.
-    let satisDogrulama = { kontrol: 0, silinmis: 0 };
+    let satisDogrulama = { kontrol: 0, resmilesen: 0, silinmis: 0 };
     try {
       satisDogrulama = await satisFaturalariniDogrula();
     } catch (e) {
