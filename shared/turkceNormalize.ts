@@ -63,3 +63,37 @@ export function firmaAdiBenzerligi(a: string, b: string): number {
   kisa.forEach((k) => { if (uzun.has(k)) kesisim++; });
   return Math.round((kesisim / kisa.size) * 100);
 }
+
+/**
+ * Simetrik (Jaccard) benzerlik — kapsama metriğinin 100 verdiği BİRDEN ÇOK
+ * adayı kırmak için.
+ *
+ * Kapsama metriği kısa tarafın tek anlamlı kelimeye inmesine karşı korumasız:
+ * "M.F.C. TEKSTİL SANAYİ VE TİCARET LTD." normalize edilince tek harfli
+ * parçalar (M, F, C) elendiği için geriye {TEKSTIL} kalır ve
+ * {ENYTEKS, TEKSTIL} içinde bulunduğu için %100 verir. Canlıda tam da bu
+ * oldu: ENYTEKS'e 100 veren iki cari çıktı, "tek sonuç" şartı bozuldu ve üç
+ * fatura "müşteri bulunamadı" diye Paraşüt'e hiç aktarılamadı.
+ *
+ * Jaccard birleşimi paydaya aldığı için bu kaymayı cezalandırır:
+ *   ENYTEKS TEKSTIL vs ENYTEKS TEKSTIL -> 100
+ *   ENYTEKS TEKSTIL vs M F C TEKSTIL   ->  50
+ *
+ * Kapsama metriğinin YERİNE geçmez, YANINDA kullanılır: kapsama "aday mı?"
+ * sorusunu, bu ölçü "hangi aday?" sorusunu cevaplar.
+ */
+export function firmaAdiSimetrikBenzerlik(a: string, b: string): number {
+  const na = normalizeFirmaAdi(a);
+  const nb = normalizeFirmaAdi(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 100;
+
+  const sa = new Set(na.split(" ").filter((k) => k.length >= 2));
+  const sb = new Set(nb.split(" ").filter((k) => k.length >= 2));
+  if (sa.size === 0 || sb.size === 0) return 0;
+
+  let kesisim = 0;
+  sa.forEach((k) => { if (sb.has(k)) kesisim++; });
+  const birlesim = sa.size + sb.size - kesisim;
+  return birlesim === 0 ? 0 : Math.round((kesisim / birlesim) * 100);
+}

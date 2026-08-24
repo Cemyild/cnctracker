@@ -2,8 +2,9 @@ import { storage } from "../storage";
 import { parasutIstek, jsonApiCoz, iliskiId } from "../parasut/client";
 import { paraBirimiParasut } from "../parasut/hesap";
 import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
-import { firmaAdiBenzerligi } from "@shared/turkceNormalize";
+import { firmaAdiBenzerligi, firmaAdiSimetrikBenzerlik } from "@shared/turkceNormalize";
 import { konteynerAnahtarlari } from "@shared/konteyner";
+import { ihracatRejimiMi } from "@shared/rejim";
 import { tarihGoster, sistemOncesiMi } from "./tarih";
 import type { NakliyeFaturasi, GumrukVerisi, NakliyeVerisi } from "@shared/schema";
 
@@ -186,6 +187,10 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
   const gumrukIndeks = new Map<string, GumrukVerisi>();
   for (const g of (await storage.getGumrukHouseNoVerileri()) as GumrukVerisi[]) {
     if (!g.dosyaNo) continue;
+    // İHRACAT SATIRLARI ELENİR: navlun faturası ithalat konteynerinin
+    // taşınmasıdır. Aynı dosya numarası altındaki ihracat satırı yalnızca
+    // yanlış firma/VKN kaynağıdır. Bkz. @shared/rejim.
+    if (ihracatRejimiMi(g.rejim)) continue;
     for (const k of konteynerAnahtarlari(g.houseNo)) {
       const anahtar = `${g.dosyaNo}|${k}`;
       if (!gumrukIndeks.has(anahtar)) gumrukIndeks.set(anahtar, g);
@@ -252,6 +257,7 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
     const dosyaBazli = new Map<string, GumrukVerisi[]>();
     for (const g of ekstra) {
       if (!g.dosyaNo) continue;
+      if (ihracatRejimiMi(g.rejim)) continue; // ihracat satırı aday değildir
       if (!dosyaBazli.has(g.dosyaNo)) dosyaBazli.set(g.dosyaNo, []);
       dosyaBazli.get(g.dosyaNo)!.push(g);
     }
@@ -264,7 +270,13 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
       // Aynı dosyada birden çok firma olabildiği için ekrandaki unvanla kırılır.
       // Kıramazsak seçim YAPMAYIZ — yanlış firmanın VKN'si yanlış müşteriye
       // fatura kesilmesine yol açar; VKN'siz kalıp unvan yedeğine düşmek daha güvenli.
-      if (adaylar.length === 1) { grup.gumruk = adaylar[0]; continue; }
+      //
+      // TEK ADAY DA DOĞRULANIR. Eskiden `adaylar.length === 1` durumu bu
+      // korumanın dışındaydı ve canlıda para hatası üretti: gumruk_verileri'nde
+      // o dosyanın YALNIZ ihracat satırı bulunduğunda (ithalat satırı henüz
+      // yüklenmemiş ya da yalnız beyannameler tablosunda) tek aday odur ve
+      // unvanı hiç sorgulanmadan kabul edilirdi. Tek aday olmasının sebebi
+      // verinin eksikliğidir, doğruluğu değil.
       const ekranUnvan = grup.ekran.gumrukFirmaUnvan || grup.ekran.musteri || "";
       if (!ekranUnvan) continue;
       const puanli = adaylar
@@ -293,8 +305,28 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
   for (const [dosyaNo, grup] of Array.from(gruplar.entries())) {
     const beklenen = parseInt(String(grup.gumruk?.konteynerSayisi || "0"), 10) || 0;
     const eslesen = grup.konteynerler.size;
-    const vkn = String(grup.gumruk?.vn || "").replace(/\D/g, "") || null;
     const firmaUnvan = grup.ekran.gumrukFirmaUnvan || grup.gumruk?.firmaUnvan || null;
+
+    // VKN, YALNIZCA geldiği satırın unvanı ekrandaki müşteriyle örtüşüyorsa
+    // kullanılır. Unvan ile VKN farklı satırlardan gelirse (aynı dosya
+    // numarasının ithalat/ihracat çifti) fatura yanlış firmaya kesilir —
+    // canlıda 26-11658 HSF yerine MATAY'a, 26-11599 DE-KA yerine ORAU'ya
+    // kesildi. Çelişki halinde VKN'siz kalıp unvan yedeğine düşmek güvenlidir.
+    const gumrukUnvan = grup.gumruk?.firmaUnvan || "";
+    const ekranMusteri = grup.ekran.gumrukFirmaUnvan || grup.ekran.musteri || "";
+    const unvanTutarli =
+      !gumrukUnvan || !ekranMusteri
+        ? true // karşılaştıracak bir şey yoksa engelleme
+        : firmaAdiBenzerligi(ekranMusteri, gumrukUnvan) >= 70;
+    if (!unvanTutarli) {
+      console.error(
+        `VKN/unvan çelişkisi (${dosyaNo}): beyanname satırı "${gumrukUnvan}" ` +
+        `ama ekrandaki müşteri "${ekranMusteri}" — VKN yok sayıldı`,
+      );
+    }
+    const vkn = unvanTutarli
+      ? String(grup.gumruk?.vn || "").replace(/\D/g, "") || null
+      : null;
 
     // Bu dosyanın konteynerlerinden biri Paraşüt'teki bir satış faturasında
     // geçiyorsa fatura zaten kesilmiş demektir.
@@ -404,9 +436,11 @@ export function cariOnbellegiTemizle(): void {
 /**
  * Müşteri cari kartını bulur: önce VKN, olmazsa unvan.
  *
- * VKN birincil anahtardır çünkü kesindir. Unvan yedeği, VKN'si eksik kalan
- * ~%1,4 kayıt için. Unvanda TAM eşleşme (100) aranır ve tek sonuç şartı
- * vardır — yanlış müşteriye fatura kesmektense kuyrukta insan onayı beklenir.
+ * VKN birincil anahtardır çünkü kesindir — AMA yalnız doğru satırdan geldiyse.
+ * Bu yüzden VKN ile bulunan cari, unvanla çapraz doğrulanır; çelişirse VKN
+ * yok sayılır. Unvan yedeğinde TAM eşleşme (100) aranır; birden çok aday
+ * çıkarsa simetrik benzerlikle kırılır, kırılamazsa seçim YAPILMAZ —
+ * yanlış müşteriye fatura kesmektense kuyrukta insan onayı beklenir.
  */
 async function musteriBul(vkn: string | null, firmaUnvan: string): Promise<string | undefined> {
   if (vkn) {
@@ -414,16 +448,53 @@ async function musteriBul(vkn: string | null, firmaUnvan: string): Promise<strin
       const cevap = await parasutIstek<any>("/contacts", {
         query: { "filter[tax_number]": vkn, "page[size]": "5" },
       });
-      const bulunan = jsonApiCoz(cevap).veri[0]?.id;
-      if (bulunan) return String(bulunan);
+      const aday = jsonApiCoz(cevap).veri[0];
+      if (aday) {
+        // VKN İLE BULUNAN CARİ, UNVANLA DOĞRULANIR.
+        //
+        // Eskiden burada koşulsuz `return` vardı: VKN bulununca unvana hiç
+        // bakılmıyordu. Doğru unvan elde olmasına ve fonksiyona parametre
+        // olarak geçirilmesine rağmen karşılaştırma yapılmadığı için,
+        // komşu beyanname satırından gelen VKN sessizce yanlış firmayı
+        // seçiyordu — canlıda 26-11658 (HSF) MATAY'a, 26-11599 (DE-KA)
+        // ORAU'ya kesildi. "VKN kesindir" varsayımı doğrudur; yanlış olan,
+        // VKN'nin DOĞRU SATIRDAN geldiği varsayımıydı.
+        const cariAd = String(aday.attributes?.name || "");
+        if (!firmaUnvan || firmaAdiBenzerligi(firmaUnvan, cariAd) >= 70) {
+          return String(aday.id);
+        }
+        console.error(
+          `VKN/cari çelişkisi: VKN ${vkn} → "${cariAd}" ama beklenen müşteri ` +
+          `"${firmaUnvan}" — VKN yok sayıldı, unvan yedeğine düşülüyor`,
+        );
+      }
     } catch (e) {
       console.error(`VKN ile cari arama hatası (${vkn}):`, e instanceof Error ? e.message : e);
     }
   }
   if (!firmaUnvan) return undefined;
+
   const liste = await cariListesiYukle();
   const tam = liste.filter((c) => firmaAdiBenzerligi(firmaUnvan, c.ad) === 100);
-  return tam.length === 1 ? tam[0].id : undefined;
+  if (tam.length === 1) return tam[0].id;
+
+  // BİRDEN ÇOK TAM EŞLEŞME: kapsama metriği kısa taraf tek anlamlı kelimeye
+  // indiğinde sahte 100 üretir ("M.F.C. TEKSTİL" → {TEKSTIL} ⊂ {ENYTEKS,
+  // TEKSTIL}). Eskiden bu durumda hiç seçim yapılmaz, fatura "müşteri
+  // bulunamadı" diye Paraşüt'e hiç aktarılamazdı — canlıda üç ENYTEKS
+  // faturası tam bu yüzden düştü ve hata, araya yeni bir cari eklendiği gün
+  // ortaya çıktı. Simetrik ölçü gerçek eşleşmeyi öne çıkarır (100 vs 50).
+  if (tam.length > 1) {
+    const puanli = tam
+      .map((c) => ({ c, p: firmaAdiSimetrikBenzerlik(firmaUnvan, c.ad) }))
+      .sort((a, b) => b.p - a.p);
+    if (puanli[0].p > (puanli[1]?.p ?? -1)) return puanli[0].c.id;
+    console.error(
+      `Cari seçilemedi ("${firmaUnvan}"): ${tam.length} aday eşit puanlı ` +
+      `(${tam.map((c) => c.ad).join(" | ")})`,
+    );
+  }
+  return undefined;
 }
 
 /**
