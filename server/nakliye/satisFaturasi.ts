@@ -36,9 +36,18 @@ export type DosyaOnizleme = {
   hazir: boolean;
   engel: string | null;
   /**
-   * Engel, kullanıcı onayıyla aşılabilir mi? Yalnızca "beklemek bir iş kararı"
-   * olan engeller için true (eksik konteyner, boş konteyner sayısı).
-   * Mükerrer fatura ve müşterisiz fatura engelleri ASLA aşılamaz.
+   * Faturayı ENGELLEMEYEN durum bildirimi (eksik/bilinmeyen konteyner sayısı).
+   * `hazir` bayrağını düşürmez; yalnız kullanıcıya gösterilir.
+   */
+  uyari: string | null;
+  /**
+   * Engel, kullanıcı onayıyla aşılabilir mi?
+   *
+   * Bugün HER ZAMAN false: aşılabilir sınıftaki iki engel (eksik konteyner,
+   * boş konteyner sayısı) `uyari`ya taşındı, geriye yalnız para hatası
+   * üreten aşılamaz engeller kaldı. Alan, uç sözleşmesini ve UI'daki onay
+   * akışını bozmamak için duruyor — ileride yeni bir aşılabilir engel
+   * çıkarsa yeri hazır.
    */
   zorlanabilir: boolean;
   paraBirimi: string;
@@ -344,11 +353,10 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
     // geçiyorsa fatura zaten kesilmiş demektir.
     const zatenKesilmis = Array.from(grup.konteynerler).find((k) => kesilmis.has(k));
 
-    // ENGELLER İKİ SINIFA AYRILIR:
-    //   aşılamaz → mükerrer fatura / müşterisiz fatura riski taşır, `zorla` bunu ASLA geçmez
-    //   aşılabilir → beklemek bir iş kararıdır; kullanıcı ekranda görüp butonla geçebilir
+    // ENGELLER: yalnız PARA HATASI riski taşıyanlar. Hepsi aşılamaz sınıfta —
+    // mükerrer fatura ya da müşterisiz/tutarsız fatura üretirler.
     let engel: string | null = null;
-    let zorlanabilir = false;
+    const zorlanabilir = false;
 
     if (taramaBasarisiz) engel = "Mükerrer taraması yapılamadı — güvenlik gereği bekletiliyor";
     else if (await storage.getSatisFaturasiByDosyaNo(dosyaNo)) engel = "Bu dosya için taslak zaten var";
@@ -361,14 +369,24 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
         ? `Doğrulanmış fatura kaydı yok (${grup.faturaKaydiOlmayan.join(", ")}) — tutara güvenilemez`
         : "Faturalanabilir kalem yok";
     }
-    else if (!beklenen) {
-      engel = "Beyannamede konteyner sayısı boş — otomatik tetiklenemez";
-      zorlanabilir = true;
-    }
-    else if (eslesen < beklenen) {
-      engel = `${beklenen} konteynerin ${eslesen}'i eşleşti — bekliyor`;
-      zorlanabilir = true;
-    }
+
+    // KONTEYNER SAYISI ARTIK ENGEL DEĞİL — bilgi.
+    //
+    // Bu iki kontrol otomatik tur içindi: tur 06:45'te kendiliğinden çalışırken
+    // eksik kalemle fatura kesmesin diye beklerdi. Otomatik faturalama kalktı
+    // (bkz. senkron.ts); eşleştirmeyi kullanıcı ekranda kendisi kuruyor ve
+    // "Bekleyenleri Faturala"ya kendisi basıyor, yani bekleme kararı zaten
+    // insanda. Engel bırakılınca yalnız zarar veriyordu:
+    //   - `!beklenen`: ithalat satırı yalnız `beyannameler` tablosunda olan
+    //     dosyalarda (gumruk_verileri'nde karşılığı yok) konteyner sayısı hiç
+    //     okunamıyor. Bilinmeyen bir sayı engel olamaz — canlıda ENYTEKS'in üç
+    //     dosyası ekranda konteyneri eşleşmiş olmasına rağmen bu yüzden
+    //     toplu turda atlanıyor, tek tek "yine de kes" gerektiriyordu.
+    //   - `eslesen < beklenen`: kullanıcının zaten gördüğü bir durum.
+    // İkisi de `uyari` alanına taşındı; `hazir` bayrağını düşürmüyorlar.
+    let uyari: string | null = null;
+    if (!beklenen) uyari = "Beyannamede konteyner sayısı yok — eşleşen konteynerlerle kesiliyor";
+    else if (eslesen < beklenen) uyari = `${beklenen} konteynerin ${eslesen}'i eşleşti`;
 
     const grupFaturalari = Array.from(grup.faturaNolar)
       .map((no) => faturaMap.get(no))
@@ -401,6 +419,7 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
       eslesenKonteyner: eslesen,
       hazir: engel === null,
       engel,
+      uyari,
       zorlanabilir,
       paraBirimi: grupFaturalari[0]?.paraBirimi || "TRY",
       kalemler,
@@ -568,10 +587,10 @@ async function etiketBulVeyaOlustur(dosyaNo: string): Promise<string | undefined
  * TEVKİFAT GİDEN FATURADA ASLA YOKTUR — withholding_rate ve
  * vat_withholding_rate kodda sabit 0'dır, gelen faturadan TÜRETİLMEZ.
  *
- * `zorla` YALNIZCA elle tetiklemede ve YALNIZCA tek dosya için anlamlıdır:
- * "aşılabilir" engelleri (eksik konteyner) geçer. Mükerrer fatura ve
- * müşterisiz fatura engellerini GEÇMEZ — o engeller para hatasıdır, iş kararı
- * değil. Otomatik turda (sadeceDosyaNo yok) zorla kullanılmaz.
+ * `zorla` bugün İŞLEVSİZ: aşılabilir engeller (eksik/boş konteyner sayısı)
+ * `uyari`ya taşındığı için geriye yalnız aşılamaz engeller kaldı ve `zorla`
+ * onları ASLA geçmez — mükerrer fatura ve müşterisiz fatura para hatasıdır,
+ * iş kararı değil. Parametre uç sözleşmesi için korunuyor.
  */
 export async function tamamlananDosyalariFaturala(
   sadeceDosyaNo?: string,
