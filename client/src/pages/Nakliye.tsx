@@ -453,6 +453,15 @@ export default function Nakliye() {
                     title: "Eşleştirme yapılamadı",
                     description: eslesme.mesaj + (eslesme.adaylar?.length ? ` (${eslesme.adaylar.join(" · ")})` : ""),
                 });
+            } else if (eslesme?.uyari) {
+                // Eşleştirme YAPILDI ama dikkat gerektiren bir durum var:
+                // seçilen müşteri ile dosyadaki firma uyuşmuyor. İş yapılmış
+                // olduğu için engellemiyoruz; kullanıcı görsün diye uyarıyoruz.
+                toast({
+                    variant: "destructive",
+                    title: "Eşleştirildi — kontrol edin",
+                    description: `${eslesme.mesaj} · ${eslesme.uyari}`,
+                });
             } else {
                 toast({
                     title: "Güncellendi",

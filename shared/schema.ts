@@ -339,6 +339,20 @@ export const nakliyeVerileri = pgTable("nakliye_verileri", {
   // (canlıda 1 kayıt: MRT2026000000060).
   elleIslendi: boolean("elle_islendi").default(false),
 
+  /**
+   * Eşleşmeyi KULLANICI elle kurdu mu?
+   *
+   * true ise otomatik eşleştirme bu satıra DOKUNMAZ. Kullanıcı müşteriyi ve
+   * dosya numarasını kendi seçtiğinde bu karar, konteyner numarasından
+   * türetilen her tahminden üstündür — numaralar tutmuyor olabilir, hatta
+   * tamamen farklı olabilir; kullanıcı gerçeği bilir.
+   *
+   * `elleIslendi` ile KARIŞTIRMA: o alan "sistem öncesi dönemde elle
+   * faturalandı" demektir ve kaydı faturalamadan çıkarır. Bu alan yalnız
+   * eşleşmenin kaynağını söyler, faturalamayı etkilemez.
+   */
+  elleEslestirildi: boolean("elle_eslestirildi").default(false),
+
   // Gümrük Eşleşme Verileri
   ilgiliDosyaNo: text("ilgili_dosya_no"),
   gumrukFirmaUnvan: text("gumruk_firma_unvan"),

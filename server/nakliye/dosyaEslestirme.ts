@@ -29,6 +29,12 @@ export type DosyaEslesmeSonucu = {
   mesaj: string;
   /** Birden çok firma adayı varsa kullanıcıya gösterilecek liste. */
   adaylar?: string[];
+  /**
+   * Eşleştirme YAPILDI ama dikkat edilmesi gereken bir şey var
+   * (seçilen müşteri ile dosyadaki firma uyuşmuyor gibi).
+   * `alanlar` dolu olmasına rağmen kullanıcıya gösterilir.
+   */
+  uyari?: string;
 };
 
 /**
@@ -42,25 +48,32 @@ function firmaKir<T>(
   satirlar: T[],
   unvanAl: (s: T) => string | null,
   musteri: string | null,
-): { kayit: T | null; adaylar: string[] } {
+): { kayit: T | null; adaylar: string[]; uyari?: string } {
   const unvanlar = Array.from(
     new Set(satirlar.map((s) => String(unvanAl(s) ?? "").trim()).filter(Boolean)),
   );
 
-  // TEK ADAY DA DOĞRULANIR — müşteri seçilmişse.
+  // ELLE GİRİŞTE KARAR KULLANICINDIR.
   //
-  // Eskiden tek satır koşulsuz kabul ediliyordu ve canlıda yanlış firmayı
-  // faturaya yazdı (2026-08-25, dosya 26-12702): gümrük listesinde yalnız
-  // PLASTİTEK'in İHRACAT satırı vardı; kullanıcı müşteri olarak ALBA seçmiş
-  // olmasına rağmen tek aday diye PLASTİTEK alındı ve onun beyanname bilgileri
-  // faturaya yazıldı. Tek aday olması doğru olduğu anlamına gelmez — veri
-  // eksik de olabilir. Müşteri tutmuyorsa SEÇİM YAPMAYIZ.
+  // Bu fonksiyon YALNIZ elle dosya no eşleştirmesinden çağrılır. Kullanıcı hem
+  // müşteriyi hem dosya numarasını kendi seçtiğine göre kararı vermiştir;
+  // sistem onu REDDETMEZ, yalnız uyuşmazlığı bildirir. Konteyner numaraları
+  // tutmuyor, hatta tamamen farklı olabilir — kullanıcı gerçeği bilir.
+  //
+  // (Otomatik eşleştirmede kural TERSİDİR: eslestirme.ts kıramadığı adayı
+  // seçmez, çünkü orada karar veren bir insan yoktur.)
   if (unvanlar.length <= 1) {
     const tekUnvan = unvanlar[0] || "";
-    if (musteri?.trim() && tekUnvan && firmaAdiBenzerligi(musteri, tekUnvan) < FIRMA_ESIK) {
-      return { kayit: null, adaylar: unvanlar };
-    }
-    return { kayit: satirlar[0], adaylar: unvanlar };
+    const uyusmuyor =
+      Boolean(musteri?.trim()) && Boolean(tekUnvan) &&
+      firmaAdiBenzerligi(musteri!, tekUnvan) < FIRMA_ESIK;
+    return {
+      kayit: satirlar[0],
+      adaylar: unvanlar,
+      uyari: uyusmuyor
+        ? `Dosyadaki firma "${tekUnvan}" seçtiğiniz müşteriyle uyuşmuyor — yine de bu dosya bağlandı.`
+        : undefined,
+    };
   }
 
   if (musteri && musteri.trim()) {
@@ -72,8 +85,21 @@ function firmaKir<T>(
     if (kazanan.p >= FIRMA_ESIK && (!ikinci || kazanan.p > ikinci.p)) {
       return { kayit: kazanan.s, adaylar: unvanlar };
     }
+    // Kıramadık ama kullanıcı müşteriyi seçmiş: en yakın adayı alıp uyarırız.
+    // Boş dönmek kullanıcıyı "dosya numarasını girdim, sistem kabul etmiyor"
+    // duvarına çarptırıyordu.
+    return {
+      kayit: kazanan.s,
+      adaylar: unvanlar,
+      uyari:
+        `Dosyada ${unvanlar.length} firma var; müşterinize en yakın olan ` +
+        `"${String(unvanAl(kazanan.s) ?? "")}" seçildi. Yanlışsa müşteriyi ` +
+        `değiştirip tekrar kaydedin.`,
+    };
   }
 
+  // Müşteri hiç seçilmemiş ve birden çok firma var — kırıcı bilgi yok,
+  // kullanıcıdan müşteriyi seçmesi istenir.
   return { kayit: null, adaylar: unvanlar };
 }
 
@@ -95,21 +121,22 @@ export async function dosyaNoIleEslestir(
   // 1) Gümrük ▸ Satışlar listesi. Tercih edilen kaynak: VKN ve konteyner
   //    sayısı yalnız burada var, ikisi de faturalamada kullanılıyor.
   if (gumrukSatirlari.length > 0) {
-    const { kayit, adaylar } = firmaKir(gumrukSatirlari, (g) => g.firmaUnvan, musteri);
+    const { kayit, adaylar, uyari } = firmaKir(gumrukSatirlari, (g) => g.firmaUnvan, musteri);
     if (!kayit) {
       return {
         alanlar: null,
         adaylar,
-        mesaj: adaylar.length === 1
-          ? `${dosyaNo} altındaki firma "${adaylar[0]}" seçtiğiniz müşteriyle uyuşmuyor. ` +
-            `Dosya numarası doğru mu?`
-          : `${dosyaNo} altında ${adaylar.length} farklı firma var. ` +
-            `Önce Müşteri alanından doğru firmayı seçip tekrar kaydedin.`,
+        mesaj:
+          `${dosyaNo} altında ${adaylar.length} farklı firma var. ` +
+          `Önce Müşteri alanından doğru firmayı seçip tekrar kaydedin.`,
       };
     }
     return {
+      uyari,
       alanlar: {
         ilgiliDosyaNo: dosyaNo,
+        // Kullanıcı kurdu: otomatik eşleştirme bir daha dokunmasın.
+        elleEslestirildi: true,
         gumrukFirmaUnvan: kayit.firmaUnvan,
         gumrukAdi: kayit.gumruk,
         gumrukDovizKiymeti: kayit.dovizKiymeti != null ? String(kayit.dovizKiymeti) : null,
@@ -130,21 +157,22 @@ export async function dosyaNoIleEslestir(
   const beyannameHam = await storage.getBeyannamelerByDosyaNo(dosyaNo);
   const beyannameSatirlari = beyannameHam.filter((b) => !ihracatRejimiMi(b.rejim));
   if (beyannameSatirlari.length > 0) {
-    const { kayit, adaylar } = firmaKir(beyannameSatirlari, (b) => b.alici, musteri);
+    const { kayit, adaylar, uyari } = firmaKir(beyannameSatirlari, (b) => b.alici, musteri);
     if (!kayit) {
       return {
         alanlar: null,
         adaylar,
-        mesaj: adaylar.length === 1
-          ? `${dosyaNo} altındaki firma "${adaylar[0]}" seçtiğiniz müşteriyle uyuşmuyor. ` +
-            `Dosya numarası doğru mu?`
-          : `${dosyaNo} altında ${adaylar.length} farklı firma var. ` +
-            `Önce Müşteri alanından doğru firmayı seçip tekrar kaydedin.`,
+        mesaj:
+          `${dosyaNo} altında ${adaylar.length} farklı firma var. ` +
+          `Önce Müşteri alanından doğru firmayı seçip tekrar kaydedin.`,
       };
     }
     return {
+      uyari,
       alanlar: {
         ilgiliDosyaNo: dosyaNo,
+        // Kullanıcı kurdu: otomatik eşleştirme bir daha dokunmasın.
+        elleEslestirildi: true,
         gumrukFirmaUnvan: kayit.alici,
         gumrukAdi: kayit.gumrukIdaresi,
         gumrukDovizKiymeti: kayit.fatBedeli != null ? String(kayit.fatBedeli) : null,

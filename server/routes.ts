@@ -3484,6 +3484,17 @@ export async function registerRoutes(
       const AZAMI_GUN_FARKI = 90;
 
       for (const n of nakliyeVerileri) {
+        // ELLE KURULAN EŞLEŞMEYE DOKUNULMAZ.
+        //
+        // Kullanıcı müşteriyi ve dosya numarasını kendi seçtiyse bu karar,
+        // konteyner numarasından türetilen her tahminden üstündür — numaralar
+        // tutmuyor, hatta tamamen farklı olabilir; gerçeği kullanıcı bilir.
+        // Bu koruma olmadan bir sonraki "Gümrük ile Eşleştir" turu elle
+        // girilen eşleşmeyi sessizce eziyordu.
+        //
+        // Geri alma yolu: dosya no alanını boşaltmak bayrağı da sıfırlar.
+        if (n.elleEslestirildi) continue;
+
         // ---------------------------------------------------------
         // 1. DYNAMIC EXTRACTION & PERSISTENCE (User Request)
         // ---------------------------------------------------------
@@ -4617,7 +4628,7 @@ export async function registerRoutes(
       }
 
       // ---- ELLE DOSYA NO EŞLEŞTİRMESİ ----
-      let eslesme: { ok: boolean; mesaj: string; adaylar?: string[] } | undefined;
+      let eslesme: { ok: boolean; mesaj: string; adaylar?: string[]; uyari?: string } | undefined;
       let sonKayit = updated;
 
       if (typeof istenenDosyaNo === "string") {
@@ -4629,6 +4640,8 @@ export async function registerRoutes(
             ilgiliDosyaNo: null, gumrukFirmaUnvan: null, gumrukAdi: null,
             gumrukDovizKiymeti: null, gumrukDovizCinsi: null, gumrukTescilNo: null,
             gumrukTescilTarihi: null, eslesenHouseNo: null,
+            // Bayrak da sıfırlanır: kayıt yeniden otomatik eşleştirmeye açılır.
+            elleEslestirildi: false,
           });
           eslesme = { ok: true, mesaj: "Eşleşme kaldırıldı" };
         } else {
@@ -4636,7 +4649,12 @@ export async function registerRoutes(
           if (cozum.alanlar) {
             sonKayit = await storage.updateNakliyeVerisi(id, cozum.alanlar);
           }
-          eslesme = { ok: Boolean(cozum.alanlar), mesaj: cozum.mesaj, adaylar: cozum.adaylar };
+          eslesme = {
+            ok: Boolean(cozum.alanlar),
+            mesaj: cozum.mesaj,
+            adaylar: cozum.adaylar,
+            uyari: cozum.uyari,
+          };
         }
       }
 
