@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, RefreshCcw, Save, Trash2, X, ArrowUpDown, ArrowUp, ArrowDown, Check, ChevronsUpDown, Truck, Link2 } from "lucide-react";
+import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, RefreshCcw, Save, Trash2, X, ArrowUpDown, ArrowUp, ArrowDown, Check, ChevronsUpDown, Truck, Link2, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -306,6 +306,7 @@ export default function Nakliye() {
     // Fatura kesme işlemi süren dosya no ("__TUMU__" = toplu işlem)
     const [kesilenDosya, setKesilenDosya] = useState<string | null>(null);
     const [parasutKontrol, setParasutKontrol] = useState(false);
+    const [mailKontrol, setMailKontrol] = useState(false);
 
     const { toast } = useToast();
 
@@ -690,6 +691,49 @@ export default function Nakliye() {
     };
 
     /**
+     * Gmail'deki yeni fatura maillerini elle çeker.
+     *
+     * Poller sunucuda ayrı bir Python scripti ve günde bir kez (06:00)
+     * çalışıyor. Fatura maili gün içinde geldiğinde ertesi sabahı beklemek
+     * gerekiyordu; bu düğme aynı turu şimdi çalıştırır. Gelen PDF'ler
+     * ayrıştırılıp listeye düşer, ardından eşleştirme kendiliğinden tetiklenir.
+     */
+    const handleMailKontrol = async () => {
+        setMailKontrol(true);
+        try {
+            const response = await fetch("/api/nakliye/mail-kontrol", { method: "POST" });
+            const sonuc = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(sonuc?.error || "Mail kontrolü başarısız");
+
+            const sorunlu = (sonuc.dogrulamaHatasi || 0) + (sonuc.hatali || 0);
+            const parcalar: string[] = [];
+            if (sonuc.yeni) {
+                parcalar.push(`${sonuc.yeni} yeni fatura eklendi`);
+                if (sonuc.yeniFaturalar?.length) parcalar.push(sonuc.yeniFaturalar.join(", "));
+            } else {
+                parcalar.push(`${sonuc.mail || 0} mail tarandı, yeni fatura yok`);
+            }
+            if (sorunlu) parcalar.push(`${sorunlu} fatura işlenemedi`);
+
+            toast({
+                title: "Mail kontrolü tamamlandı",
+                variant: sorunlu ? "destructive" : undefined,
+                description: parcalar.join(" · "),
+            });
+            fetchSavedInvoices();
+        } catch (error) {
+            console.error("Mail kontrol hatası:", error);
+            toast({
+                variant: "destructive",
+                title: "Hata",
+                description: error instanceof Error ? error.message : "Mail kontrolü başarısız.",
+            });
+        } finally {
+            setMailKontrol(false);
+        }
+    };
+
+    /**
      * Paraşüt boru hattını elle tetikler (çek → alış hizala → eşleştir).
      *
      * Neden gerekli: e-Fatura'ları sistem Paraşüt'e YAZMAZ; kullanıcı "İçeri Al"
@@ -934,12 +978,25 @@ export default function Nakliye() {
                                 <p className="mt-0.5 text-[12.5px] text-muted-foreground">Navlun faturaları ve konteyner takibi · <strong className="text-foreground/80">{yil}</strong></p>
                             </div>
                         </div>
+                        {/* Düğmeler iş akışı sırasına dizilidir:
+                            mail gelir → beyannameyle eşleşir → Paraşüt doğrulanır → fatura kesilir */}
                         <div className="flex flex-wrap items-center gap-2">
                             <Button
                                 variant="outline"
                                 className="h-[38px] gap-2 font-semibold"
+                                onClick={handleMailKontrol}
+                                disabled={mailKontrol || matching || uploading || parasutKontrol || kesilenDosya !== null}
+                                title="Gmail'deki yeni fatura maillerini şimdi çeker (otomatik tur her sabah 06:00'da çalışır)"
+                            >
+                                {mailKontrol ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                                {mailKontrol ? "Kontrol ediliyor..." : "Mailleri Kontrol Et"}
+                            </Button>
+
+                            <Button
+                                variant="outline"
+                                className="h-[38px] gap-2 font-semibold"
                                 onClick={handleMatchWithGumruk}
-                                disabled={matching || uploading || parasutKontrol}
+                                disabled={matching || uploading || parasutKontrol || mailKontrol}
                             >
                                 {matching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                                 {matching ? "Eşleşiyor..." : "Gümrük ile Eşleştir"}
@@ -951,7 +1008,7 @@ export default function Nakliye() {
                                 variant="outline"
                                 className="h-[38px] gap-2 font-semibold"
                                 onClick={handleParasutKontrol}
-                                disabled={parasutKontrol || matching || uploading || kesilenDosya !== null}
+                                disabled={parasutKontrol || matching || uploading || kesilenDosya !== null || mailKontrol}
                                 title="Paraşüt'te İçeri Al ile aktardığınız faturaları arayıp kayda bağlar (ALIŞ rozetini tazeler). Satış faturası kesmez."
                             >
                                 {parasutKontrol
@@ -966,7 +1023,7 @@ export default function Nakliye() {
                                 variant="outline"
                                 className="h-[38px] gap-2 font-semibold"
                                 onClick={handleTumunuFaturala}
-                                disabled={kesilenDosya !== null || matching || uploading || parasutKontrol}
+                                disabled={kesilenDosya !== null || matching || uploading || parasutKontrol || mailKontrol}
                                 title="Beyanname eşleşmesi tamamlanmış dosyalar için Paraşüt'te satış faturası taslağı oluştur"
                             >
                                 {kesilenDosya === "__TUMU__"

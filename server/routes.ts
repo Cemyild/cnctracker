@@ -8,6 +8,8 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import express from "express";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { pdfMetniCikar, faturaAnalizEt } from "./nakliye/faturaAnaliz";
 import { faturaDogrula, belgeTipiBelirle } from "./nakliye/dogrulama";
 import { parasuttanCek } from "./nakliye/parasutOkuma";
@@ -1022,6 +1024,59 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Satış önizleme hatası:", error);
       res.status(500).json({ error: "Önizleme alınamadı" });
+    }
+  });
+
+  // Gmail'deki yeni fatura maillerini ELLE çek.
+  //
+  // Poller Express uygulamasının parçası DEĞİL: VPS'te ayrı bir Python scripti
+  // (cron `0 6 * * *`). Tek işi e-Arşiv fatura maillerindeki PDF eklerini
+  // /api/nakliye/fatura-yukle ucuna taşımak; ayrıştırmayı uygulama yapar.
+  // Fatura maili gün içinde geldiğinde kullanıcı ertesi sabahı beklemesin
+  // diye bu uç var — cron'un yaptığı işin aynısını şimdi yapar.
+  //
+  // GÜVENLİK: execFile kullanılır (shell YOK) ve komut sabittir; istek
+  // gövdesinden hiçbir şey komuta geçmez.
+  app.post("/api/nakliye/mail-kontrol", async (_req, res) => {
+    const script = process.env.GMAIL_POLLER_PATH || "/root/nakliye/gmail_poller.py";
+    if (!fs.existsSync(script)) {
+      return res.status(503).json({
+        error: `Mail kontrol scripti bulunamadı (${script}). Bu özellik yalnız sunucuda çalışır.`,
+      });
+    }
+
+    try {
+      // PDF'ler Claude ile ayrıştırıldığı için tur uzun sürebilir; ölçülen
+      // normal süre ~30 saniye, sınır bol tutuldu.
+      const { stdout } = await promisify(execFile)("/usr/bin/python3", [script], {
+        timeout: 10 * 60_000,
+        maxBuffer: 4 * 1024 * 1024,
+      });
+
+      // Script özeti tek satırda yazar:
+      //   [2026-08-25 06:00:01] mail=9 yeni=1 mevcut=8 dogrulama_hatasi=0 hatali=0
+      //   ⏎   yeni: GIB2026000000094
+      const say = (anahtar: string) => {
+        const m = stdout.match(new RegExp(`${anahtar}=(\\d+)`));
+        return m ? parseInt(m[1], 10) : 0;
+      };
+      const yeniSatir = stdout.match(/^\s*yeni:\s*(.+)$/m)?.[1]?.trim() || "";
+
+      res.json({
+        success: true,
+        mail: say("mail"),
+        yeni: say("yeni"),
+        mevcut: say("mevcut"),
+        dogrulamaHatasi: say("dogrulama_hatasi"),
+        hatali: say("hatali"),
+        yeniFaturalar: yeniSatir ? yeniSatir.split(/,\s*/) : [],
+      });
+    } catch (error: any) {
+      console.error("Mail kontrol hatası:", error);
+      const mesaj = error?.killed
+        ? "Mail kontrolü zaman aşımına uğradı (10 dk)"
+        : error instanceof Error ? error.message : "Bilinmeyen hata";
+      res.status(500).json({ error: mesaj.slice(0, 300) });
     }
   });
 
