@@ -1,6 +1,7 @@
 import { storage } from "../storage";
 import { firmaAdiBenzerligi } from "@shared/turkceNormalize";
 import { normalizeKonteyner } from "./dogrulama";
+import { ihracatRejimiMi } from "@shared/rejim";
 import { gunSayisi } from "./tarih";
 import type { GumrukVerisi } from "@shared/schema";
 
@@ -56,6 +57,8 @@ export async function eslestirmeCalistir(): Promise<{
   const gumrukMap = new Map<string, GumrukVerisi[]>();
   for (const g of gumrukVerileri as GumrukVerisi[]) {
     if (!g.houseNo) continue;
+    // Nakliye ithalat işidir; ihracat satırı aday değildir (bkz. @shared/rejim).
+    if (ihracatRejimiMi(g.rejim)) continue;
     const k = normalizeKonteyner(g.houseNo);
     if (k.length < 8) continue;
     if (!gumrukMap.has(k)) gumrukMap.set(k, []);
