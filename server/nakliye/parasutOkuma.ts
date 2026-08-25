@@ -1,20 +1,28 @@
 import { storage } from "../storage";
 import { parasutIstek, jsonApiCoz, iliskiId } from "../parasut/client";
 import { parasutMatrahTuret, paraBirimiCnc } from "../parasut/hesap";
-import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
+import { konteynerGecerliMi } from "./dogrulama";
+import { konteynerAnahtarlari } from "@shared/konteyner";
 import { eBelgePdfIndir } from "./parasutPdf";
 
-/** Serbest metinden konteyner numaralarını çıkarır (4 harf + 7 rakam). */
+/**
+ * Serbest metinden konteyner numaralarını çıkarır.
+ *
+ * TEK DOĞRULUK KAYNAĞI @shared/konteyner'dır. Burada eskiden ayrı bir regex
+ * vardı (`[A-Z]{4}\s*\d{7}`) ve YALNIZ bitişik 7 rakamı tanıyordu; kontrol
+ * hanesi ayrılmış yazılan numaraları kaçırıyordu. Tedarikçi faturalarında bu
+ * biçim yaygın:
+ *   "40 CNTR GEMLİK-BURSA/DEMİRTAŞ NAKLİYE BEDELİ(TIIU 685049-6)"
+ * Sonuç: fatura "konteyner içermiyor" sayılıp NAKLİYE FATURASI OLARAK
+ * TANINMIYOR ve Paraşüt'ten hiç çekilmiyordu — kullanıcı "İçeri Al" yapıp
+ * düğmeye bastığı halde fatura uygulamaya düşmüyordu (canlıda 2026-08-25:
+ * GAF2026000002211 ve GAF2026000002212).
+ *
+ * `konteynerGecerliMi` filtresi korunur: 4 harf + 7 rakama indirgenemeyen
+ * parçalar (kontrol hanesiz 6 rakamlı yazımlar) eskisi gibi elenir.
+ */
 function konteynerCikar(metin: string): string[] {
-  const bulunanlar = new Set<string>();
-  const t = (metin || "").toUpperCase();
-  const re = /([A-Z]{4})\s*(\d{7})/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(t)) !== null) {
-    const k = normalizeKonteyner(m[1] + m[2]);
-    if (konteynerGecerliMi(k)) bulunanlar.add(k);
-  }
-  return Array.from(bulunanlar);
+  return konteynerAnahtarlari(metin).filter(konteynerGecerliMi);
 }
 
 /**

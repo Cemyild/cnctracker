@@ -3500,14 +3500,17 @@ export async function registerRoutes(
         // ---------------------------------------------------------
         let activeKonteynerler = n.konteynerler || "";
 
-        // Regex exactly as used in Frontend (Nakliye.tsx) but relaxed for backend processing
-        // Removed leading \b to capture "TaşimaHMMU..." cases
-        const containerRegex = /([A-Z]{4})\s*(\d{6,7})\b/g;
-        const extracted = (n.malHizmet || "").match(containerRegex);
+        // Konteyner çıkarımı TEK KAYNAKTAN: @shared/konteyner.
+        //
+        // Burada eskiden ayrı bir regex vardı (`[A-Z]{4}\s*\d{6,7}\b`) ve
+        // kontrol hanesi ayrılmış numaralarda yanlış anahtar üretiyordu:
+        // "TIIU 685049-6" → "TIIU685049" (kontrol hanesi düşer). Eşleşme havuzu
+        // ise aşağıda konteynerAnahtarlari ile kuruluyor ve "TIIU6850496"
+        // üretiyor — iki taraf farklı anahtar ürettiği için eşleşme sessizce
+        // kaçıyordu.
+        const uniqueExtracted = konteynerAnahtarlari(n.malHizmet).join(", ");
 
-        if (extracted && extracted.length > 0) {
-             const uniqueExtracted = Array.from(new Set(extracted)).join(", ");
-
+        if (uniqueExtracted) {
              // If DB is empty, or we found MORE/DIFFERENT data, update it.
              // Simple check: if current is empty or doesn't include the new find
              if (!activeKonteynerler || activeKonteynerler.length < uniqueExtracted.length) {
