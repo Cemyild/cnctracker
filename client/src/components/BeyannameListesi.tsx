@@ -23,6 +23,7 @@ type BeyannameSayfa = {
   satirlar: Beyanname[];
   toplam: number;
   sayilar: { IM: number; EX: number; TR: number };
+  beyansiz: { IM: number; EX: number; TR: number };
 };
 
 const REJIM_SEKMELERI = [
@@ -65,6 +66,8 @@ export function BeyannameListesi() {
   // Transitte dosya no, karşı taraf ve fatura bedeli YOKTUR (elle girilen kayıt).
   const transit = rejim === "TR";
   const sutunSayisi = transit ? 5 : 8;
+  // Dosya açılmış ama beyanname henüz tescil edilmemiş kayıtlar: beyan no ve tarih boş gelir.
+  const beyansizSayi = data?.beyansiz[rejim] ?? 0;
 
   return (
     <Card>
@@ -101,6 +104,13 @@ export function BeyannameListesi() {
             ))}
           </TabsList>
         </Tabs>
+
+        {beyansizSayi > 0 && (
+          <p className="text-xs text-amber-600" data-testid="text-beyanname-tescilsiz">
+            {beyansizSayi} kaydın beyanname numarası henüz yok (tescil bekliyor) — dosya no
+            sırasıyla listenin başında görünürler.
+          </p>
+        )}
 
         <div className="overflow-x-auto">
           <Table>

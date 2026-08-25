@@ -63,6 +63,8 @@ export type BeyannameSayfa = {
   satirlar: Beyanname[];
   toplam: number;                                  // seçili rejimdeki eşleşme sayısı
   sayilar: { IM: number; EX: number; TR: number }; // sekme rozetleri
+  // Beyanname no'su henüz girilmemiş (tescil bekleyen) kayıt sayısı — uyarı satırı için.
+  beyansiz: { IM: number; EX: number; TR: number };
 };
 
 // Türkçe arama katlaması. lower()/ILIKE "İ" ve "ı"yı bozar (BeyannameSecici'de
@@ -3950,13 +3952,21 @@ export class DatabaseStorage implements IStorage {
 
     // Üç sekmenin sayısı TEK grup sorgusuyla alınır (rejim başına ayrı count DEĞİL).
     const gruplar = await db
-      .select({ rejim: beyannameler.rejim, adet: count() })
+      .select({
+        rejim: beyannameler.rejim,
+        adet: count(),
+        beyansiz: count(sql`case when ${beyannameler.beyanNo} is null or btrim(${beyannameler.beyanNo}) = '' then 1 end`),
+      })
       .from(beyannameler)
       .where(aramaKosulu)
       .groupBy(beyannameler.rejim);
     const sayilar = { IM: 0, EX: 0, TR: 0 };
+    const beyansiz = { IM: 0, EX: 0, TR: 0 };
     for (const g of gruplar) {
-      if (g.rejim === "IM" || g.rejim === "EX" || g.rejim === "TR") sayilar[g.rejim] = Number(g.adet);
+      if (g.rejim === "IM" || g.rejim === "EX" || g.rejim === "TR") {
+        sayilar[g.rejim] = Number(g.adet);
+        beyansiz[g.rejim] = Number(g.beyansiz);
+      }
     }
 
     const rejimKosulu = eq(beyannameler.rejim, rejim);
@@ -3964,12 +3974,20 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(beyannameler)
       .where(aramaKosulu ? and(rejimKosulu, aramaKosulu) : rejimKosulu)
-      // Transitte beyan tarihi boş olabilir -> nulls last ile listenin sonuna gider.
-      .orderBy(sql`${beyannameler.beyanTarihi} desc nulls last, ${beyannameler.dosyaNo} desc nulls last`)
+      // SIRA = DOSYA NO, SAYISAL. Metin sıralaması "26-9"u "26-15963"ün üstüne çıkarır;
+      // beyan tarihine göre sıralamak ise tescili henüz yapılmamış (tarihi/beyan no'su boş)
+      // EN YENİ dosyaları son sayfaya süpürüyordu. Dosya no yıl/sıra parçalarına bölünüp
+      // int'e çevrilir; kalıba uymayan satırlar (transitte dosya no yoktur) sona gider.
+      .orderBy(sql`
+        case when ${beyannameler.dosyaNo} ~ '^[0-9]+-[0-9]+$' then split_part(${beyannameler.dosyaNo}, '-', 1)::int end desc nulls last,
+        case when ${beyannameler.dosyaNo} ~ '^[0-9]+-[0-9]+$' then split_part(${beyannameler.dosyaNo}, '-', 2)::int end desc nulls last,
+        ${beyannameler.beyanTarihi} desc nulls last,
+        ${beyannameler.beyanNo} desc nulls last
+      `)
       .limit(limit)
       .offset(offset);
 
-    return { satirlar, toplam: sayilar[rejim], sayilar };
+    return { satirlar, toplam: sayilar[rejim], sayilar, beyansiz };
   }
 
   // Nakliye eşleştirmesi için: yalnız konteyner numarası çıkarılabilmiş beyannameler.
