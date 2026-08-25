@@ -24,6 +24,7 @@ import {
   TIP_ETIKET, DURUM_ETIKET, IADE_ETIKET, BELGE_ETIKET, belgeUrl,
 } from "@/pages/portal/portalUtils";
 import { OtomatikYuklemeRozeti } from "@/components/OtomatikYuklemeRozeti";
+import { BeyannameListesi } from "@/components/BeyannameListesi";
 
 type Ozet = {
   talepler: TalepDetay[];
@@ -70,6 +71,10 @@ function ExcelYukleme() {
         description: `${veri.toplam} satır: ${veri.eklenen} yeni, ${veri.guncellenen} güncellendi`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/odemeler/ozet"] });
+      // Liste sorgusunun anahtari tam URL (arama/sayfa parametreli) -> onek eslesmesi.
+      queryClient.invalidateQueries({
+        predicate: (sorgu) => String(sorgu.queryKey[0] ?? "").startsWith("/api/odemeler/beyannameler"),
+      });
     } catch (e: any) {
       toast({ title: "Hata", description: e.message, variant: "destructive" });
     } finally {
@@ -446,6 +451,7 @@ export default function Odemeler() {
             <OtomatikYuklemeRozeti tip="beyanname-ex" baslik="İhracat" />
           </div>
           <ExcelYukleme />
+          <BeyannameListesi />
           {ozet && ozet.eslesmeyen.length > 0 && (
             <Card>
               <CardHeader>

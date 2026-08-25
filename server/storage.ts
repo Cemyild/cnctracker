@@ -46,7 +46,7 @@ import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as XLSX from "xlsx";
 import { db } from "./db";
-import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count, notInArray, gte, lte } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count, notInArray, gte, lte, type AnyColumn } from "drizzle-orm";
 import { sigortaTahakkukDokumu } from "@shared/sigortaTahakkuk";
 import { buildDedupKey } from "./dedup";
 
@@ -56,6 +56,29 @@ export type OdemeTalepDetay = OdemeTalep & {
   talepEdenAd: string;
   belgeler: OdemeBelge[];
 };
+
+// Ödemeler ▸ Beyanname listesi: rejim sekmesi (İthalat/İhracat/Transit) başına
+// sayfalı görünüm. Sekme rozetleri arama süzgecini de yansıtsın diye üç sayı da döner.
+export type BeyannameSayfa = {
+  satirlar: Beyanname[];
+  toplam: number;                                  // seçili rejimdeki eşleşme sayısı
+  sayilar: { IM: number; EX: number; TR: number }; // sekme rozetleri
+};
+
+// Türkçe arama katlaması. lower()/ILIKE "İ" ve "ı"yı bozar (BeyannameSecici'de
+// aynı tuzak istemci tarafında toLocaleLowerCase("tr") ile aşılmıştı). Burada
+// hem arama terimi hem kolonlar AYNI ASCII eşlemesinden geçirilip büyük harfe
+// çevrilir; SQL tarafındaki karşılığı translate(...) + upper(...).
+const TR_KATLAMA_KAYNAK = "ıİşŞğĞüÜöÖçÇâÂîÎûÛ";
+const TR_KATLAMA_HEDEF = "iIsSgGuUoOcCaAiIuU";
+function trKatlaBuyuk(metin: string): string {
+  let cikti = "";
+  for (const ch of metin) {
+    const i = TR_KATLAMA_KAYNAK.indexOf(ch);
+    cikti += i >= 0 ? TR_KATLAMA_HEDEF[i] : ch;
+  }
+  return cikti.toUpperCase();
+}
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -416,6 +439,12 @@ export interface IStorage {
   updatePortalKullanici(id: string, k: Partial<InsertPortalKullanici>): Promise<PortalKullanici | undefined>;
   upsertBeyannameler(rows: InsertBeyanname[]): Promise<{ eklenen: number; guncellenen: number }>;
   getBeyannameler(kullanici?: string): Promise<Beyanname[]>;
+  getBeyannameListesi(secenekler: {
+    rejim: "IM" | "EX" | "TR";
+    arama?: string;
+    limit: number;
+    offset: number;
+  }): Promise<BeyannameSayfa>;
   getBeyannameKonteynerVerileri(): Promise<Beyanname[]>;
   getBeyannamelerByDosyaNo(dosyaNo: string): Promise<Beyanname[]>;
   getBeyanname(id: string): Promise<Beyanname | undefined>;
@@ -3893,6 +3922,54 @@ export class DatabaseStorage implements IStorage {
         .orderBy(siralama);
     }
     return db.select().from(beyannameler).orderBy(siralama);
+  }
+
+  // Yönetim panelindeki beyanname listesi (Ödemeler ▸ İzleme). Rejim süzgeci,
+  // arama ve sayfalama SUNUCUDA yapılır: portal tarafındaki "tüm tabloyu indir"
+  // kalıbı burada kabul edilemez, tablo on binlerce satıra çıkabiliyor.
+  async getBeyannameListesi({ rejim, arama, limit, offset }: {
+    rejim: "IM" | "EX" | "TR";
+    arama?: string;
+    limit: number;
+    offset: number;
+  }): Promise<BeyannameSayfa> {
+    const q = trKatlaBuyuk((arama ?? "").trim());
+    // LIKE jokerleri kaçırılır; aksi halde "%" yazan kullanıcı deseni anlamsızlaştırır.
+    const desen = `%${q.replace(/([\\%_])/g, "\\$1")}%`;
+    const katla = (kolon: AnyColumn) =>
+      sql`upper(translate(coalesce(${kolon}, ''), ${TR_KATLAMA_KAYNAK}, ${TR_KATLAMA_HEDEF}))`;
+    const aramaKosulu = q
+      ? or(
+          sql`${katla(beyannameler.dosyaNo)} like ${desen}`,
+          sql`${katla(beyannameler.beyanNo)} like ${desen}`,
+          sql`${katla(beyannameler.alici)} like ${desen}`,
+          sql`${katla(beyannameler.gonderen)} like ${desen}`,
+          sql`${katla(beyannameler.kullanici)} like ${desen}`,
+        )
+      : undefined;
+
+    // Üç sekmenin sayısı TEK grup sorgusuyla alınır (rejim başına ayrı count DEĞİL).
+    const gruplar = await db
+      .select({ rejim: beyannameler.rejim, adet: count() })
+      .from(beyannameler)
+      .where(aramaKosulu)
+      .groupBy(beyannameler.rejim);
+    const sayilar = { IM: 0, EX: 0, TR: 0 };
+    for (const g of gruplar) {
+      if (g.rejim === "IM" || g.rejim === "EX" || g.rejim === "TR") sayilar[g.rejim] = Number(g.adet);
+    }
+
+    const rejimKosulu = eq(beyannameler.rejim, rejim);
+    const satirlar = await db
+      .select()
+      .from(beyannameler)
+      .where(aramaKosulu ? and(rejimKosulu, aramaKosulu) : rejimKosulu)
+      // Transitte beyan tarihi boş olabilir -> nulls last ile listenin sonuna gider.
+      .orderBy(sql`${beyannameler.beyanTarihi} desc nulls last, ${beyannameler.dosyaNo} desc nulls last`)
+      .limit(limit)
+      .offset(offset);
+
+    return { satirlar, toplam: sayilar[rejim], sayilar };
   }
 
   // Nakliye eşleştirmesi için: yalnız konteyner numarası çıkarılabilmiş beyannameler.

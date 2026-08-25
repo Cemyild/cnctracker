@@ -5369,6 +5369,22 @@ export async function registerRoutes(
     }
   });
 
+  // Beyanname listesi — yönetim panelinde yükleme sonucunun hemen altında
+  // İthalat / İhracat / Transit sekmeleriyle gösterilir. Rejim süzgeci, arama ve
+  // sayfalama SUNUCUDA: portal ucundaki "tüm tabloyu indir" kalıbı burada yok.
+  app.get("/api/odemeler/beyannameler", async (req, res) => {
+    try {
+      const ham = String(req.query.rejim ?? "IM").toUpperCase();
+      const rejim = ham === "EX" || ham === "TR" ? ham : "IM";
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "50"), 10) || 50, 1), 200);
+      const offset = Math.max(parseInt(String(req.query.offset ?? "0"), 10) || 0, 0);
+      const arama = String(req.query.arama ?? "").trim();
+      res.json(await storage.getBeyannameListesi({ rejim, arama, limit, offset }));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ==================== ÖDEMELER PORTALI: OTURUM ====================
 
   // Oturumdaki AKTİF kullanıcıyı yükler; yoksa null.
