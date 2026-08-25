@@ -296,14 +296,20 @@ const AYLAR = [
     { value: "12", label: "Aralık" }
 ];
 
-const YILLAR = [2024, 2025, 2026];
+// Yıl listesi ve varsayılan seçim sabit değil: ekran her zaman içinde
+// bulunulan yıldan açılır, liste de 2024'ten bugüne otomatik uzar. 2026
+// alt sınır olarak korunur ki veri yüklenmemiş yıl da seçilebilsin.
+const SIMDIKI_YIL = new Date().getFullYear();
+const SON_YIL = Math.max(SIMDIKI_YIL, 2026);
+const YILLAR = Array.from({ length: SON_YIL - 2024 + 1 }, (_, i) => 2024 + i);
+const VARSAYILAN_YIL = Math.min(Math.max(SIMDIKI_YIL, 2024), SON_YIL);
 
 export default function Sigorta() {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [mainTab, setMainTab] = useState("ozet");
     
-    const [selectedYear, setSelectedYear] = useState<number>(2025);
+    const [selectedYear, setSelectedYear] = useState<number>(VARSAYILAN_YIL);
     const [selectedMonth, setSelectedMonth] = useState<string>("toplam");
     // Acente filtresi — Tümü / (Mapfre) / Ray; tüm KPI ve listeleri o acenteye indirger
     const [acente, setAcente] = useState<"tum" | "mapfre" | "ray">("tum");
