@@ -1295,6 +1295,20 @@ function PoliceMuhasebeDialog({ policy, muhasebe, loading, onClose }: {
 // ---------------------------------------------------------------------------
 // 3. VERİ YÜKLEME TAB COMPONENT
 // ---------------------------------------------------------------------------
+// Muhasebe kayıtlarında tarih "GG.AA.YYYY" METNİ olarak tutulur. Ne sunucudaki
+// ORDER BY ne de JS'in string karşılaştırması bunu kronolojik sıralar (gün
+// basamağı başta olduğu için "01.12" < "02.01"). Saat dilimi kaymasına yol
+// açmasın diye new Date() KULLANILMADAN "YYYYAAGG" sayısal anahtarına çevrilir.
+// Çözülemeyen tarihler listenin sonuna düşsün diye en büyük anahtarı alır.
+const tarihSiraAnahtari = (tarih?: string | null): string => {
+    const t = String(tarih || "").trim();
+    let m = t.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/);      // GG.AA.YYYY
+    if (m) return `${m[3]}${m[2].padStart(2, "0")}${m[1].padStart(2, "0")}`;
+    m = t.match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})/);          // YYYY-AA-GG
+    if (m) return `${m[1]}${m[2].padStart(2, "0")}${m[3].padStart(2, "0")}`;
+    return "99999999";
+};
+
 function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
@@ -1336,6 +1350,10 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
     const [matchSortBy, setMatchSortBy] = useState<"sigortali" | "brutPrim">("sigortali");
     const [rematchProcessing, setRematchProcessing] = useState(false);
 
+    // Eşleşmeyen kayıtlar tablosunda toplu seçim
+    const [selectedUnmatched, setSelectedUnmatched] = useState<string[]>([]);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
+
     // Fetch Accounting Records (Muhasebe)
     const { data: storedMuhasebe, refetch: refetchMuhasebe } = useQuery({
         queryKey: ['sigorta-muhasebe', subTab, yil],
@@ -1354,6 +1372,51 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
         return storedMuhasebe.filter((m: any) =>
             m.eslestiMi === MUHASEBE_DURUM.ESLESMEDI || m.eslestiMi === MUHASEBE_DURUM.ONERI_REDDEDILDI);
     }, [storedMuhasebe]);
+
+    // Sunucu "ORDER BY tarih" uyguluyor ama kolon text olduğu için sıralama
+    // kronolojik değil; üstelik aynı tarihli satırlarda Postgres'in sırası
+    // stabil olmadığından bir kayıt silinince tüm liste yer değiştiriyordu.
+    // Tarih + evrak no + id üçlüsüyle tam deterministik sıralıyoruz.
+    const siraliEslesmeyenler = useMemo(() => {
+        return [...unmatchedRecordsList].sort((a: any, b: any) => {
+            const ta = tarihSiraAnahtari(a.tarih);
+            const tb = tarihSiraAnahtari(b.tarih);
+            if (ta !== tb) return ta < tb ? -1 : 1;
+            const ba = String(a.belgeNo || "");
+            const bb = String(b.belgeNo || "");
+            if (ba !== bb) return ba.localeCompare(bb, "tr");
+            return String(a.id || "").localeCompare(String(b.id || ""));
+        });
+    }, [unmatchedRecordsList]);
+
+    // Yıl/şirket değişince veya kayıt silinince listede kalmayan id'ler
+    // seçimde asılı kalmasın (aksi halde "3 seçildi" der ama 1 satır siler).
+    useEffect(() => {
+        setSelectedUnmatched((onceki) => {
+            if (onceki.length === 0) return onceki;
+            const mevcut = new Set(unmatchedRecordsList.map((r: any) => r.id));
+            const kalan = onceki.filter((id) => mevcut.has(id));
+            return kalan.length === onceki.length ? onceki : kalan;
+        });
+    }, [unmatchedRecordsList]);
+
+    const handleBulkDeleteUnmatched = async () => {
+        if (selectedUnmatched.length === 0) return;
+        if (!confirm(`Seçili ${selectedUnmatched.length} kaydı silmek istediğinize emin misiniz?`)) return;
+        setBulkDeleting(true);
+        try {
+            const res = await apiRequest("POST", "/api/sigorta/muhasebe/toplu-sil", { ids: selectedUnmatched });
+            const { count } = await res.json();
+            setSelectedUnmatched([]);
+            refetchMuhasebe();
+            toast({ title: "Silindi", description: `${count} kayıt silindi.` });
+        } catch (err) {
+            console.error(err);
+            toast({ variant: "destructive", title: "Hata", description: "Toplu silme işlemi başarısız." });
+        } finally {
+            setBulkDeleting(false);
+        }
+    };
 
     // Kullanıcı onayına sunulacak eşleştirme önerileri. Hiçbir şey otomatik
     // bağlanmaz — bu liste yalnızca aday + gerekçe gösterir.
@@ -2598,20 +2661,46 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                             Muhasebe Excel'inde bulunup poliçe listesinde karşılığı bulunamayan kayıtlar.
                                             Banka/vergi hareketleri (virman, stopaj) bu listeye dahil edilmez.
                                         </span>
-                                        <Button
-                                            size="sm"
-                                            variant="default"
-                                            className="bg-blue-600 hover:bg-blue-700 shrink-0"
-                                            disabled={rematchProcessing || (unmatchedRecordsList?.length ?? 0) === 0}
-                                            onClick={handleRematchUnmatched}
-                                            title="Eşleşmeyen kayıtları mevcut poliçe listesine karşı yeniden tara"
-                                        >
-                                            {rematchProcessing ? "Eşleştiriliyor..." : "Tekrar Eşleştir"}
-                                        </Button>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            {selectedUnmatched.length > 0 && (
+                                                <>
+                                                    <span className="text-sm font-medium text-red-800">{selectedUnmatched.length} kayıt seçildi.</span>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="destructive"
+                                                        disabled={bulkDeleting}
+                                                        onClick={handleBulkDeleteUnmatched}
+                                                        title="Seçili kayıtları listeden kaldır"
+                                                    >
+                                                        <Trash2 className="w-4 h-4 mr-2" />
+                                                        {bulkDeleting ? "Siliniyor..." : "Seçilenleri Sil"}
+                                                    </Button>
+                                                </>
+                                            )}
+                                            <Button
+                                                size="sm"
+                                                variant="default"
+                                                className="bg-blue-600 hover:bg-blue-700"
+                                                disabled={rematchProcessing || (unmatchedRecordsList?.length ?? 0) === 0}
+                                                onClick={handleRematchUnmatched}
+                                                title="Eşleşmeyen kayıtları mevcut poliçe listesine karşı yeniden tara"
+                                            >
+                                                {rematchProcessing ? "Eşleştiriliyor..." : "Tekrar Eşleştir"}
+                                            </Button>
+                                        </div>
                                     </div>
                                     <Table>
                                         <TableHeader>
                                             <TableRow>
+                                                <TableHead className="w-[50px]">
+                                                    <Checkbox
+                                                        aria-label="Tümünü seç"
+                                                        checked={siraliEslesmeyenler.length > 0 && selectedUnmatched.length === siraliEslesmeyenler.length}
+                                                        onCheckedChange={(checked) => {
+                                                            setSelectedUnmatched(checked ? siraliEslesmeyenler.map((r: any) => r.id) : []);
+                                                        }}
+                                                    />
+                                                </TableHead>
                                                 <TableHead>Tarih</TableHead>
                                                 <TableHead>Evrak No</TableHead>
 
@@ -2623,11 +2712,27 @@ function VeriYukleme({ yil, globalAy }: { yil: number; globalAy: string }) {
                                         <TableBody>
                                             {unmatchedRecordsList.length === 0 ? (
                                                 <TableRow>
-                                                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">Eşleşmeyen kayıt yok.</TableCell>
+                                                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">Eşleşmeyen kayıt yok.</TableCell>
                                                 </TableRow>
                                             ) : (
-                                                unmatchedRecordsList.map((rec: any, idx: number) => (
-                                                    <TableRow key={rec.id || idx} className="hover:bg-red-50">
+                                                siraliEslesmeyenler.map((rec: any, idx: number) => (
+                                                    <TableRow
+                                                        key={rec.id || idx}
+                                                        className="hover:bg-red-50"
+                                                        data-state={selectedUnmatched.includes(rec.id) ? "selected" : undefined}
+                                                    >
+                                                        <TableCell>
+                                                            <Checkbox
+                                                                aria-label="Kaydı seç"
+                                                                checked={selectedUnmatched.includes(rec.id)}
+                                                                onCheckedChange={(checked) => {
+                                                                    setSelectedUnmatched((onceki) =>
+                                                                        checked
+                                                                            ? [...onceki, rec.id]
+                                                                            : onceki.filter((id) => id !== rec.id));
+                                                                }}
+                                                            />
+                                                        </TableCell>
                                                         <TableCell>{rec.tarih}</TableCell>
                                                         <TableCell className="font-bold">{rec.belgeNo}</TableCell>
                                                         <TableCell className="text-right">

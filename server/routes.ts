@@ -1497,6 +1497,23 @@ export async function registerRoutes(
     }
   });
 
+  // Eşleşmeyen kayıtlar tablosundaki toplu seçimin silme ucu.
+  // DELETE /muhasebe/toplu-sil yazılamaz — üstteki ":id" rotası onu yakalar;
+  // bu yüzden POST.
+  app.post("/api/sigorta/muhasebe/toplu-sil", async (req, res) => {
+    try {
+        const { ids } = req.body;
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ error: "ids zorunlu" });
+        }
+        const count = await storage.deleteSigortaMuhasebeKayitlariByIds(ids);
+        res.json({ success: true, count });
+    } catch (err) {
+        console.error("Muhasebe kayıtları toplu silinirken hata:", err);
+        res.status(500).json({ error: "Silme işlemi başarısız" });
+    }
+  });
+
   // NOT: Eski `DELETE /api/sigorta/muhasebe-clear/mapfre` endpoint'i kaldırıldı.
   // Aynı işi `DELETE /api/sigorta/muhasebe?sirket=Mapfre` zaten yapıyor.
 

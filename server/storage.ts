@@ -204,6 +204,7 @@ export interface IStorage {
   deleteSigortaMuhasebeKayitlari(sirket: string, ay?: string, yil?: number): Promise<void>;
   updateSigortaMuhasebeKaydi(id: string, veri: Partial<InsertSigortaMuhasebe>): Promise<SigortaMuhasebe | null>;
   deleteSigortaMuhasebeKaydi(id: string): Promise<void>;
+  deleteSigortaMuhasebeKayitlariByIds(ids: string[]): Promise<number>;
   
   // RAW SQL EXECUTION
   executeRawSql(query: string): Promise<any[]>;
@@ -1973,6 +1974,16 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSigortaMuhasebeKaydi(id: string): Promise<void> {
     await db.delete(sigortaMuhasebeKayitlari).where(eq(sigortaMuhasebeKayitlari.id, id));
+  }
+
+  // Toplu silme — çoklu seçimde satır başına DELETE atmak yerine tek sorgu.
+  async deleteSigortaMuhasebeKayitlariByIds(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const silinen = await db
+      .delete(sigortaMuhasebeKayitlari)
+      .where(inArray(sigortaMuhasebeKayitlari.id, ids))
+      .returning({ id: sigortaMuhasebeKayitlari.id });
+    return silinen.length;
   }
   async executeRawSql(query: string): Promise<any[]> {
     try {
