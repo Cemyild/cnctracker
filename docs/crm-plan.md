@@ -238,5 +238,19 @@ yanlış ele geçerse personel isim/telefonları sızmasın.
 
 - Açık sayfa: `client/src/pages/PublicCrmForm.tsx`, rota `/firma-bilgi/:token`.
   Yönetici şifre kapısı atlanır (App.tsx bypass listesine eklendi).
+
+  **Form departman odaklıdır.** İlk sürümde "Kişi Ekle" ile satır satır kişi
+  ekleniyor, her satırda departman seçici ve ünvan kutusu vardı; firma için
+  yorucuydu. Artık katalogdaki **her departman için hazır bir alan** basılır
+  (Ad Soyad / E-posta / Telefon / Cep), firma yalnız kendisine uyanları
+  doldurur. Departman seçici ve ünvan kutusu formdan kaldırıldı — ünvan
+  alanı veritabanında ve panelde duruyor, sadece firma girmiyor.
+
+  Sonuç: form **katalogdan sürülür**. Panelden yeni departman eklendiğinde
+  (örn. "Diğer", "Gümrükleme") formda kendiliğinden yeni bir alan belirir;
+  pasife alınan departman formdan düşer. Sunucu tarafında değişiklik
+  gerekmedi — API sözleşmesi zaten "her kişi kendi departmanId'sini taşır"
+  biçimindeydi. Departman başına tek kişi girilir; bir departmana ikinci
+  kişi gerekirse panelden eklenir.
 - Panel: `client/src/components/crm/FormLinkModal.tsx` — bağlantı üret/kopyala/
   aç/yenile/kapat + gelen gönderimlerin geçmişi.

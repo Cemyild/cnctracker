@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { CheckCircle2, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type FormVerisi = {
   musteriAd: string;
@@ -16,20 +15,16 @@ type FormVerisi = {
   kart: Record<string, string>;
 };
 
-const DEPARTMANSIZ_DEGER = "__yok__";
-
-type KisiSatiri = {
-  departmanId: string;
+// Departman başına TEK kişi alanı. Firma hangi departmanı doldurursa o kaydedilir;
+// boş bırakılan departman hiç gönderilmez.
+type KisiAlani = {
   adSoyad: string;
-  unvan: string;
   telefon: string;
   cepTelefon: string;
   email: string;
 };
 
-const bosKisi = (departmanId = DEPARTMANSIZ_DEGER): KisiSatiri => ({
-  departmanId, adSoyad: "", unvan: "", telefon: "", cepTelefon: "", email: "",
-});
+const bosKisi = (): KisiAlani => ({ adSoyad: "", telefon: "", cepTelefon: "", email: "" });
 
 const KART_ALANLARI: { ad: string; etiket: string; placeholder?: string; tip?: string }[] = [
   { ad: "vergiDairesi", etiket: "Vergi Dairesi", placeholder: "Beşiktaş" },
@@ -48,7 +43,8 @@ export default function PublicCrmForm() {
   const token = params?.token;
 
   const [kart, setKart] = useState<Record<string, string>>({});
-  const [kisiler, setKisiler] = useState<KisiSatiri[]>([bosKisi()]);
+  // departmanId -> kişi alanı
+  const [kisiler, setKisiler] = useState<Record<string, KisiAlani>>({});
   const [gonderenAd, setGonderenAd] = useState("");
   const [gonderenEmail, setGonderenEmail] = useState("");
   const [gonderildi, setGonderildi] = useState(false);
@@ -65,12 +61,11 @@ export default function PublicCrmForm() {
     retry: false,
   });
 
-  // Mevcut şirket bilgileri ön doldurulur; firma düzeltip gönderir.
-  // İlk departman varsa ilk kişi satırı ona ayarlanır.
+  // Mevcut şirket bilgileri ön doldurulur; her departman için boş bir kişi alanı açılır.
   useEffect(() => {
     if (!data) return;
     setKart(data.kart ?? {});
-    setKisiler([bosKisi(data.departmanlar[0]?.id ?? DEPARTMANSIZ_DEGER)]);
+    setKisiler(Object.fromEntries(data.departmanlar.map((d) => [d.id, bosKisi()])));
   }, [data]);
 
   const gonder = useMutation({
@@ -82,12 +77,10 @@ export default function PublicCrmForm() {
           gonderenAd,
           gonderenEmail,
           kart,
-          kisiler: kisiler
-            .filter((k) => k.adSoyad.trim())
-            .map((k) => ({
-              ...k,
-              departmanId: k.departmanId === DEPARTMANSIZ_DEGER ? null : k.departmanId,
-            })),
+          // Yalnız adı girilmiş departmanlar gönderilir.
+          kisiler: Object.entries(kisiler)
+            .filter(([, k]) => k.adSoyad.trim())
+            .map(([departmanId, k]) => ({ departmanId, ...k })),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Gönderilemedi");
@@ -97,8 +90,11 @@ export default function PublicCrmForm() {
     onError: (e: Error) => setHataMesaji(e.message),
   });
 
-  const kisiGuncelle = (i: number, alan: keyof KisiSatiri, deger: string) =>
-    setKisiler((onceki) => onceki.map((k, j) => (j === i ? { ...k, [alan]: deger } : k)));
+  const kisiGuncelle = (departmanId: string, alan: keyof KisiAlani, deger: string) =>
+    setKisiler((onceki) => ({
+      ...onceki,
+      [departmanId]: { ...(onceki[departmanId] ?? bosKisi()), [alan]: deger },
+    }));
 
   if (!token) {
     return <Merkez><p className="text-slate-600">Geçersiz bağlantı.</p></Merkez>;
@@ -166,8 +162,8 @@ export default function PublicCrmForm() {
             <CardDescription className="text-base">
               <strong className="text-slate-800">{data.musteriAd}</strong>
               <br />
-              Aşağıdaki bilgileri kontrol edip güncelleyebilir, departmanlarınız için
-              iletişim kurulacak kişileri ekleyebilirsiniz.
+              Aşağıdaki bilgileri kontrol edip güncelleyebilir, departmanlarımızın
+              iletişime geçeceği kişileri yazabilirsiniz.
             </CardDescription>
           </CardHeader>
 
@@ -211,99 +207,65 @@ export default function PublicCrmForm() {
                 </div>
               </section>
 
-              {/* ── İletişim kişileri ── */}
+              {/* ── Departman bazlı iletişim kişileri ── */}
               <section className="space-y-4">
                 <div>
                   <h3 className="text-[15px] font-bold text-slate-900">İletişim Kişileri</h3>
                   <p className="mt-1 text-[13px] text-slate-500">
-                    Her departman için bizimle iletişime geçilecek kişiyi yazın. Aynı
-                    departmana birden fazla kişi ekleyebilirsiniz.
+                    Her departman için o konuda muhatap olacak kişiyi yazın.
+                    <strong className="text-slate-700"> Size uymayan departmanları boş bırakabilirsiniz</strong> —
+                    yalnız doldurduklarınız kaydedilir.
                   </p>
                 </div>
 
-                {kisiler.map((k, i) => (
-                  <div key={i} className="space-y-4 rounded-lg border bg-white p-5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[13px] font-bold text-slate-500">
-                        {i + 1}. Kişi
-                      </span>
-                      {kisiler.length > 1 && (
-                        <Button
-                          type="button" variant="ghost" size="sm"
-                          className="h-8 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          onClick={() => setKisiler(kisiler.filter((_, j) => j !== i))}
-                        >
-                          <Trash2 className="mr-1 h-3.5 w-3.5" /> Kaldır
-                        </Button>
-                      )}
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label className="text-[13px] font-semibold">Departman</Label>
-                        <Select
-                          value={k.departmanId}
-                          onValueChange={(v) => kisiGuncelle(i, "departmanId", v)}
-                        >
-                          <SelectTrigger><SelectValue placeholder="Seçiniz" /></SelectTrigger>
-                          <SelectContent>
-                            {data.departmanlar.map((d) => (
-                              <SelectItem key={d.id} value={d.id}>{d.ad}</SelectItem>
-                            ))}
-                            <SelectItem value={DEPARTMANSIZ_DEGER}>Diğer</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-[13px] font-semibold">Ad Soyad</Label>
-                        <Input
-                          value={k.adSoyad}
-                          placeholder="Ahmet Yılmaz"
-                          onChange={(e) => kisiGuncelle(i, "adSoyad", e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-[13px] font-semibold">Görev / Ünvan</Label>
-                        <Input
-                          value={k.unvan}
-                          placeholder="İthalat Şefi"
-                          onChange={(e) => kisiGuncelle(i, "unvan", e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-[13px] font-semibold">E-posta</Label>
-                        <Input
-                          type="email" value={k.email}
-                          placeholder="ahmet@firma.com"
-                          onChange={(e) => kisiGuncelle(i, "email", e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-[13px] font-semibold">Telefon</Label>
-                        <Input
-                          type="tel" value={k.telefon}
-                          placeholder="0212 000 00 00"
-                          onChange={(e) => kisiGuncelle(i, "telefon", e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-[13px] font-semibold">Cep Telefonu</Label>
-                        <Input
-                          type="tel" value={k.cepTelefon}
-                          placeholder="0532 000 00 00"
-                          onChange={(e) => kisiGuncelle(i, "cepTelefon", e.target.value)}
-                        />
+                {data.departmanlar.map((d) => {
+                  const k = kisiler[d.id] ?? bosKisi();
+                  const dolu = !!k.adSoyad.trim();
+                  return (
+                    <div
+                      key={d.id}
+                      className={`rounded-lg border p-5 transition-colors ${dolu ? "border-slate-300 bg-white" : "bg-white"}`}
+                    >
+                      <h4 className="mb-4 text-[13.5px] font-extrabold uppercase tracking-wide text-slate-600">
+                        {d.ad}
+                      </h4>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-[13px] font-semibold">Ad Soyad</Label>
+                          <Input
+                            value={k.adSoyad}
+                            placeholder="Ahmet Yılmaz"
+                            onChange={(e) => kisiGuncelle(d.id, "adSoyad", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[13px] font-semibold">E-posta</Label>
+                          <Input
+                            type="email" value={k.email}
+                            placeholder="ahmet@firma.com"
+                            onChange={(e) => kisiGuncelle(d.id, "email", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[13px] font-semibold">Telefon</Label>
+                          <Input
+                            type="tel" value={k.telefon}
+                            placeholder="0212 000 00 00"
+                            onChange={(e) => kisiGuncelle(d.id, "telefon", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[13px] font-semibold">Cep Telefonu</Label>
+                          <Input
+                            type="tel" value={k.cepTelefon}
+                            placeholder="0532 000 00 00"
+                            onChange={(e) => kisiGuncelle(d.id, "cepTelefon", e.target.value)}
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-
-                <Button
-                  type="button" variant="outline" className="w-full"
-                  onClick={() => setKisiler([...kisiler, bosKisi(data.departmanlar[0]?.id ?? DEPARTMANSIZ_DEGER)])}
-                >
-                  <Plus className="mr-1.5 h-4 w-4" /> Kişi Ekle
-                </Button>
+                  );
+                })}
               </section>
 
               {/* ── Formu dolduran ── */}
