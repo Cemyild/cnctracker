@@ -35,6 +35,7 @@ import PublicSurvey from "@/pages/PublicSurvey";
 import SurveyAnalysis from "@/pages/SurveyAnalysis";
 import PortalApp from "@/pages/portal/PortalApp";
 import Odemeler from "@/pages/Odemeler";
+import CRM from "@/pages/CRM";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -47,6 +48,7 @@ const pageTitles: Record<string, string> = {
   "/calisanlar": "Çalışanlar",
   "/hesaplamalar": "Hesaplamalar",
   "/tahsilat": "Müşteri Tahsilat",
+  "/crm": "Müşteri CRM",
   "/odemeler": "Ödemeler",
   "/anketler": "Anketler",
   "/iso9001": "ISO9001-2015",
@@ -73,6 +75,7 @@ function Router() {
       <Route path="/calisanlar" component={Calisanlar} />
       <Route path="/hesaplamalar" component={Hesaplamalar} />
       <Route path="/tahsilat" component={Tahsilat} />
+      <Route path="/crm" component={CRM} />
       <Route path="/odemeler" component={Odemeler} />
       <Route path="/anketler">
         <Redirect to="/iso9001/anketler" />

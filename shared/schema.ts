@@ -1459,3 +1459,108 @@ export const insertParasutSatisFaturasiSchema = createInsertSchema(parasutSatisF
 });
 export type InsertParasutSatisFaturasi = z.infer<typeof insertParasutSatisFaturasiSchema>;
 export type ParasutSatisFaturasi = typeof parasutSatisFaturalari.$inferSelect;
+
+// ============================================================================
+// MÜŞTERİ CRM MODÜLÜ
+// Müşteri = mevcut `musteriler` tablosu (Tahsilat/mizan kaynaklı). CRM paralel
+// bir müşteri listesi AÇMAZ; iletişim bilgisini o kimliğin üzerine ekler.
+// ============================================================================
+
+// Departman kataloğu — kod içine gömülü sabit liste değil, kullanıcı yönetir.
+export const crmDepartmanlar = pgTable("crm_departmanlar", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ad: text("ad").notNull(),
+  sira: integer("sira").notNull().default(0),
+  aktif: boolean("aktif").notNull().default(true),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  uniqueIndex("crm_departmanlar_ad_idx").on(table.ad),
+]);
+
+export const insertCrmDepartmanSchema = createInsertSchema(crmDepartmanlar).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertCrmDepartman = z.infer<typeof insertCrmDepartmanSchema>;
+export type CrmDepartman = typeof crmDepartmanlar.$inferSelect;
+
+// Müşteri kartı — `musteriler` ile 1-1. Ayrı tablo: mizan içe aktarımı
+// `musteriler` satırlarını yazdığı için CRM alanları oraya konmaz.
+export const crmMusteriBilgileri = pgTable("crm_musteri_bilgileri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  musteriId: varchar("musteri_id").notNull().references(() => musteriler.id, { onDelete: "cascade" }),
+  vergiDairesi: text("vergi_dairesi"),
+  vergiNo: text("vergi_no"),
+  adres: text("adres"),
+  ilce: text("ilce"),
+  il: text("il"),
+  postaKodu: text("posta_kodu"),
+  telefon: text("telefon"),
+  faks: text("faks"),
+  genelEmail: text("genel_email"),
+  web: text("web"),
+  notlar: text("notlar"),
+  guncellenme: timestamp("guncellenme").defaultNow(),
+}, (table) => [
+  uniqueIndex("crm_musteri_bilgileri_musteri_idx").on(table.musteriId),
+]);
+
+export const insertCrmMusteriBilgiSchema = createInsertSchema(crmMusteriBilgileri).omit({
+  id: true,
+  guncellenme: true,
+});
+export type InsertCrmMusteriBilgi = z.infer<typeof insertCrmMusteriBilgiSchema>;
+export type CrmMusteriBilgi = typeof crmMusteriBilgileri.$inferSelect;
+
+// Departman bazlı iletişim kişileri — "ithalat işine kim bakıyor" sorusunun cevabı.
+export const crmKisiler = pgTable("crm_kisiler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  musteriId: varchar("musteri_id").notNull().references(() => musteriler.id, { onDelete: "cascade" }),
+  // Departman silinirse kişi yetim kalmasın diye set null — UI "Departmansız" gösterir.
+  departmanId: varchar("departman_id").references(() => crmDepartmanlar.id, { onDelete: "set null" }),
+  adSoyad: text("ad_soyad").notNull(),
+  unvan: text("unvan"),
+  telefon: text("telefon"),
+  cepTelefon: text("cep_telefon"),
+  email: text("email"),
+  birincil: boolean("birincil").notNull().default(false),
+  aktif: boolean("aktif").notNull().default(true),
+  notlar: text("notlar"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  index("crm_kisiler_musteri_idx").on(table.musteriId),
+  index("crm_kisiler_musteri_departman_idx").on(table.musteriId, table.departmanId),
+]);
+
+export const insertCrmKisiSchema = createInsertSchema(crmKisiler).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertCrmKisi = z.infer<typeof insertCrmKisiSchema>;
+export type CrmKisi = typeof crmKisiler.$inferSelect;
+
+// Görüşme / etkileşim kaydı. tarih ve takipTarihi: text YYYY-MM-DD (proje kuralı).
+export const crmGorusmeler = pgTable("crm_gorusmeler", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  musteriId: varchar("musteri_id").notNull().references(() => musteriler.id, { onDelete: "cascade" }),
+  kisiId: varchar("kisi_id").references(() => crmKisiler.id, { onDelete: "set null" }),
+  tarih: text("tarih").notNull(),
+  tip: text("tip").notNull().default("telefon"),  // telefon | email | ziyaret | toplanti | diger
+  konu: text("konu").notNull(),
+  notlar: text("notlar"),
+  personel: text("personel"),
+  takipTarihi: text("takip_tarihi"),
+  takipTamamlandi: boolean("takip_tamamlandi").notNull().default(false),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  index("crm_gorusmeler_musteri_idx").on(table.musteriId),
+  index("crm_gorusmeler_tarih_idx").on(table.tarih),
+  index("crm_gorusmeler_takip_idx").on(table.takipTamamlandi, table.takipTarihi),
+]);
+
+export const insertCrmGorusmeSchema = createInsertSchema(crmGorusmeler).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertCrmGorusme = z.infer<typeof insertCrmGorusmeSchema>;
+export type CrmGorusme = typeof crmGorusmeler.$inferSelect;

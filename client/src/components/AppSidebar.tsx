@@ -25,6 +25,7 @@ import {
   HandCoins,
   Banknote,
   Award,
+  Contact,
 } from "lucide-react";
 
 const navItems = [
@@ -37,6 +38,7 @@ const navItems = [
   { title: "Çalışanlar", icon: Users, href: "/calisanlar" },
   { title: "Hesaplamalar", icon: Calculator, href: "/hesaplamalar" },
   { title: "Müşteri Tahsilat", icon: HandCoins, href: "/tahsilat" },
+  { title: "Müşteri CRM", icon: Contact, href: "/crm" },
   { title: "Ödemeler", icon: Banknote, href: "/odemeler" },
   { title: "ISO9001-2015", icon: Award, href: "/iso9001" },
 ];

@@ -6576,5 +6576,283 @@ export async function registerRoutes(
     }
   });
 
+
+  // ==================== MÜŞTERİ CRM ====================
+  //
+  // Müşteri kimliği mevcut `musteriler` tablosundan gelir (Tahsilat/mizan
+  // kaynaklı). CRM ikinci bir müşteri listesi tutmaz; kartı, iletişim
+  // kişilerini ve görüşme kaydını o kimliğin üzerine ekler.
+
+  app.get("/api/crm/stats", async (_req, res) => {
+    try {
+      res.json(await storage.getCrmStats());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Departman kataloğu ─────────────────────────────────────────────────
+
+  app.get("/api/crm/departmanlar", async (_req, res) => {
+    try {
+      res.json(await storage.getCrmDepartmanlar());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/crm/departmanlar", async (req, res) => {
+    try {
+      const ad = String(req.body?.ad ?? "").trim();
+      if (!ad) return res.status(400).json({ error: "Departman adı zorunlu" });
+      const mevcutlar = await storage.getCrmDepartmanlar();
+      // Aynı ad üzerinde unique index var; 23505 yerine anlaşılır mesaj dönelim.
+      if (mevcutlar.some((d) => d.ad.toLocaleLowerCase("tr") === ad.toLocaleLowerCase("tr"))) {
+        return res.status(409).json({ error: "Bu departman zaten var" });
+      }
+      const sira = Number.isFinite(Number(req.body?.sira))
+        ? Number(req.body.sira)
+        : mevcutlar.length;
+      res.json(await storage.createCrmDepartman({ ad, sira, aktif: true }));
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/crm/departmanlar/:id", async (req, res) => {
+    try {
+      const izinli: { ad?: string; sira?: number; aktif?: boolean } = {};
+      if (typeof req.body?.ad === "string" && req.body.ad.trim()) izinli.ad = req.body.ad.trim();
+      if (Number.isFinite(Number(req.body?.sira))) izinli.sira = Number(req.body.sira);
+      if (typeof req.body?.aktif === "boolean") izinli.aktif = req.body.aktif;
+      const guncel = await storage.updateCrmDepartman(req.params.id, izinli);
+      if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(guncel);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/crm/departmanlar/:id", async (req, res) => {
+    try {
+      await storage.deleteCrmDepartman(req.params.id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // ─── Müşteri listesi ve kartı ───────────────────────────────────────────
+
+  app.get("/api/crm/musteriler", async (_req, res) => {
+    try {
+      res.json(await storage.getCrmMusteriListesi());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Mizanda henüz görünmeyen yeni müşteri elle açılabilsin diye. hesapKodu
+  // notNull + unique; boş bırakılırsa CRM-xxxx formatında geçici kod üretilir,
+  // mizan geldiğinde gerçek 120-xx koduyla düzeltilebilir.
+  app.post("/api/crm/musteriler", async (req, res) => {
+    try {
+      const ad = String(req.body?.ad ?? "").trim();
+      if (!ad) return res.status(400).json({ error: "Müşteri adı zorunlu" });
+
+      let hesapKodu = String(req.body?.hesapKodu ?? "").trim();
+      if (!hesapKodu) {
+        hesapKodu = `CRM-${Date.now().toString(36).toUpperCase()}`;
+      } else if (await storage.getMusteriByHesapKodu(hesapKodu)) {
+        return res.status(409).json({ error: "Bu hesap kodu zaten kayıtlı" });
+      }
+
+      const musteri = await storage.insertMusteri({
+        hesapKodu,
+        ad,
+        sektor: req.body?.sektor?.trim() || null,
+        firmaGrubu: req.body?.firmaGrubu?.trim() || null,
+      } as any);
+      res.json(musteri);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/crm/musteriler/:id", async (req, res) => {
+    try {
+      const detay = await storage.getCrmMusteriDetay(req.params.id);
+      if (!detay) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(detay);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/crm/musteriler/:id/bilgi", async (req, res) => {
+    try {
+      const musteri = await storage.getMusteri(req.params.id);
+      if (!musteri) return res.status(404).json({ error: "Bulunamadı" });
+
+      // Beyaz liste: musteriId gövdeden GELMEZ, yoldan alınır.
+      const alanlar = [
+        "vergiDairesi", "vergiNo", "adres", "ilce", "il", "postaKodu",
+        "telefon", "faks", "genelEmail", "web", "notlar",
+      ] as const;
+      const izinli: Record<string, string | null> = {};
+      for (const a of alanlar) {
+        if (a in (req.body ?? {})) {
+          const v = req.body[a];
+          izinli[a] = typeof v === "string" && v.trim() ? v.trim() : null;
+        }
+      }
+      res.json(await storage.upsertCrmMusteriBilgi(req.params.id, izinli as any));
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // ─── İletişim kişileri ──────────────────────────────────────────────────
+
+  app.get("/api/crm/rehber", async (_req, res) => {
+    try {
+      res.json(await storage.getCrmRehber());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/crm/kisiler", async (req, res) => {
+    try {
+      const musteriId = String(req.body?.musteriId ?? "").trim();
+      const adSoyad = String(req.body?.adSoyad ?? "").trim();
+      if (!musteriId || !adSoyad) {
+        return res.status(400).json({ error: "Müşteri ve ad soyad zorunlu" });
+      }
+      if (!(await storage.getMusteri(musteriId))) {
+        return res.status(404).json({ error: "Müşteri bulunamadı" });
+      }
+      res.json(await storage.createCrmKisi({
+        musteriId,
+        adSoyad,
+        departmanId: req.body?.departmanId || null,
+        unvan: req.body?.unvan?.trim() || null,
+        telefon: req.body?.telefon?.trim() || null,
+        cepTelefon: req.body?.cepTelefon?.trim() || null,
+        email: req.body?.email?.trim() || null,
+        birincil: req.body?.birincil === true,
+        aktif: req.body?.aktif !== false,
+        notlar: req.body?.notlar?.trim() || null,
+      } as any));
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/crm/kisiler/:id", async (req, res) => {
+    try {
+      const izinli: Record<string, unknown> = {};
+      const metin = ["adSoyad", "unvan", "telefon", "cepTelefon", "email", "notlar"] as const;
+      for (const a of metin) {
+        if (a in (req.body ?? {})) {
+          const v = req.body[a];
+          izinli[a] = typeof v === "string" && v.trim() ? v.trim() : null;
+        }
+      }
+      // adSoyad notNull — boşaltılmasına izin verme.
+      if ("adSoyad" in izinli && !izinli.adSoyad) {
+        return res.status(400).json({ error: "Ad soyad boş bırakılamaz" });
+      }
+      if ("departmanId" in (req.body ?? {})) izinli.departmanId = req.body.departmanId || null;
+      if (typeof req.body?.birincil === "boolean") izinli.birincil = req.body.birincil;
+      if (typeof req.body?.aktif === "boolean") izinli.aktif = req.body.aktif;
+
+      const guncel = await storage.updateCrmKisi(req.params.id, izinli as any);
+      if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(guncel);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/crm/kisiler/:id", async (req, res) => {
+    try {
+      await storage.deleteCrmKisi(req.params.id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // ─── Görüşme kaydı ──────────────────────────────────────────────────────
+
+  app.get("/api/crm/takipler", async (_req, res) => {
+    try {
+      res.json(await storage.getCrmBekleyenTakipler());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/crm/gorusmeler", async (req, res) => {
+    try {
+      const musteriId = String(req.body?.musteriId ?? "").trim();
+      const konu = String(req.body?.konu ?? "").trim();
+      const tarih = String(req.body?.tarih ?? "").trim();
+      if (!musteriId || !konu || !tarih) {
+        return res.status(400).json({ error: "Müşteri, tarih ve konu zorunlu" });
+      }
+      if (!(await storage.getMusteri(musteriId))) {
+        return res.status(404).json({ error: "Müşteri bulunamadı" });
+      }
+      res.json(await storage.createCrmGorusme({
+        musteriId,
+        konu,
+        tarih,
+        kisiId: req.body?.kisiId || null,
+        tip: req.body?.tip?.trim() || "telefon",
+        notlar: req.body?.notlar?.trim() || null,
+        personel: req.body?.personel?.trim() || null,
+        takipTarihi: req.body?.takipTarihi?.trim() || null,
+        takipTamamlandi: req.body?.takipTamamlandi === true,
+      } as any));
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/crm/gorusmeler/:id", async (req, res) => {
+    try {
+      const izinli: Record<string, unknown> = {};
+      const metin = ["konu", "tarih", "tip", "notlar", "personel", "takipTarihi"] as const;
+      for (const a of metin) {
+        if (a in (req.body ?? {})) {
+          const v = req.body[a];
+          izinli[a] = typeof v === "string" && v.trim() ? v.trim() : null;
+        }
+      }
+      if (("konu" in izinli && !izinli.konu) || ("tarih" in izinli && !izinli.tarih)) {
+        return res.status(400).json({ error: "Tarih ve konu boş bırakılamaz" });
+      }
+      if ("kisiId" in (req.body ?? {})) izinli.kisiId = req.body.kisiId || null;
+      if (typeof req.body?.takipTamamlandi === "boolean") izinli.takipTamamlandi = req.body.takipTamamlandi;
+
+      const guncel = await storage.updateCrmGorusme(req.params.id, izinli as any);
+      if (!guncel) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(guncel);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/crm/gorusmeler/:id", async (req, res) => {
+    try {
+      await storage.deleteCrmGorusme(req.params.id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   return httpServer;
 }

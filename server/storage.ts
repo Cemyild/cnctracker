@@ -40,13 +40,17 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   parasutSatisFaturalari, type ParasutSatisFaturasi, type InsertParasutSatisFaturasi,
   normalizeSube, normalizeKategori,
   giderSubeDagilimlari, type GiderSubeDagilim, type GiderWithDagilim,
+  crmDepartmanlar, type CrmDepartman, type InsertCrmDepartman,
+  crmMusteriBilgileri, type CrmMusteriBilgi, type InsertCrmMusteriBilgi,
+  crmKisiler, type CrmKisi, type InsertCrmKisi,
+  crmGorusmeler, type CrmGorusme, type InsertCrmGorusme,
 } from "@shared/schema";
 import { isYakitFaturasi } from "@shared/yakit";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as XLSX from "xlsx";
 import { db } from "./db";
-import { eq, and, sql, inArray, desc, isNotNull, or, asc, ne, count, notInArray, gte, lte, type AnyColumn } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, isNotNull, isNull, or, asc, ne, count, notInArray, gte, lte, type AnyColumn } from "drizzle-orm";
 import { sigortaTahakkukDokumu } from "@shared/sigortaTahakkuk";
 import { buildDedupKey } from "./dedup";
 
@@ -81,6 +85,52 @@ function trKatlaBuyuk(metin: string): string {
   }
   return cikti.toUpperCase();
 }
+
+// ============================================================================
+// MÜŞTERİ CRM — dönüş tipleri
+// ============================================================================
+
+// Liste satırı: müşteri + CRM özeti. Kişi/görüşme sayıları satır başına sorgu
+// ile DEĞİL, tek GROUP BY + Map birleştirmesiyle doldurulur (N+1 önleme).
+export type CrmMusteriListe = Musteri & {
+  kisiSayisi: number;
+  kartVar: boolean;
+  sonGorusmeTarihi: string | null;
+  telefon: string | null;
+  il: string | null;
+};
+
+export type CrmKisiDetay = CrmKisi & { departmanAd: string | null };
+export type CrmGorusmeDetay = CrmGorusme & { kisiAd: string | null };
+
+export type CrmMusteriDetay = {
+  musteri: Musteri;
+  bilgi: CrmMusteriBilgi | null;
+  kisiler: CrmKisiDetay[];
+  gorusmeler: CrmGorusmeDetay[];
+};
+
+// Global rehber satırı — "bu numara kimdi?" sorusunun cevabı.
+export type CrmRehberSatiri = CrmKisi & {
+  departmanAd: string | null;
+  musteriAd: string;
+  hesapKodu: string;
+};
+
+export type CrmTakip = CrmGorusme & { musteriAd: string };
+
+export type CrmStats = {
+  musteriSayisi: number;
+  kartliMusteriSayisi: number;
+  kisiSayisi: number;
+  gorusmeSayisi: number;
+  bekleyenTakip: number;
+};
+
+// Katalog ilk açılışta bunlarla tohumlanır; sonrası kullanıcının.
+const VARSAYILAN_DEPARTMANLAR = [
+  "İthalat", "İhracat", "Muhasebe", "Lojistik", "Satın Alma", "Depo", "Yönetim",
+];
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -518,6 +568,30 @@ export interface IStorage {
   getSatisFaturalari(): Promise<ParasutSatisFaturasi[]>;
   insertSatisFaturasi(s: InsertParasutSatisFaturasi): Promise<ParasutSatisFaturasi>;
   updateSatisFaturasi(id: string, s: Partial<InsertParasutSatisFaturasi>): Promise<ParasutSatisFaturasi | undefined>;
+
+  // Müşteri CRM — departman kataloğu
+  getCrmDepartmanlar(): Promise<CrmDepartman[]>;
+  createCrmDepartman(data: InsertCrmDepartman): Promise<CrmDepartman>;
+  updateCrmDepartman(id: string, data: Partial<InsertCrmDepartman>): Promise<CrmDepartman | null>;
+  deleteCrmDepartman(id: string): Promise<void>;
+
+  // Müşteri CRM — müşteri kartı
+  getCrmMusteriListesi(): Promise<CrmMusteriListe[]>;
+  getCrmMusteriDetay(musteriId: string): Promise<CrmMusteriDetay | null>;
+  upsertCrmMusteriBilgi(musteriId: string, data: Partial<InsertCrmMusteriBilgi>): Promise<CrmMusteriBilgi>;
+
+  // Müşteri CRM — iletişim kişileri
+  getCrmRehber(): Promise<CrmRehberSatiri[]>;
+  createCrmKisi(data: InsertCrmKisi): Promise<CrmKisi>;
+  updateCrmKisi(id: string, data: Partial<InsertCrmKisi>): Promise<CrmKisi | null>;
+  deleteCrmKisi(id: string): Promise<void>;
+
+  // Müşteri CRM — görüşme kaydı
+  createCrmGorusme(data: InsertCrmGorusme): Promise<CrmGorusme>;
+  updateCrmGorusme(id: string, data: Partial<InsertCrmGorusme>): Promise<CrmGorusme | null>;
+  deleteCrmGorusme(id: string): Promise<void>;
+  getCrmBekleyenTakipler(): Promise<CrmTakip[]>;
+  getCrmStats(): Promise<CrmStats>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4727,6 +4801,258 @@ export class DatabaseStorage implements IStorage {
   async updateSatisFaturasi(id: string, s: Partial<InsertParasutSatisFaturasi>): Promise<ParasutSatisFaturasi | undefined> {
     const [row] = await db.update(parasutSatisFaturalari).set(s).where(eq(parasutSatisFaturalari.id, id)).returning();
     return row;
+  }
+
+  // ==========================================================================
+  // MÜŞTERİ CRM — DEPARTMAN KATALOĞU
+  // ==========================================================================
+
+  async getCrmDepartmanlar(): Promise<CrmDepartman[]> {
+    const sirali = () => db.select().from(crmDepartmanlar)
+      .orderBy(asc(crmDepartmanlar.sira), asc(crmDepartmanlar.ad));
+
+    const mevcut = await sirali();
+    if (mevcut.length > 0) return mevcut;
+
+    // İlk açılış: katalog boş, varsayılanlar tohumlanır. onConflictDoNothing —
+    // iki istemci aynı anda sayfayı açarsa unique index ihlaliyle patlamasın.
+    await db.insert(crmDepartmanlar)
+      .values(VARSAYILAN_DEPARTMANLAR.map((ad, i) => ({ ad, sira: i })))
+      .onConflictDoNothing();
+    return await sirali();
+  }
+
+  async createCrmDepartman(data: InsertCrmDepartman): Promise<CrmDepartman> {
+    const [row] = await db.insert(crmDepartmanlar).values(data).returning();
+    return row;
+  }
+
+  async updateCrmDepartman(id: string, data: Partial<InsertCrmDepartman>): Promise<CrmDepartman | null> {
+    const [row] = await db.update(crmDepartmanlar).set(data).where(eq(crmDepartmanlar.id, id)).returning();
+    return row ?? null;
+  }
+
+  // Kişilerin departman FK alanı ON DELETE SET NULL ile bağlı: departman
+  // silinince kişi kaydı silinmez, "Departmansız" grubuna düşer.
+  async deleteCrmDepartman(id: string): Promise<void> {
+    await db.delete(crmDepartmanlar).where(eq(crmDepartmanlar.id, id));
+  }
+
+  // ==========================================================================
+  // MÜŞTERİ CRM — MÜŞTERİ KARTI
+  // ==========================================================================
+
+  async getCrmMusteriListesi(): Promise<CrmMusteriListe[]> {
+    // Satır başına sorgu YOK: dört toplu sorgu + Map birleştirme.
+    const [musteriRows, kisiSayilari, bilgiRows, sonGorusmeler] = await Promise.all([
+      db.select().from(musteriler).orderBy(asc(musteriler.ad)),
+      db.select({
+        musteriId: crmKisiler.musteriId,
+        adet: sql<number>`count(*)::int`,
+      }).from(crmKisiler).where(eq(crmKisiler.aktif, true)).groupBy(crmKisiler.musteriId),
+      db.select({
+        musteriId: crmMusteriBilgileri.musteriId,
+        telefon: crmMusteriBilgileri.telefon,
+        il: crmMusteriBilgileri.il,
+      }).from(crmMusteriBilgileri),
+      db.select({
+        musteriId: crmGorusmeler.musteriId,
+        sonTarih: sql<string>`max(${crmGorusmeler.tarih})`,
+      }).from(crmGorusmeler).groupBy(crmGorusmeler.musteriId),
+    ]);
+
+    const kisiMap = new Map(kisiSayilari.map((r) => [r.musteriId, r.adet]));
+    const bilgiMap = new Map(bilgiRows.map((r) => [r.musteriId, r]));
+    const gorusmeMap = new Map(sonGorusmeler.map((r) => [r.musteriId, r.sonTarih]));
+
+    return musteriRows.map((m) => {
+      const bilgi = bilgiMap.get(m.id);
+      return {
+        ...m,
+        kisiSayisi: kisiMap.get(m.id) ?? 0,
+        kartVar: !!bilgi,
+        sonGorusmeTarihi: gorusmeMap.get(m.id) ?? null,
+        telefon: bilgi?.telefon ?? null,
+        il: bilgi?.il ?? null,
+      };
+    });
+  }
+
+  async getCrmMusteriDetay(musteriId: string): Promise<CrmMusteriDetay | null> {
+    const musteri = await this.getMusteri(musteriId);
+    if (!musteri) return null;
+
+    const [bilgiRows, kisiRows, gorusmeRows] = await Promise.all([
+      db.select().from(crmMusteriBilgileri).where(eq(crmMusteriBilgileri.musteriId, musteriId)),
+      db.select({
+        id: crmKisiler.id,
+        musteriId: crmKisiler.musteriId,
+        departmanId: crmKisiler.departmanId,
+        adSoyad: crmKisiler.adSoyad,
+        unvan: crmKisiler.unvan,
+        telefon: crmKisiler.telefon,
+        cepTelefon: crmKisiler.cepTelefon,
+        email: crmKisiler.email,
+        birincil: crmKisiler.birincil,
+        aktif: crmKisiler.aktif,
+        notlar: crmKisiler.notlar,
+        olusturmaTarihi: crmKisiler.olusturmaTarihi,
+        departmanAd: crmDepartmanlar.ad,
+      })
+        .from(crmKisiler)
+        .leftJoin(crmDepartmanlar, eq(crmKisiler.departmanId, crmDepartmanlar.id))
+        .where(eq(crmKisiler.musteriId, musteriId))
+        // Departman sırası, sonra birincil muhatap üstte, sonra ada göre.
+        .orderBy(asc(crmDepartmanlar.sira), desc(crmKisiler.birincil), asc(crmKisiler.adSoyad)),
+      db.select({
+        id: crmGorusmeler.id,
+        musteriId: crmGorusmeler.musteriId,
+        kisiId: crmGorusmeler.kisiId,
+        tarih: crmGorusmeler.tarih,
+        tip: crmGorusmeler.tip,
+        konu: crmGorusmeler.konu,
+        notlar: crmGorusmeler.notlar,
+        personel: crmGorusmeler.personel,
+        takipTarihi: crmGorusmeler.takipTarihi,
+        takipTamamlandi: crmGorusmeler.takipTamamlandi,
+        olusturmaTarihi: crmGorusmeler.olusturmaTarihi,
+        kisiAd: crmKisiler.adSoyad,
+      })
+        .from(crmGorusmeler)
+        .leftJoin(crmKisiler, eq(crmGorusmeler.kisiId, crmKisiler.id))
+        .where(eq(crmGorusmeler.musteriId, musteriId))
+        .orderBy(desc(crmGorusmeler.tarih)),
+    ]);
+
+    return {
+      musteri,
+      bilgi: bilgiRows[0] ?? null,
+      kisiler: kisiRows,
+      gorusmeler: gorusmeRows,
+    };
+  }
+
+  // Kart yoksa açar, varsa günceller. musteri_id üzerinde unique index var.
+  async upsertCrmMusteriBilgi(musteriId: string, data: Partial<InsertCrmMusteriBilgi>): Promise<CrmMusteriBilgi> {
+    const alanlar = { ...data, musteriId, guncellenme: new Date() };
+    const [row] = await db.insert(crmMusteriBilgileri)
+      .values(alanlar as InsertCrmMusteriBilgi)
+      .onConflictDoUpdate({ target: crmMusteriBilgileri.musteriId, set: alanlar })
+      .returning();
+    return row;
+  }
+
+  // ==========================================================================
+  // MÜŞTERİ CRM — İLETİŞİM KİŞİLERİ
+  // ==========================================================================
+
+  async getCrmRehber(): Promise<CrmRehberSatiri[]> {
+    return await db.select({
+      id: crmKisiler.id,
+      musteriId: crmKisiler.musteriId,
+      departmanId: crmKisiler.departmanId,
+      adSoyad: crmKisiler.adSoyad,
+      unvan: crmKisiler.unvan,
+      telefon: crmKisiler.telefon,
+      cepTelefon: crmKisiler.cepTelefon,
+      email: crmKisiler.email,
+      birincil: crmKisiler.birincil,
+      aktif: crmKisiler.aktif,
+      notlar: crmKisiler.notlar,
+      olusturmaTarihi: crmKisiler.olusturmaTarihi,
+      departmanAd: crmDepartmanlar.ad,
+      musteriAd: musteriler.ad,
+      hesapKodu: musteriler.hesapKodu,
+    })
+      .from(crmKisiler)
+      .innerJoin(musteriler, eq(crmKisiler.musteriId, musteriler.id))
+      .leftJoin(crmDepartmanlar, eq(crmKisiler.departmanId, crmDepartmanlar.id))
+      .orderBy(asc(musteriler.ad), asc(crmKisiler.adSoyad));
+  }
+
+  // Bir müşteri+departman ikilisinde tek birincil muhatap olur. Yeni birincil
+  // işaretlenince eskisi düşürülür; aksi halde "kime soracağız" belirsiz kalır.
+  private async crmBirincilTekillestir(kisi: CrmKisi): Promise<void> {
+    await db.update(crmKisiler).set({ birincil: false }).where(and(
+      eq(crmKisiler.musteriId, kisi.musteriId),
+      kisi.departmanId ? eq(crmKisiler.departmanId, kisi.departmanId) : isNull(crmKisiler.departmanId),
+      ne(crmKisiler.id, kisi.id),
+    ));
+  }
+
+  async createCrmKisi(data: InsertCrmKisi): Promise<CrmKisi> {
+    const [row] = await db.insert(crmKisiler).values(data).returning();
+    if (row.birincil) await this.crmBirincilTekillestir(row);
+    return row;
+  }
+
+  async updateCrmKisi(id: string, data: Partial<InsertCrmKisi>): Promise<CrmKisi | null> {
+    const [row] = await db.update(crmKisiler).set(data).where(eq(crmKisiler.id, id)).returning();
+    if (!row) return null;
+    if (row.birincil) await this.crmBirincilTekillestir(row);
+    return row;
+  }
+
+  async deleteCrmKisi(id: string): Promise<void> {
+    await db.delete(crmKisiler).where(eq(crmKisiler.id, id));
+  }
+
+  // ==========================================================================
+  // MÜŞTERİ CRM — GÖRÜŞME KAYDI
+  // ==========================================================================
+
+  async createCrmGorusme(data: InsertCrmGorusme): Promise<CrmGorusme> {
+    const [row] = await db.insert(crmGorusmeler).values(data).returning();
+    return row;
+  }
+
+  async updateCrmGorusme(id: string, data: Partial<InsertCrmGorusme>): Promise<CrmGorusme | null> {
+    const [row] = await db.update(crmGorusmeler).set(data).where(eq(crmGorusmeler.id, id)).returning();
+    return row ?? null;
+  }
+
+  async deleteCrmGorusme(id: string): Promise<void> {
+    await db.delete(crmGorusmeler).where(eq(crmGorusmeler.id, id));
+  }
+
+  // Takip tarihi girilmiş ve henüz kapatılmamış görüşmeler — "geri dönecektim" listesi.
+  async getCrmBekleyenTakipler(): Promise<CrmTakip[]> {
+    return await db.select({
+      id: crmGorusmeler.id,
+      musteriId: crmGorusmeler.musteriId,
+      kisiId: crmGorusmeler.kisiId,
+      tarih: crmGorusmeler.tarih,
+      tip: crmGorusmeler.tip,
+      konu: crmGorusmeler.konu,
+      notlar: crmGorusmeler.notlar,
+      personel: crmGorusmeler.personel,
+      takipTarihi: crmGorusmeler.takipTarihi,
+      takipTamamlandi: crmGorusmeler.takipTamamlandi,
+      olusturmaTarihi: crmGorusmeler.olusturmaTarihi,
+      musteriAd: musteriler.ad,
+    })
+      .from(crmGorusmeler)
+      .innerJoin(musteriler, eq(crmGorusmeler.musteriId, musteriler.id))
+      .where(and(eq(crmGorusmeler.takipTamamlandi, false), isNotNull(crmGorusmeler.takipTarihi)))
+      .orderBy(asc(crmGorusmeler.takipTarihi));
+  }
+
+  async getCrmStats(): Promise<CrmStats> {
+    const [musteriSay, kartSay, kisiSay, gorusmeSay, takipSay] = await Promise.all([
+      db.select({ n: sql<number>`count(*)::int` }).from(musteriler),
+      db.select({ n: sql<number>`count(*)::int` }).from(crmMusteriBilgileri),
+      db.select({ n: sql<number>`count(*)::int` }).from(crmKisiler).where(eq(crmKisiler.aktif, true)),
+      db.select({ n: sql<number>`count(*)::int` }).from(crmGorusmeler),
+      db.select({ n: sql<number>`count(*)::int` }).from(crmGorusmeler)
+        .where(and(eq(crmGorusmeler.takipTamamlandi, false), isNotNull(crmGorusmeler.takipTarihi))),
+    ]);
+    return {
+      musteriSayisi: musteriSay[0]?.n ?? 0,
+      kartliMusteriSayisi: kartSay[0]?.n ?? 0,
+      kisiSayisi: kisiSay[0]?.n ?? 0,
+      gorusmeSayisi: gorusmeSay[0]?.n ?? 0,
+      bekleyenTakip: takipSay[0]?.n ?? 0,
+    };
   }
 }
 
