@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,8 +15,8 @@ type FormVerisi = {
   kart: Record<string, string>;
 };
 
-// Departman başına TEK kişi alanı. Firma hangi departmanı doldurursa o kaydedilir;
-// boş bırakılan departman hiç gönderilmez.
+// Departman başına iki kişi alanı. Firma yalnız doldurduklarını gönderir;
+// adı boş bırakılan alan hiç iletilmez.
 type KisiAlani = {
   adSoyad: string;
   telefon: string;
@@ -25,6 +25,11 @@ type KisiAlani = {
 };
 
 const bosKisi = (): KisiAlani => ({ adSoyad: "", telefon: "", cepTelefon: "", email: "" });
+
+// Bir departmanda kaç muhatap yazılabilir. İkincisi isteğe bağlıdır; üçüncü
+// bir kişi gerekirse panelden eklenir (form sade kalsın diye).
+const KISI_SAYISI = 2;
+const yeniDepartmanAlanlari = () => Array.from({ length: KISI_SAYISI }, bosKisi);
 
 const KART_ALANLARI: { ad: string; etiket: string; placeholder?: string; tip?: string }[] = [
   { ad: "vergiDairesi", etiket: "Vergi Dairesi", placeholder: "Beşiktaş" },
@@ -43,8 +48,8 @@ export default function PublicCrmForm() {
   const token = params?.token;
 
   const [kart, setKart] = useState<Record<string, string>>({});
-  // departmanId -> kişi alanı
-  const [kisiler, setKisiler] = useState<Record<string, KisiAlani>>({});
+  // departmanId -> [1. kişi, 2. kişi]
+  const [kisiler, setKisiler] = useState<Record<string, KisiAlani[]>>({});
   const [gonderenAd, setGonderenAd] = useState("");
   const [gonderenEmail, setGonderenEmail] = useState("");
   const [gonderildi, setGonderildi] = useState(false);
@@ -61,11 +66,11 @@ export default function PublicCrmForm() {
     retry: false,
   });
 
-  // Mevcut şirket bilgileri ön doldurulur; her departman için boş bir kişi alanı açılır.
+  // Mevcut şirket bilgileri ön doldurulur; her departman için boş kişi alanları açılır.
   useEffect(() => {
     if (!data) return;
     setKart(data.kart ?? {});
-    setKisiler(Object.fromEntries(data.departmanlar.map((d) => [d.id, bosKisi()])));
+    setKisiler(Object.fromEntries(data.departmanlar.map((d) => [d.id, yeniDepartmanAlanlari()])));
   }, [data]);
 
   const gonder = useMutation({
@@ -77,10 +82,10 @@ export default function PublicCrmForm() {
           gonderenAd,
           gonderenEmail,
           kart,
-          // Yalnız adı girilmiş departmanlar gönderilir.
-          kisiler: Object.entries(kisiler)
-            .filter(([, k]) => k.adSoyad.trim())
-            .map(([departmanId, k]) => ({ departmanId, ...k })),
+          // Yalnız adı girilmiş alanlar gönderilir; boş kutular hiç iletilmez.
+          kisiler: Object.entries(kisiler).flatMap(([departmanId, liste]) =>
+            liste.filter((k) => k.adSoyad.trim()).map((k) => ({ departmanId, ...k })),
+          ),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Gönderilemedi");
@@ -90,11 +95,14 @@ export default function PublicCrmForm() {
     onError: (e: Error) => setHataMesaji(e.message),
   });
 
-  const kisiGuncelle = (departmanId: string, alan: keyof KisiAlani, deger: string) =>
-    setKisiler((onceki) => ({
-      ...onceki,
-      [departmanId]: { ...(onceki[departmanId] ?? bosKisi()), [alan]: deger },
-    }));
+  const kisiGuncelle = (departmanId: string, sira: number, alan: keyof KisiAlani, deger: string) =>
+    setKisiler((onceki) => {
+      const liste = onceki[departmanId] ?? yeniDepartmanAlanlari();
+      return {
+        ...onceki,
+        [departmanId]: liste.map((k, i) => (i === sira ? { ...k, [alan]: deger } : k)),
+      };
+    });
 
   if (!token) {
     return <Merkez><p className="text-slate-600">Geçersiz bağlantı.</p></Merkez>;
@@ -218,50 +226,80 @@ export default function PublicCrmForm() {
                   </p>
                 </div>
 
+                {/* Bilgilendirme: ikinci kişi alanının ne işe yaradığı */}
+                <div className="flex gap-3 rounded-lg border border-sky-200 bg-sky-50 p-4">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+                  <p className="text-[12.5px] leading-relaxed text-sky-900">
+                    <strong>Her departman için iki kişi yazabilirsiniz.</strong> İkinci kişi
+                    zorunlu değildir; yalnız o departmanda birden fazla muhatabınız varsa
+                    doldurun. Örneğin ithalat işlerini iki kişi yürütüyorsa ikisini de
+                    yazabilir, tek kişi yeterliyse ikinci alanı boş bırakabilirsiniz.
+                    İkiden fazla kişi bildirmek isterseniz formu gönderdikten sonra
+                    bize iletin, biz ekleyelim.
+                  </p>
+                </div>
+
                 {data.departmanlar.map((d) => {
-                  const k = kisiler[d.id] ?? bosKisi();
-                  const dolu = !!k.adSoyad.trim();
+                  const liste = kisiler[d.id] ?? yeniDepartmanAlanlari();
                   return (
-                    <div
-                      key={d.id}
-                      className={`rounded-lg border p-5 transition-colors ${dolu ? "border-slate-300 bg-white" : "bg-white"}`}
-                    >
+                    <div key={d.id} className="rounded-lg border bg-white p-5">
                       <h4 className="mb-4 text-[13.5px] font-extrabold uppercase tracking-wide text-slate-600">
                         {d.ad}
                       </h4>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label className="text-[13px] font-semibold">Ad Soyad</Label>
-                          <Input
-                            value={k.adSoyad}
-                            placeholder="Ahmet Yılmaz"
-                            onChange={(e) => kisiGuncelle(d.id, "adSoyad", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-[13px] font-semibold">E-posta</Label>
-                          <Input
-                            type="email" value={k.email}
-                            placeholder="ahmet@firma.com"
-                            onChange={(e) => kisiGuncelle(d.id, "email", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-[13px] font-semibold">Telefon</Label>
-                          <Input
-                            type="tel" value={k.telefon}
-                            placeholder="0212 000 00 00"
-                            onChange={(e) => kisiGuncelle(d.id, "telefon", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-[13px] font-semibold">Cep Telefonu</Label>
-                          <Input
-                            type="tel" value={k.cepTelefon}
-                            placeholder="0532 000 00 00"
-                            onChange={(e) => kisiGuncelle(d.id, "cepTelefon", e.target.value)}
-                          />
-                        </div>
+
+                      <div className="space-y-5">
+                        {liste.map((k, i) => (
+                          <div
+                            key={i}
+                            // İkinci kişi görsel olarak ikincil: üstten ince bir
+                            // çizgiyle ayrılır, etiketi "isteğe bağlı" der.
+                            className={i > 0 ? "border-t pt-5" : undefined}
+                          >
+                            <div className="mb-3 flex items-baseline gap-2">
+                              <span className="text-[12px] font-bold text-slate-500">
+                                {i + 1}. Kişi
+                              </span>
+                              {i > 0 && (
+                                <span className="text-[11.5px] text-slate-400">isteğe bağlı</span>
+                              )}
+                            </div>
+
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label className="text-[13px] font-semibold">Ad Soyad</Label>
+                                <Input
+                                  value={k.adSoyad}
+                                  placeholder="Ahmet Yılmaz"
+                                  onChange={(e) => kisiGuncelle(d.id, i, "adSoyad", e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label className="text-[13px] font-semibold">E-posta</Label>
+                                <Input
+                                  type="email" value={k.email}
+                                  placeholder="ahmet@firma.com"
+                                  onChange={(e) => kisiGuncelle(d.id, i, "email", e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label className="text-[13px] font-semibold">Telefon</Label>
+                                <Input
+                                  type="tel" value={k.telefon}
+                                  placeholder="0212 000 00 00"
+                                  onChange={(e) => kisiGuncelle(d.id, i, "telefon", e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label className="text-[13px] font-semibold">Cep Telefonu</Label>
+                                <Input
+                                  type="tel" value={k.cepTelefon}
+                                  placeholder="0532 000 00 00"
+                                  onChange={(e) => kisiGuncelle(d.id, i, "cepTelefon", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );

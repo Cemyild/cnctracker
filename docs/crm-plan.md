@@ -250,7 +250,15 @@ yanlış ele geçerse personel isim/telefonları sızmasın.
   (örn. "Diğer", "Gümrükleme") formda kendiliğinden yeni bir alan belirir;
   pasife alınan departman formdan düşer. Sunucu tarafında değişiklik
   gerekmedi — API sözleşmesi zaten "her kişi kendi departmanId'sini taşır"
-  biçimindeydi. Departman başına tek kişi girilir; bir departmana ikinci
-  kişi gerekirse panelden eklenir.
+  biçimindeydi.
+
+  **Departman başına iki kişi alanı** (`KISI_SAYISI = 2`). İkincisi görsel
+  olarak ikincil (ince ayraç + "isteğe bağlı" etiketi) ve bölümün başında
+  ne işe yaradığını anlatan bir bilgi kutusu var. Bu da sunucu değişikliği
+  gerektirmedi: eşleştirme anahtarı (departman + isim) olduğu için aynı
+  departmandaki iki farklı isim doğal olarak iki kayıt olur; firma aynı ismi
+  iki kutuya yazarsa ilk kayıt eşleştirme haritasına girdiği için ikincisi
+  *güncelleme* sayılır, mükerrer kişi açılmaz. İkiden fazla kişi gerekirse
+  panelden eklenir (form sade kalsın diye).
 - Panel: `client/src/components/crm/FormLinkModal.tsx` — bağlantı üret/kopyala/
   aç/yenile/kapat + gelen gönderimlerin geçmişi.
