@@ -124,7 +124,7 @@ export function MusteriPanel({
               value={arama}
               onChange={(e) => setArama(e.target.value)}
               placeholder="Firma, hesap kodu, il ara…"
-              className="h-[36px] pl-8.5 text-[13px]"
+              className="h-[36px] text-[13px]"
               style={{ paddingLeft: "2.15rem" }}
             />
           </div>
