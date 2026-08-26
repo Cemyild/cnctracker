@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, Mail, MapPin, MessageSquarePlus, Pencil, Phone, Plus, Search,
-  Smartphone, Star, Trash2, UserRound, CalendarClock, CheckCircle2, Globe,
+  Smartphone, Star, Trash2, UserRound, CalendarClock, CheckCircle2, Globe, Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { FirmaBilgiForm } from "./FirmaBilgiForm";
+import { FormLinkModal } from "./FormLinkModal";
 import { GorusmeModal } from "./GorusmeModal";
 import { KisiModal } from "./KisiModal";
 import {
@@ -53,6 +54,7 @@ export function MusteriPanel({
   const [gorusmeModal, setGorusmeModal] = useState<{ acik: boolean; duzenlenen: CrmGorusme | null }>(
     { acik: false, duzenlenen: null },
   );
+  const [formLinkAcik, setFormLinkAcik] = useState(false);
 
   const suzulmus = useMemo(
     () => musteriler.filter((m) => aramaEslesir(arama, m.ad, m.hesapKodu, m.sektor, m.il, m.telefon)),
@@ -223,6 +225,13 @@ export function MusteriPanel({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-[34px] gap-1.5"
+                    onClick={() => setFormLinkAcik(true)}
+                  >
+                    <Link2 className="h-3.5 w-3.5" /> Bilgi Formu
+                  </Button>
                   <Button
                     variant="outline"
                     className="h-[34px] gap-1.5"
@@ -508,6 +517,12 @@ export function MusteriPanel({
             kisiler={detay?.kisiler ?? []}
             duzenlenen={gorusmeModal.duzenlenen}
             onClose={() => setGorusmeModal({ acik: false, duzenlenen: null })}
+          />
+          <FormLinkModal
+            open={formLinkAcik}
+            musteriId={seciliId}
+            musteriAd={detay?.musteri.ad ?? ""}
+            onClose={() => setFormLinkAcik(false)}
           />
         </>
       )}

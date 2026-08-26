@@ -183,7 +183,7 @@ function fixUploadFilename(name: string): string {
 
 import { insertGumrukVerisiSchema, insertAracSchema, type InsertGumrukVerisi, insertNakliyeVerisiSchema, insertSigortaPoliceSchema, insertSigortaMuhasebeSchema, insertSalaryPlanSchema, insertExpenseCategorySchema, insertAracGiderSchema, aylar, normalizeSube, normalizeKategori } from "@shared/schema";
 import { konteynerAnahtarlari, konteynerMetni } from "@shared/konteyner";
-import { createHash, timingSafeEqual } from "crypto";
+import { createHash, timingSafeEqual, randomBytes } from "crypto";
 import { z } from "zod";
 import {
   aylikHesapla,
@@ -6853,6 +6853,112 @@ export async function registerRoutes(
       res.status(400).json({ error: e.message });
     }
   });
+
+  // ─── CRM firma bilgi formu ──────────────────────────────────────────────
+  //
+  // ISO 9001 anket linkleriyle aynı mantık: /api/crm/form/:token uçları
+  // KİMLİK DOĞRULAMASIZDIR (firma bu bağlantıyı dışarıdan açar). Erişimi
+  // token'ın kendisi ve `aktif` bayrağı sınırlar.
+
+  // Panel: müşterinin linki + gelen yanıtların geçmişi
+  app.get("/api/crm/musteriler/:id/form", async (req, res) => {
+    try {
+      const [link, yanitlar] = await Promise.all([
+        storage.getCrmFormLink(req.params.id),
+        storage.getCrmFormYanitlari(req.params.id),
+      ]);
+      res.json({ link, yanitlar });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Panel: link üret / yenile. Yenileme token'ı değiştirdiği için daha önce
+  // gönderilmiş bağlantı kendiliğinden geçersizleşir.
+  app.post("/api/crm/musteriler/:id/form", async (req, res) => {
+    try {
+      if (!(await storage.getMusteri(req.params.id))) {
+        return res.status(404).json({ error: "Müşteri bulunamadı" });
+      }
+      const token = randomBytes(24).toString("base64url");
+      res.json(await storage.upsertCrmFormLink(req.params.id, token));
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // Panel: linki kapat / yeniden aç
+  app.put("/api/crm/musteriler/:id/form", async (req, res) => {
+    try {
+      if (typeof req.body?.aktif !== "boolean") {
+        return res.status(400).json({ error: "aktif alanı zorunlu" });
+      }
+      const link = await storage.setCrmFormLinkAktif(req.params.id, req.body.aktif);
+      if (!link) return res.status(404).json({ error: "Bulunamadı" });
+      res.json(link);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // AÇIK UÇ — formu getir. Firmanın kendi şirket bilgileri ön doldurulur
+  // (adres/vergi/telefon: düzeltsinler diye). Mevcut İLETİŞİM KİŞİLERİ
+  // KASITLI OLARAK DÖNDÜRÜLMEZ: bağlantı yanlış ele geçerse personel
+  // isimleri sızmasın.
+  app.get("/api/crm/form/:token", async (req, res) => {
+    try {
+      const link = await storage.getCrmFormLinkByToken(req.params.token);
+      if (!link) return res.status(404).json({ error: "Bağlantı geçersiz" });
+      if (!link.aktif) return res.status(410).json({ error: "Bu bağlantı kapatılmış" });
+
+      const detay = await storage.getCrmMusteriDetay(link.musteriId);
+      const b = detay?.bilgi ?? null;
+      const departmanlar = (await storage.getCrmDepartmanlar())
+        .filter((d) => d.aktif)
+        .map((d) => ({ id: d.id, ad: d.ad }));
+
+      res.json({
+        musteriAd: link.musteriAd,
+        departmanlar,
+        kart: {
+          vergiDairesi: b?.vergiDairesi ?? "",
+          vergiNo: b?.vergiNo ?? "",
+          adres: b?.adres ?? "",
+          ilce: b?.ilce ?? "",
+          il: b?.il ?? "",
+          postaKodu: b?.postaKodu ?? "",
+          telefon: b?.telefon ?? "",
+          faks: b?.faks ?? "",
+          genelEmail: b?.genelEmail ?? "",
+          web: b?.web ?? "",
+        },
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // AÇIK UÇ — form gönderimi. Uygulama kuralları storage tarafında:
+  // boş alan mevcut veriyi ezmez, kişi silinmez.
+  app.post("/api/crm/form/:token", async (req, res) => {
+    try {
+      const link = await storage.getCrmFormLinkByToken(req.params.token);
+      if (!link) return res.status(404).json({ error: "Bağlantı geçersiz" });
+      if (!link.aktif) return res.status(410).json({ error: "Bu bağlantı kapatılmış" });
+
+      const kisiler = Array.isArray(req.body?.kisiler) ? req.body.kisiler.slice(0, 50) : [];
+      const sonuc = await storage.crmFormGonderimUygula(link, {
+        gonderenAd: req.body?.gonderenAd,
+        gonderenEmail: req.body?.gonderenEmail,
+        kart: typeof req.body?.kart === "object" && req.body.kart ? req.body.kart : {},
+        kisiler,
+      });
+      res.json({ ok: true, ...sonuc });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
 
   return httpServer;
 }

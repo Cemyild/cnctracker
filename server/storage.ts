@@ -44,6 +44,8 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   crmMusteriBilgileri, type CrmMusteriBilgi, type InsertCrmMusteriBilgi,
   crmKisiler, type CrmKisi, type InsertCrmKisi,
   crmGorusmeler, type CrmGorusme, type InsertCrmGorusme,
+  crmFormLinkleri, type CrmFormLink, type InsertCrmFormLink,
+  crmFormYanitlari, type CrmFormYanit, type InsertCrmFormYanit,
 } from "@shared/schema";
 import { isYakitFaturasi } from "@shared/yakit";
 import { randomUUID } from "crypto";
@@ -126,6 +128,38 @@ export type CrmStats = {
   gorusmeSayisi: number;
   bekleyenTakip: number;
 };
+
+// CRM firma bilgi formu — dönüş ve giriş tipleri
+export type CrmFormLinkDetay = CrmFormLink & { musteriAd: string; hesapKodu: string };
+
+export type CrmFormGonderim = {
+  gonderenAd?: string | null;
+  gonderenEmail?: string | null;
+  kart?: Record<string, unknown>;
+  kisiler?: Array<Record<string, unknown>>;
+};
+
+export type CrmFormSonuc = {
+  eklenenKisi: number;
+  guncellenenKisi: number;
+  guncellenenKartAlani: number;
+};
+
+// Formun yazabileceği kart alanları. Beyaz liste: gövdeden gelen başka hiçbir
+// anahtar tabloya ulaşamaz.
+const CRM_FORM_KART_ALANLARI = [
+  "vergiDairesi", "vergiNo", "adres", "ilce", "il", "postaKodu",
+  "telefon", "faks", "genelEmail", "web",
+] as const;
+
+// Formun bir kişi kaydında doldurabileceği alanlar.
+const CRM_FORM_KISI_ALANLARI = ["unvan", "telefon", "cepTelefon", "email"] as const;
+
+// Boş/boşluk olmayan metni döndürür, aksi halde null. "Boş alan mevcut veriyi
+// ezmez" kuralının tek uygulama noktası.
+function crmDolu(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
 
 // Katalog ilk açılışta bunlarla tohumlanır; sonrası kullanıcının.
 const VARSAYILAN_DEPARTMANLAR = [
@@ -592,6 +626,14 @@ export interface IStorage {
   deleteCrmGorusme(id: string): Promise<void>;
   getCrmBekleyenTakipler(): Promise<CrmTakip[]>;
   getCrmStats(): Promise<CrmStats>;
+
+  // Müşteri CRM — firma bilgi formu (herkese açık link)
+  getCrmFormLink(musteriId: string): Promise<CrmFormLink | null>;
+  getCrmFormLinkByToken(token: string): Promise<CrmFormLinkDetay | null>;
+  upsertCrmFormLink(musteriId: string, token: string): Promise<CrmFormLink>;
+  setCrmFormLinkAktif(musteriId: string, aktif: boolean): Promise<CrmFormLink | null>;
+  getCrmFormYanitlari(musteriId: string): Promise<CrmFormYanit[]>;
+  crmFormGonderimUygula(link: CrmFormLink, gonderim: CrmFormGonderim): Promise<CrmFormSonuc>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -5053,6 +5095,148 @@ export class DatabaseStorage implements IStorage {
       gorusmeSayisi: gorusmeSay[0]?.n ?? 0,
       bekleyenTakip: takipSay[0]?.n ?? 0,
     };
+  }
+
+  // ==========================================================================
+  // MÜŞTERİ CRM — FİRMA BİLGİ FORMU (herkese açık link)
+  // ==========================================================================
+
+  async getCrmFormLink(musteriId: string): Promise<CrmFormLink | null> {
+    const [row] = await db.select().from(crmFormLinkleri).where(eq(crmFormLinkleri.musteriId, musteriId));
+    return row ?? null;
+  }
+
+  async getCrmFormLinkByToken(token: string): Promise<CrmFormLinkDetay | null> {
+    const [row] = await db.select({
+      id: crmFormLinkleri.id,
+      musteriId: crmFormLinkleri.musteriId,
+      token: crmFormLinkleri.token,
+      aktif: crmFormLinkleri.aktif,
+      kullanimSayisi: crmFormLinkleri.kullanimSayisi,
+      sonKullanim: crmFormLinkleri.sonKullanim,
+      olusturmaTarihi: crmFormLinkleri.olusturmaTarihi,
+      musteriAd: musteriler.ad,
+      hesapKodu: musteriler.hesapKodu,
+    })
+      .from(crmFormLinkleri)
+      .innerJoin(musteriler, eq(crmFormLinkleri.musteriId, musteriler.id))
+      .where(eq(crmFormLinkleri.token, token));
+    return row ?? null;
+  }
+
+  // Müşteri başına tek satır: "Yenile" aynı satırın token'ını değiştirir, böylece
+  // daha önce gönderilmiş bağlantı kendiliğinden geçersizleşir.
+  async upsertCrmFormLink(musteriId: string, token: string): Promise<CrmFormLink> {
+    const [row] = await db.insert(crmFormLinkleri)
+      .values({ musteriId, token, aktif: true })
+      .onConflictDoUpdate({
+        target: crmFormLinkleri.musteriId,
+        set: { token, aktif: true },
+      })
+      .returning();
+    return row;
+  }
+
+  async setCrmFormLinkAktif(musteriId: string, aktif: boolean): Promise<CrmFormLink | null> {
+    const [row] = await db.update(crmFormLinkleri).set({ aktif })
+      .where(eq(crmFormLinkleri.musteriId, musteriId)).returning();
+    return row ?? null;
+  }
+
+  async getCrmFormYanitlari(musteriId: string): Promise<CrmFormYanit[]> {
+    return await db.select().from(crmFormYanitlari)
+      .where(eq(crmFormYanitlari.musteriId, musteriId))
+      .orderBy(desc(crmFormYanitlari.gonderimTarihi));
+  }
+
+  // Formdan gelen veriyi CRM kaydına işler. İKİ KORUMA:
+  //   1. Boş gelen alan mevcut veriyi EZMEZ — yalnız dolu alanlar yazılır.
+  //   2. Kişi SİLİNMEZ — aynı departmanda aynı isim gelirse güncellenir,
+  //      yoksa eklenir. Firmanın yarım doldurduğu bir form kayıt kaybettirmez.
+  // Gönderimin ham hâli ayrıca saklanır (crm_form_yanitlari).
+  async crmFormGonderimUygula(link: CrmFormLink, gonderim: CrmFormGonderim): Promise<CrmFormSonuc> {
+    const musteriId = link.musteriId;
+
+    // ── 1. Firma kartı: yalnız dolu alanlar ──
+    const kartYamasi: Record<string, string> = {};
+    for (const alan of CRM_FORM_KART_ALANLARI) {
+      const deger = crmDolu(gonderim.kart?.[alan]);
+      if (deger) kartYamasi[alan] = deger;
+    }
+    if (Object.keys(kartYamasi).length > 0) {
+      await this.upsertCrmMusteriBilgi(musteriId, kartYamasi as any);
+    }
+
+    // ── 2. Kişiler ──
+    // Geçerli departman kimlikleri: formdan gelen tanımsız bir id null'a düşer.
+    const departmanlar = await this.getCrmDepartmanlar();
+    const gecerliDepartmanlar = new Set(departmanlar.map((d) => d.id));
+
+    // Mevcut kişiler bir kez çekilir; eşleştirme JS tarafında yapılır (satır
+    // başına sorgu yok). Türkçe I/İ tuzağı için toLocaleLowerCase("tr").
+    const mevcutKisiler = await db.select().from(crmKisiler).where(eq(crmKisiler.musteriId, musteriId));
+    const anahtar = (departmanId: string | null, adSoyad: string) =>
+      `${departmanId ?? "-"}|${adSoyad.trim().toLocaleLowerCase("tr")}`;
+    const mevcutHarita = new Map(mevcutKisiler.map((k) => [anahtar(k.departmanId, k.adSoyad), k]));
+
+    let eklenenKisi = 0;
+    let guncellenenKisi = 0;
+
+    for (const ham of gonderim.kisiler ?? []) {
+      const adSoyad = crmDolu(ham?.adSoyad);
+      if (!adSoyad) continue;  // isimsiz satır formun boş satırıdır, atlanır
+
+      const istenenDepartman = typeof ham?.departmanId === "string" ? ham.departmanId : null;
+      const departmanId = istenenDepartman && gecerliDepartmanlar.has(istenenDepartman)
+        ? istenenDepartman
+        : null;
+
+      const alanlar: Record<string, string> = {};
+      for (const a of CRM_FORM_KISI_ALANLARI) {
+        const deger = crmDolu(ham?.[a]);
+        if (deger) alanlar[a] = deger;
+      }
+
+      const eslesen = mevcutHarita.get(anahtar(departmanId, adSoyad));
+      if (eslesen) {
+        // Aynı kişi yeniden gönderildi: yalnız dolu alanlar güncellenir.
+        if (Object.keys(alanlar).length > 0) {
+          await db.update(crmKisiler).set(alanlar).where(eq(crmKisiler.id, eslesen.id));
+        }
+        guncellenenKisi++;
+      } else {
+        const [yeni] = await db.insert(crmKisiler).values({
+          musteriId, departmanId, adSoyad, aktif: true, birincil: false, ...alanlar,
+        }).returning();
+        mevcutHarita.set(anahtar(departmanId, adSoyad), yeni);
+        eklenenKisi++;
+      }
+    }
+
+    // ── 3. Ham gönderimi sakla + link sayacını ilerlet ──
+    const sonuc: CrmFormSonuc = {
+      eklenenKisi,
+      guncellenenKisi,
+      guncellenenKartAlani: Object.keys(kartYamasi).length,
+    };
+
+    await db.insert(crmFormYanitlari).values({
+      musteriId,
+      linkId: link.id,
+      gonderenAd: crmDolu(gonderim.gonderenAd),
+      gonderenEmail: crmDolu(gonderim.gonderenEmail),
+      ham: gonderim as any,
+      eklenenKisi: sonuc.eklenenKisi,
+      guncellenenKisi: sonuc.guncellenenKisi,
+      guncellenenKartAlani: sonuc.guncellenenKartAlani,
+    });
+
+    await db.update(crmFormLinkleri).set({
+      kullanimSayisi: sql`${crmFormLinkleri.kullanimSayisi} + 1`,
+      sonKullanim: new Date(),
+    }).where(eq(crmFormLinkleri.id, link.id));
+
+    return sonuc;
   }
 }
 

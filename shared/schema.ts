@@ -1564,3 +1564,54 @@ export const insertCrmGorusmeSchema = createInsertSchema(crmGorusmeler).omit({
 });
 export type InsertCrmGorusme = z.infer<typeof insertCrmGorusmeSchema>;
 export type CrmGorusme = typeof crmGorusmeler.$inferSelect;
+
+// ─── CRM: firma bilgi formu (herkese açık link) ──────────────────────────────
+// ISO 9001 anket linkleriyle aynı mantık: firmaya bir bağlantı gönderilir,
+// firma kendi bilgilerini girer, gelen veri CRM kartına ve kişilerine işlenir.
+
+// Müşteri başına TEK aktif link (musteri_id unique). "Yenile" token'ı değiştirir,
+// böylece eski bağlantı kendiliğinden geçersiz kalır.
+export const crmFormLinkleri = pgTable("crm_form_linkleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  musteriId: varchar("musteri_id").notNull().references(() => musteriler.id, { onDelete: "cascade" }),
+  token: text("token").notNull(),
+  aktif: boolean("aktif").notNull().default(true),
+  kullanimSayisi: integer("kullanim_sayisi").notNull().default(0),
+  sonKullanim: timestamp("son_kullanim"),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  uniqueIndex("crm_form_linkleri_token_idx").on(table.token),
+  uniqueIndex("crm_form_linkleri_musteri_idx").on(table.musteriId),
+]);
+
+export const insertCrmFormLinkSchema = createInsertSchema(crmFormLinkleri).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertCrmFormLink = z.infer<typeof insertCrmFormLinkSchema>;
+export type CrmFormLink = typeof crmFormLinkleri.$inferSelect;
+
+// Gelen her gönderim ham hâliyle saklanır. Uygulama kuralları (boş alan ezmez,
+// kişi silinmez) veri kaybını önler; yine de "firma tam olarak ne gönderdi"
+// sorusunun cevabı burada durur.
+export const crmFormYanitlari = pgTable("crm_form_yanitlari", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  musteriId: varchar("musteri_id").notNull().references(() => musteriler.id, { onDelete: "cascade" }),
+  linkId: varchar("link_id").references(() => crmFormLinkleri.id, { onDelete: "set null" }),
+  gonderenAd: text("gonderen_ad"),
+  gonderenEmail: text("gonderen_email"),
+  ham: jsonb("ham").notNull(),                     // formun gönderdiği payload
+  eklenenKisi: integer("eklenen_kisi").notNull().default(0),
+  guncellenenKisi: integer("guncellenen_kisi").notNull().default(0),
+  guncellenenKartAlani: integer("guncellenen_kart_alani").notNull().default(0),
+  gonderimTarihi: timestamp("gonderim_tarihi").defaultNow(),
+}, (table) => [
+  index("crm_form_yanitlari_musteri_idx").on(table.musteriId, table.gonderimTarihi),
+]);
+
+export const insertCrmFormYanitSchema = createInsertSchema(crmFormYanitlari).omit({
+  id: true,
+  gonderimTarihi: true,
+});
+export type InsertCrmFormYanit = z.infer<typeof insertCrmFormYanitSchema>;
+export type CrmFormYanit = typeof crmFormYanitlari.$inferSelect;

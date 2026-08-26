@@ -163,3 +163,80 @@ Türkçe arama `toLocaleLowerCase("tr")` ile yapılır (I/İ tuzağı). Tarihler
 | Departman silinince kişiler yetim kalır | FK `set null`, UI "Departmansız" grubunda gösterir |
 | Şema dışı tablo bırakmak CI `db:push`'unu kilitler (bilinen tuzak) | 4 tablonun tamamı şemada tanımlı, elle SQL yok |
 | Mizan içe aktarımıyla çakışma | CRM alanları ayrı tabloda, `musteriler` kolonlarına dokunulmaz |
+
+---
+
+# Faz 2 — Firma Bilgi Formu (herkese açık link)
+
+**Tarih:** 2026-08-26
+
+## Problem
+
+Firmanın iletişim bilgilerini personel telefonla toplayıp elle giriyor. Yavaş,
+eksik kalıyor ve güncellenmiyor. ISO 9001 anketlerinde olduğu gibi firmaya bir
+bağlantı gönderilip kendi bilgilerini girmesi istenebilmeli.
+
+## Akış
+
+1. Personel CRM'de firmayı seçer → **Bilgi Formu** → bağlantı üretir
+2. Bağlantı firmaya e-posta ile gider (`/firma-bilgi/<token>`)
+3. Firma açar: şirket bilgilerini kontrol/düzeltir, departman departman kişi ekler
+4. Gönderir → veri o müşterinin CRM kartına ve kişilerine **otomatik** işlenir
+
+## Veri modeli
+
+### `crm_form_linkleri`
+Müşteri başına TEK satır (`musteri_id` unique). "Yenile" aynı satırın token'ını
+değiştirir → daha önce gönderilmiş bağlantı kendiliğinden geçersizleşir.
+
+| kolon | not |
+|---|---|
+| musteriId | FK → musteriler, cascade, **unique** |
+| token | unique, `randomBytes(24).toString("base64url")` |
+| aktif | kapatılabilir |
+| kullanimSayisi, sonKullanim | kaç kez dolduruldu |
+
+### `crm_form_yanitlari`
+Her gönderimin **ham payload'u** (`ham` jsonb) + uygulama sayaçları. Uygulama
+kuralları veri kaybını önlese de "firma tam olarak ne gönderdi" sorusunun
+cevabı burada durur.
+
+## Uygulama kuralları — en kritik kısım
+
+Düz üzerine-yazma tehlikelidir: firma formu ikinci kez doldurursa ya da bir
+çalışan yarım doldurursa özenle girilmiş veri silinir. İki koruma:
+
+1. **Boş gelen alan mevcut veriyi EZMEZ.** Yalnız dolu alanlar yazılır
+   (`crmDolu()` tek uygulama noktası). Yarım form kayıp yaratmaz.
+2. **Kişi SİLİNMEZ.** Aynı müşteri + aynı departman + aynı isim gelirse
+   güncellenir (mükerrer açılmaz), yoksa eklenir. Eşleştirme Türkçe duyarsız
+   (`toLocaleLowerCase("tr")`), mevcut kişiler tek sorguda çekilip JS tarafında
+   eşleştirilir — satır başına sorgu yok.
+
+Ayrıca: formdan gelen `departmanId` katalogda yoksa `null`a düşer; kart ve kişi
+alanları **beyaz listeyle** sınırlıdır, gövdeden gelen başka anahtar tabloya
+ulaşamaz; gönderilen kişi sayısı 50 ile sınırlıdır.
+
+## Uçlar
+
+| method | yol | kimlik |
+|---|---|---|
+| GET/POST/PUT | /api/crm/musteriler/:id/form | panel (link getir / üret-yenile / aç-kapat) |
+| GET | /api/crm/form/:token | **açık** — form verisi |
+| POST | /api/crm/form/:token | **açık** — gönderim |
+
+`/api/crm/form/*` uçları kimlik doğrulamasızdır (anket uçlarıyla aynı model);
+erişimi token ve `aktif` bayrağı sınırlar.
+
+## Gizlilik kararı
+
+Açık form firmanın **şirket bilgilerini** ön doldurur (adres, vergi, santral —
+düzeltebilsinler diye) ama **mevcut iletişim kişilerini DÖNDÜRMEZ**. Bağlantı
+yanlış ele geçerse personel isim/telefonları sızmasın.
+
+## UI
+
+- Açık sayfa: `client/src/pages/PublicCrmForm.tsx`, rota `/firma-bilgi/:token`.
+  Yönetici şifre kapısı atlanır (App.tsx bypass listesine eklendi).
+- Panel: `client/src/components/crm/FormLinkModal.tsx` — bağlantı üret/kopyala/
+  aç/yenile/kapat + gelen gönderimlerin geçmişi.

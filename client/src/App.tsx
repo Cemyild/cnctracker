@@ -36,6 +36,7 @@ import SurveyAnalysis from "@/pages/SurveyAnalysis";
 import PortalApp from "@/pages/portal/PortalApp";
 import Odemeler from "@/pages/Odemeler";
 import CRM from "@/pages/CRM";
+import PublicCrmForm from "@/pages/PublicCrmForm";
 import NotFound from "@/pages/not-found";
 
 const pageTitles: Record<string, string> = {
@@ -93,6 +94,7 @@ function Router() {
       <Route path="/egitim-degerlendirme/:id" component={PublicEgitimDegerlendirme} />
       <Route path="/anket-sonuclari/:id" component={SurveyAnalysis} />
       <Route path="/survey/:id" component={PublicSurvey} />
+      <Route path="/firma-bilgi/:token" component={PublicCrmForm} />
       <Route path="/portal" component={PortalApp} />
       <Route path="/portal/:rest*" component={PortalApp} />
       <Route component={NotFound} />
@@ -115,6 +117,8 @@ function AppContent() {
   if (
     location.startsWith("/survey/") ||
     location.startsWith("/egitim-degerlendirme/") ||
+    // Firma bilgi formu: müşteri dışarıdan açar, yönetici şifresi sorulmaz.
+    location.startsWith("/firma-bilgi/") ||
     location.startsWith("/portal")
   ) {
     return <Router />;
