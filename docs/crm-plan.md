@@ -252,9 +252,13 @@ yanlış ele geçerse personel isim/telefonları sızmasın.
   gerekmedi — API sözleşmesi zaten "her kişi kendi departmanId'sini taşır"
   biçimindeydi.
 
-  **Departman başına iki kişi alanı** (`KISI_SAYISI = 2`). İkincisi görsel
-  olarak ikincil (ince ayraç + "isteğe bağlı" etiketi) ve bölümün başında
-  ne işe yaradığını anlatan bir bilgi kutusu var. Bu da sunucu değişikliği
+  **Departman başına TEK kişi alanı + "İkinci kişi ekle" düğmesi**
+  (`AZAMI_KISI = 2`). İkinci alan varsayılan olarak GÖRÜNMEZ — 7 departman ×
+  2 kişi × 4 kutu her zaman açık olsaydı form gereksiz kalabalık olurdu.
+  İkinci muhatabı olan firma düğmeyle açar, "Kaldır" ile kapatır; kişi
+  numarası etiketi (`1. Kişi` / `2. Kişi`) yalnız ikinci alan açıkken
+  görünür. Bilgilendirme ayrı bir kutu değil, bölüm girişindeki tek cümle.
+  Bu da sunucu değişikliği
   gerektirmedi: eşleştirme anahtarı (departman + isim) olduğu için aynı
   departmandaki iki farklı isim doğal olarak iki kayıt olur; firma aynı ismi
   iki kutuya yazarsa ilk kayıt eşleştirme haritasına girdiği için ikincisi

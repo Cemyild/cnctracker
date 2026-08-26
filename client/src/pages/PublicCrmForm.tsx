@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { CheckCircle2, Info } from "lucide-react";
+import { CheckCircle2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,8 +15,7 @@ type FormVerisi = {
   kart: Record<string, string>;
 };
 
-// Departman başına iki kişi alanı. Firma yalnız doldurduklarını gönderir;
-// adı boş bırakılan alan hiç iletilmez.
+// Firma yalnız doldurduklarını gönderir; adı boş bırakılan alan hiç iletilmez.
 type KisiAlani = {
   adSoyad: string;
   telefon: string;
@@ -26,10 +25,10 @@ type KisiAlani = {
 
 const bosKisi = (): KisiAlani => ({ adSoyad: "", telefon: "", cepTelefon: "", email: "" });
 
-// Bir departmanda kaç muhatap yazılabilir. İkincisi isteğe bağlıdır; üçüncü
-// bir kişi gerekirse panelden eklenir (form sade kalsın diye).
-const KISI_SAYISI = 2;
-const yeniDepartmanAlanlari = () => Array.from({ length: KISI_SAYISI }, bosKisi);
+// Her departman TEK kişi alanıyla açılır — form kalabalık görünmesin. İkinci
+// muhatabı olan firma düğmeyle ikinci alanı açar. Üçüncü kişi panelden eklenir.
+const AZAMI_KISI = 2;
+const yeniDepartmanAlanlari = () => [bosKisi()];
 
 const KART_ALANLARI: { ad: string; etiket: string; placeholder?: string; tip?: string }[] = [
   { ad: "vergiDairesi", etiket: "Vergi Dairesi", placeholder: "Beşiktaş" },
@@ -103,6 +102,20 @@ export default function PublicCrmForm() {
         [departmanId]: liste.map((k, i) => (i === sira ? { ...k, [alan]: deger } : k)),
       };
     });
+
+  const ikinciKisiAc = (departmanId: string) =>
+    setKisiler((onceki) => {
+      const liste = onceki[departmanId] ?? yeniDepartmanAlanlari();
+      if (liste.length >= AZAMI_KISI) return onceki;
+      return { ...onceki, [departmanId]: [...liste, bosKisi()] };
+    });
+
+  // Kaldırılan alan zaten gönderilmezdi; yine de yazılanlar temizlensin.
+  const ikinciKisiKapat = (departmanId: string) =>
+    setKisiler((onceki) => ({
+      ...onceki,
+      [departmanId]: (onceki[departmanId] ?? yeniDepartmanAlanlari()).slice(0, 1),
+    }));
 
   if (!token) {
     return <Merkez><p className="text-slate-600">Geçersiz bağlantı.</p></Merkez>;
@@ -222,20 +235,9 @@ export default function PublicCrmForm() {
                   <p className="mt-1 text-[13px] text-slate-500">
                     Her departman için o konuda muhatap olacak kişiyi yazın.
                     <strong className="text-slate-700"> Size uymayan departmanları boş bırakabilirsiniz</strong> —
-                    yalnız doldurduklarınız kaydedilir.
-                  </p>
-                </div>
-
-                {/* Bilgilendirme: ikinci kişi alanının ne işe yaradığı */}
-                <div className="flex gap-3 rounded-lg border border-sky-200 bg-sky-50 p-4">
-                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
-                  <p className="text-[12.5px] leading-relaxed text-sky-900">
-                    <strong>Her departman için iki kişi yazabilirsiniz.</strong> İkinci kişi
-                    zorunlu değildir; yalnız o departmanda birden fazla muhatabınız varsa
-                    doldurun. Örneğin ithalat işlerini iki kişi yürütüyorsa ikisini de
-                    yazabilir, tek kişi yeterliyse ikinci alanı boş bırakabilirsiniz.
-                    İkiden fazla kişi bildirmek isterseniz formu gönderdikten sonra
-                    bize iletin, biz ekleyelim.
+                    yalnız doldurduklarınız kaydedilir. Bir departmanda iki muhatabınız
+                    varsa alt taraftaki <strong className="text-slate-700">İkinci kişi ekle</strong> ile
+                    ekleyebilirsiniz.
                   </p>
                 </div>
 
@@ -249,20 +251,25 @@ export default function PublicCrmForm() {
 
                       <div className="space-y-5">
                         {liste.map((k, i) => (
-                          <div
-                            key={i}
-                            // İkinci kişi görsel olarak ikincil: üstten ince bir
-                            // çizgiyle ayrılır, etiketi "isteğe bağlı" der.
-                            className={i > 0 ? "border-t pt-5" : undefined}
-                          >
-                            <div className="mb-3 flex items-baseline gap-2">
-                              <span className="text-[12px] font-bold text-slate-500">
-                                {i + 1}. Kişi
-                              </span>
-                              {i > 0 && (
-                                <span className="text-[11.5px] text-slate-400">isteğe bağlı</span>
-                              )}
-                            </div>
+                          <div key={i} className={i > 0 ? "border-t pt-5" : undefined}>
+                            {/* Tek kişi varken numara etiketi gereksiz gürültü;
+                                yalnız ikinci alan açılınca gösterilir. */}
+                            {liste.length > 1 && (
+                              <div className="mb-3 flex items-baseline justify-between gap-2">
+                                <span className="text-[12px] font-bold text-slate-500">
+                                  {i + 1}. Kişi
+                                </span>
+                                {i > 0 && (
+                                  <button
+                                    type="button"
+                                    className="text-[11.5px] font-semibold text-slate-400 underline-offset-2 hover:text-red-600 hover:underline"
+                                    onClick={() => ikinciKisiKapat(d.id)}
+                                  >
+                                    Kaldır
+                                  </button>
+                                )}
+                              </div>
+                            )}
 
                             <div className="grid gap-4 sm:grid-cols-2">
                               <div className="space-y-2">
@@ -301,6 +308,16 @@ export default function PublicCrmForm() {
                           </div>
                         ))}
                       </div>
+
+                      {liste.length < AZAMI_KISI && (
+                        <button
+                          type="button"
+                          onClick={() => ikinciKisiAc(d.id)}
+                          className="mt-4 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sky-700 underline-offset-2 hover:underline"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> İkinci kişi ekle
+                        </button>
+                      )}
                     </div>
                   );
                 })}
