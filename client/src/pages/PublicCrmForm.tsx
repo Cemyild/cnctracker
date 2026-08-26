@@ -310,13 +310,21 @@ export default function PublicCrmForm() {
                       </div>
 
                       {liste.length < AZAMI_KISI && (
-                        <button
-                          type="button"
-                          onClick={() => ikinciKisiAc(d.id)}
-                          className="mt-4 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sky-700 underline-offset-2 hover:underline"
-                        >
-                          <Plus className="h-3.5 w-3.5" /> İkinci kişi ekle
-                        </button>
+                        <div className="mt-4">
+                          {/* Hatırlatma düğmenin hemen üstünde: bölüm başındaki
+                              açıklamaya geri dönmeden görülsün. */}
+                          <p className="text-[11.5px] text-slate-400">
+                            Bu departmanda ikinci bir muhatabınız varsa
+                            “İkinci kişi ekle” ile ekleyebilirsiniz.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => ikinciKisiAc(d.id)}
+                            className="mt-1.5 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sky-700 underline-offset-2 hover:underline"
+                          >
+                            <Plus className="h-3.5 w-3.5" /> İkinci kişi ekle
+                          </button>
+                        </div>
                       )}
                     </div>
                   );
