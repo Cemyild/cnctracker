@@ -6996,7 +6996,10 @@ export async function registerRoutes(
         const ad = metin(r["Ünvan"]);
         if (!ad) continue;
         const il = metin(r["Şehir"]);
-        const adres = [metin(r["Adres1"]), metin(r["Adres2"])].filter(Boolean).join(" ") || null;
+        // Adres UC parcaya bolunmus; ucuncusu genellikle "NILUFER / BURSA"
+        // satiridir. Ilcenin cikarilabilmesi ve adresin eksiksiz olmasi icin
+        // ucu birden birlestirilir.
+        const adres = [metin(r["Adres1"]), metin(r["Adres2"]), metin(r["Adres3"])].filter(Boolean).join(" ") || null;
         const noter = [metin(r["Vekalet1"]), metin(r["Vekalet2"])].filter(Boolean).join(" - ") || null;
         // EFatura kaynakta 1/2 kodlu; yalnız "1" mükellef sayılır, diğerleri
         // bilinmiyor kabul edilip null bırakılır (tahmin edilmez).
