@@ -36,6 +36,11 @@ export type CrmMusteriBilgi = {
   genelEmail: string | null;
   web: string | null;
   notlar: string | null;
+  vekaletBaslangic: string | null;
+  vekaletBitis: string | null;
+  vekaletNoter: string | null;
+  kepAdresi: string | null;
+  eFatura: boolean | null;
 };
 
 export type CrmKisi = {

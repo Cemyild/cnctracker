@@ -11,6 +11,7 @@ import type { CrmMusteriBilgi } from "./tipler";
 const ALANLAR = [
   "vergiDairesi", "vergiNo", "adres", "ilce", "il", "postaKodu",
   "telefon", "faks", "genelEmail", "web", "notlar",
+  "vekaletBaslangic", "vekaletBitis", "vekaletNoter", "kepAdresi",
 ] as const;
 
 type Alan = (typeof ALANLAR)[number];
@@ -112,6 +113,25 @@ export function FirmaBilgiForm({ musteriId, bilgi }: { musteriId: string; bilgi:
       <div className="mt-3.5 grid gap-3.5 md:grid-cols-2">
         {alan("genelEmail", "Genel E-posta", "info@firma.com", "email")}
         {alan("web", "Web Sitesi", "www.firma.com")}
+      </div>
+
+      <div className="mt-3.5 grid gap-3.5 md:grid-cols-2">
+        {alan("kepAdresi", "KEP Adresi", "firma@hs01.kep.tr", "email")}
+      </div>
+
+      {/* Gümrük vekaleti — çoğu kayıt Müşteri Listesi Excel'inden gelir,
+          elle de düzeltilebilir. */}
+      <div className="mt-5 border-t pt-4">
+        <h4 className="text-[12.5px] font-extrabold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          Gümrük Vekaleti
+        </h4>
+        <div className="mt-3 grid gap-3.5 md:grid-cols-2">
+          {alan("vekaletBaslangic", "Başlangıç Tarihi", undefined, "date")}
+          {alan("vekaletBitis", "Bitiş Tarihi", undefined, "date")}
+        </div>
+        <div className="mt-3.5">
+          {alan("vekaletNoter", "Noter / Yevmiye", "BURSA 28. NOTERLİĞİ - 05.12.2024/46050")}
+        </div>
       </div>
 
       <div className="mt-3.5 grid min-w-0 gap-1.5">

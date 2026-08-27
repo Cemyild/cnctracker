@@ -48,6 +48,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   crmFormYanitlari, type CrmFormYanit, type InsertCrmFormYanit,
 } from "@shared/schema";
 import { isYakitFaturasi } from "@shared/yakit";
+import { adNormalize, adGovde } from "@shared/musteriExcel";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as XLSX from "xlsx";
@@ -160,6 +161,60 @@ const CRM_FORM_KISI_ALANLARI = ["unvan", "telefon", "cepTelefon", "email"] as co
 function crmDolu(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
+
+// ── Müşteri Listesi Excel içe aktarımı ──────────────────────────────────────
+
+// Route tarafında ayrıştırılıp normalize edilmiş bir Excel satırı.
+export type CrmExcelSatir = {
+  ad: string;
+  vergiDairesi: string | null;
+  vergiNo: string | null;
+  adres: string | null;
+  ilce: string | null;
+  il: string | null;
+  telefon: string | null;
+  faks: string | null;
+  genelEmail: string | null;
+  kepAdresi: string | null;
+  eFatura: boolean | null;
+  vekaletBaslangic: string | null;
+  vekaletBitis: string | null;
+  vekaletNoter: string | null;
+};
+
+// Kart üzerinde Excel'in yazabileceği alanlar. Beyaz liste.
+const CRM_EXCEL_ALANLARI = [
+  "vergiDairesi", "vergiNo", "adres", "ilce", "il", "telefon", "faks",
+  "genelEmail", "kepAdresi", "vekaletBaslangic", "vekaletBitis", "vekaletNoter",
+] as const;
+
+export type CrmExcelSonuc = {
+  excelSatir: number;
+  appMusteri: number;
+  eslesen: number;
+  kartAcilan: number;
+  guncellenen: number;
+  doldurulanAlan: number;
+  degismeyen: number;
+  // Excel'de birden fazla aday bulunanlar — elle seçim gerekir.
+  belirsiz: { musteri: string; adaylar: string[] }[];
+  // App'te olup Excel'de hiç bulunamayanlar.
+  bulunamayan: string[];
+  // Kartta zaten değer VAR ve Excel farklı diyor — dokunulmadı, bilgi olarak döner.
+  farklilar: { musteri: string; alan: string; mevcut: string; excel: string }[];
+};
+
+// Vekalet takibi satiri
+export type CrmVekaletSatiri = {
+  musteriId: string;
+  musteriAd: string;
+  hesapKodu: string;
+  vekaletBaslangic: string | null;
+  vekaletBitis: string | null;
+  vekaletNoter: string | null;
+  telefon: string | null;
+  il: string | null;
+};
 
 // Katalog ilk açılışta bunlarla tohumlanır; sonrası kullanıcının.
 const VARSAYILAN_DEPARTMANLAR = [
@@ -634,6 +689,10 @@ export interface IStorage {
   setCrmFormLinkAktif(musteriId: string, aktif: boolean): Promise<CrmFormLink | null>;
   getCrmFormYanitlari(musteriId: string): Promise<CrmFormYanit[]>;
   crmFormGonderimUygula(link: CrmFormLink, gonderim: CrmFormGonderim): Promise<CrmFormSonuc>;
+
+  // Müşteri CRM — müşteri listesi Excel içe aktarımı ve vekalet takibi
+  crmExcelIceAktar(satirlar: CrmExcelSatir[]): Promise<CrmExcelSonuc>;
+  getCrmVekaletler(): Promise<CrmVekaletSatiri[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -5237,6 +5296,142 @@ export class DatabaseStorage implements IStorage {
     }).where(eq(crmFormLinkleri.id, link.id));
 
     return sonuc;
+  }
+
+  // ==========================================================================
+  // MÜŞTERİ CRM — MÜŞTERİ LİSTESİ EXCEL İÇE AKTARIMI
+  // ==========================================================================
+
+  // Excel firma adlarını üç kademeli eşleştirir ve YALNIZ BOŞ alanları doldurur.
+  //
+  // Neden kademeli: mizandan gelen `musteriler.ad` çoğu zaman 50 karakterde
+  // KIRPILMIŞ ("... LİMİTED ŞİRK"), Excel'deki ad ise tam. Ayrıca hukuki şekil
+  // eki iki kaynakta farklı yazılıyor ("LTD.ŞTİ." ↔ "LİMİTED ŞİRKETİ").
+  //
+  // Neden yalnız boş alan: kullanıcının panelden girdiği ya da firmanın kendi
+  // formundan gelen veri Excel'den daha güncel olabilir; sessizce ezilmemeli.
+  // Farklı olanlar `farklilar` listesiyle rapor edilir, karar kullanıcının.
+  //
+  // DİKKAT: Excel binlerce firma içerir, bunların çoğu uzun süredir
+  // çalışılmayan firmalardır. Bu yüzden yön APP'TEN EXCEL'E taranır —
+  // Excel'de olup app'te olmayan firma HİÇ oluşturulmaz.
+  async crmExcelIceAktar(satirlar: CrmExcelSatir[]): Promise<CrmExcelSonuc> {
+    const sonuc: CrmExcelSonuc = {
+      excelSatir: satirlar.length,
+      appMusteri: 0, eslesen: 0, kartAcilan: 0, guncellenen: 0,
+      doldurulanAlan: 0, degismeyen: 0,
+      belirsiz: [], bulunamayan: [], farklilar: [],
+    };
+
+    // Excel adları iki indekste toplanır: tam ad ve hukuki ekleri atılmış gövde.
+    const tamIndeks = new Map<string, CrmExcelSatir[]>();
+    const govdeIndeks = new Map<string, CrmExcelSatir[]>();
+    for (const s of satirlar) {
+      const t = adNormalize(s.ad);
+      const g = adGovde(s.ad);
+      if (t) { if (!tamIndeks.has(t)) tamIndeks.set(t, []); tamIndeks.get(t)!.push(s); }
+      if (g.length >= 4) { if (!govdeIndeks.has(g)) govdeIndeks.set(g, []); govdeIndeks.get(g)!.push(s); }
+    }
+    const govdeAnahtarlari = [...govdeIndeks.keys()];
+
+    // Müşteriler ve mevcut kartlar toplu çekilir (satır başına sorgu yok).
+    const [musteriRows, kartRows] = await Promise.all([
+      db.select().from(musteriler),
+      db.select().from(crmMusteriBilgileri),
+    ]);
+    sonuc.appMusteri = musteriRows.length;
+    const kartHarita = new Map(kartRows.map((k) => [k.musteriId, k]));
+
+    for (const m of musteriRows) {
+      // Gümrük ünvan takma adları da denenir; mizan adı kırpıksa oradan tutabilir.
+      const adaylar = [m.ad, ...(m.gumrukFirmaUnvanlari ?? [])].filter(Boolean) as string[];
+
+      let eslesen: CrmExcelSatir | null = null;
+      let cokAday: string[] | null = null;
+
+      for (const a of adaylar) {
+        const t = adNormalize(a);
+        const bulunan = tamIndeks.get(t);
+        if (bulunan?.length === 1) { eslesen = bulunan[0]; break; }
+        if (bulunan && bulunan.length > 1) cokAday = bulunan.map((x) => x.ad);
+      }
+      if (!eslesen) for (const a of adaylar) {
+        const g = adGovde(a);
+        if (g.length < 6) continue;
+        const bulunan = govdeIndeks.get(g);
+        if (bulunan?.length === 1) { eslesen = bulunan[0]; break; }
+        if (bulunan && bulunan.length > 1) cokAday = bulunan.map((x) => x.ad);
+      }
+      // Kırpılmış ad: app adı Excel adının öneki (ya da tersi). TEK aday şartı
+      // var — birden fazlaysa tahmin etmek yerine belirsiz sayılır.
+      if (!eslesen) for (const a of adaylar) {
+        const g = adGovde(a);
+        if (g.length < 10) continue;
+        const uyan = govdeAnahtarlari.filter((k) => k.startsWith(g) || g.startsWith(k));
+        const satirlarUyan = uyan.flatMap((k) => govdeIndeks.get(k)!);
+        if (satirlarUyan.length === 1) { eslesen = satirlarUyan[0]; break; }
+        if (satirlarUyan.length > 1) cokAday = satirlarUyan.map((x) => x.ad);
+      }
+
+      if (!eslesen) {
+        if (cokAday) sonuc.belirsiz.push({ musteri: m.ad, adaylar: cokAday.slice(0, 5) });
+        else sonuc.bulunamayan.push(m.ad);
+        continue;
+      }
+      sonuc.eslesen++;
+
+      // ── Yama: yalnız BOŞ alanlar ──
+      const kart = kartHarita.get(m.id) ?? null;
+      const yama: Record<string, string | boolean> = {};
+      let dolduruldu = 0;
+
+      for (const alan of CRM_EXCEL_ALANLARI) {
+        const yeni = eslesen[alan];
+        if (yeni === null || yeni === undefined || String(yeni).trim() === "") continue;
+        const mevcut = kart ? (kart as any)[alan] : null;
+        if (mevcut === null || mevcut === undefined || String(mevcut).trim() === "") {
+          yama[alan] = String(yeni);
+          dolduruldu++;
+        } else if (String(mevcut).trim() !== String(yeni).trim() && sonuc.farklilar.length < 200) {
+          sonuc.farklilar.push({
+            musteri: m.ad, alan,
+            mevcut: String(mevcut), excel: String(yeni),
+          });
+        }
+      }
+      // e-Fatura boolean; yalnız kartta hiç değer yokken yazılır.
+      if (eslesen.eFatura !== null && (kart?.eFatura === null || kart?.eFatura === undefined)) {
+        yama.eFatura = eslesen.eFatura;
+        dolduruldu++;
+      }
+
+      if (dolduruldu === 0) { sonuc.degismeyen++; continue; }
+
+      await this.upsertCrmMusteriBilgi(m.id, yama as any);
+      if (kart) sonuc.guncellenen++; else sonuc.kartAcilan++;
+      sonuc.doldurulanAlan += dolduruldu;
+    }
+
+    return sonuc;
+  }
+
+  // Vekalet takibi: kartında vekalet bitiş tarihi olan müşteriler, en yakın
+  // biten başta. Durum sınıflaması istemci tarafında bugüne göre yapılır.
+  async getCrmVekaletler(): Promise<CrmVekaletSatiri[]> {
+    return await db.select({
+      musteriId: musteriler.id,
+      musteriAd: musteriler.ad,
+      hesapKodu: musteriler.hesapKodu,
+      vekaletBaslangic: crmMusteriBilgileri.vekaletBaslangic,
+      vekaletBitis: crmMusteriBilgileri.vekaletBitis,
+      vekaletNoter: crmMusteriBilgileri.vekaletNoter,
+      telefon: crmMusteriBilgileri.telefon,
+      il: crmMusteriBilgileri.il,
+    })
+      .from(crmMusteriBilgileri)
+      .innerJoin(musteriler, eq(crmMusteriBilgileri.musteriId, musteriler.id))
+      .where(isNotNull(crmMusteriBilgileri.vekaletBitis))
+      .orderBy(asc(crmMusteriBilgileri.vekaletBitis));
   }
 }
 

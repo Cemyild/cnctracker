@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BookUser, CalendarClock, Contact, Layers, Users } from "lucide-react";
+import { BookUser, CalendarClock, Contact, FileSignature, Layers, Upload, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DepartmanYonetimi } from "@/components/crm/DepartmanYonetimi";
+import { ExcelIceAktarModal } from "@/components/crm/ExcelIceAktarModal";
 import { MusteriPanel } from "@/components/crm/MusteriPanel";
 import { Rehber } from "@/components/crm/Rehber";
-import { fmtTarih, type CrmDepartman, type CrmMusteriListe, type CrmStats } from "@/components/crm/tipler";
+import { Vekaletler } from "@/components/crm/Vekaletler";
+import { bugun, fmtTarih, type CrmDepartman, type CrmMusteriListe, type CrmStats } from "@/components/crm/tipler";
 
 type BekleyenTakip = {
   id: string;
@@ -15,9 +18,12 @@ type BekleyenTakip = {
   takipTarihi: string | null;
 };
 
+type Vekalet = { musteriId: string; vekaletBitis: string | null };
+
 const SEKMELER = [
   { id: "musteriler", etiket: "Müşteriler", Icon: Users },
   { id: "rehber", etiket: "Rehber", Icon: BookUser },
+  { id: "vekaletler", etiket: "Vekaletler", Icon: FileSignature },
   { id: "departmanlar", etiket: "Departmanlar", Icon: Layers },
 ] as const;
 
@@ -26,11 +32,19 @@ type Sekme = (typeof SEKMELER)[number]["id"];
 export default function CRM() {
   const [sekme, setSekme] = useState<Sekme>("musteriler");
   const [seciliMusteriId, setSeciliMusteriId] = useState<string | null>(null);
+  const [excelAcik, setExcelAcik] = useState(false);
 
   const { data: musteriler = [] } = useQuery<CrmMusteriListe[]>({ queryKey: ["/api/crm/musteriler"] });
   const { data: departmanlar = [] } = useQuery<CrmDepartman[]>({ queryKey: ["/api/crm/departmanlar"] });
   const { data: stats } = useQuery<CrmStats>({ queryKey: ["/api/crm/stats"] });
   const { data: takipler = [] } = useQuery<BekleyenTakip[]>({ queryKey: ["/api/crm/takipler"] });
+  const { data: vekaletler = [] } = useQuery<Vekalet[]>({ queryKey: ["/api/crm/vekaletler"] });
+
+  // Süresi dolmuş vekalet sayısı — KPI ve uyarı şeridi için.
+  const BUGUN = bugun();
+  const vekaletDolmus = vekaletler.filter(
+    (v) => v.vekaletBitis && !v.vekaletBitis.startsWith("3000") && v.vekaletBitis < BUGUN,
+  ).length;
 
   // Rehberden "Firmayı aç" tıklanınca müşteri sekmesine geçilir.
   const musteriAc = (id: string) => {
@@ -64,8 +78,15 @@ export default function CRM() {
       etiket: "Bekleyen Takip",
       deger: String(stats?.bekleyenTakip ?? 0),
       alt: "kapatılmamış görüşme",
+      renk: "#f59e0b",
+      degerRenk: (stats?.bekleyenTakip ?? 0) > 0 ? "#b45309" : "#0f172a",
+    },
+    {
+      etiket: "Süresi Dolmuş Vekalet",
+      deger: String(vekaletDolmus),
+      alt: `${vekaletler.length} firmada vekalet kaydı`,
       renk: "#dc2626",
-      degerRenk: (stats?.bekleyenTakip ?? 0) > 0 ? "#dc2626" : "#0f172a",
+      degerRenk: vekaletDolmus > 0 ? "#dc2626" : "#0f172a",
     },
   ];
 
@@ -86,6 +107,13 @@ export default function CRM() {
                 </p>
               </div>
             </div>
+            <Button
+              variant="outline"
+              className="h-[38px] gap-1.5"
+              onClick={() => setExcelAcik(true)}
+            >
+              <Upload className="h-4 w-4" /> Excel&apos;den Güncelle
+            </Button>
           </div>
 
           {/* Sekme barı — aktif sekme inset alt çizgi */}
@@ -112,7 +140,7 @@ export default function CRM() {
         </div>
 
         {/* ===== KPI ŞERİDİ ===== */}
-        <div className="mt-5 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+        <div className="mt-5 grid grid-cols-2 gap-3.5 lg:grid-cols-5">
           {kpis.map((k) => (
             <div key={k.etiket} className="relative overflow-hidden rounded-[14px] border bg-card p-4">
               <span className="absolute bottom-0 left-0 top-0 w-1" style={{ background: k.renk }} />
@@ -170,9 +198,12 @@ export default function CRM() {
             />
           )}
           {sekme === "rehber" && <Rehber onMusteriAc={musteriAc} />}
+          {sekme === "vekaletler" && <Vekaletler onMusteriAc={musteriAc} />}
           {sekme === "departmanlar" && <DepartmanYonetimi departmanlar={departmanlar} />}
         </div>
       </div>
+
+      <ExcelIceAktarModal open={excelAcik} onClose={() => setExcelAcik(false)} />
     </div>
   );
 }

@@ -1500,9 +1500,17 @@ export const crmMusteriBilgileri = pgTable("crm_musteri_bilgileri", {
   genelEmail: text("genel_email"),
   web: text("web"),
   notlar: text("notlar"),
+  // Gümrük vekaleti — müşteri listesi Excel'inden gelir. Tarihler diğer her
+  // yerdeki gibi text + YYYY-MM-DD (proje kuralı).
+  vekaletBaslangic: text("vekalet_baslangic"),
+  vekaletBitis: text("vekalet_bitis"),
+  vekaletNoter: text("vekalet_noter"),   // "BURSA 28. NOTERLİĞİ - 05.12.2024/46050"
+  kepAdresi: text("kep_adresi"),
+  eFatura: boolean("e_fatura"),
   guncellenme: timestamp("guncellenme").defaultNow(),
 }, (table) => [
   uniqueIndex("crm_musteri_bilgileri_musteri_idx").on(table.musteriId),
+  index("crm_musteri_bilgileri_vekalet_idx").on(table.vekaletBitis),
 ]);
 
 export const insertCrmMusteriBilgiSchema = createInsertSchema(crmMusteriBilgileri).omit({

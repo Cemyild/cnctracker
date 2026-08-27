@@ -3,6 +3,8 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { buildDedupKey } from "./dedup";
 import multer from "multer";
+import { telefonTemizle, telefonBirlestir, excelSeriTarih } from "@shared/musteriExcel";
+import type { CrmExcelSatir } from "./storage";
 import { type IStorage } from "./storage";
 import * as XLSX from "xlsx";
 import fs from "fs";
@@ -126,6 +128,9 @@ const uploadNakliyeFatura = multer({
 // ay/yıl req.body'den geldiği için route handler'ında okunuyor; multer'a
 // diskStorage yerine memoryStorage verip dosyayı kendimiz taşıyoruz.
 const uploadBordroMemory = multer({ storage: multer.memoryStorage() });
+
+// Müşteri Listesi Excel'i: diske yazılmaz, ayrıştırılıp atılır.
+const uploadCrmExcelMemory = multer({ storage: multer.memoryStorage() });
 
 // Mizan upload — memory storage; arşivleme route handler'ında md5 hesabıyla yapılır
 const uploadMizanMemory = multer({ storage: multer.memoryStorage() });
@@ -6698,6 +6703,7 @@ export async function registerRoutes(
       const alanlar = [
         "vergiDairesi", "vergiNo", "adres", "ilce", "il", "postaKodu",
         "telefon", "faks", "genelEmail", "web", "notlar",
+        "vekaletBaslangic", "vekaletBitis", "vekaletNoter", "kepAdresi",
       ] as const;
       const izinli: Record<string, string | null> = {};
       for (const a of alanlar) {
@@ -6958,6 +6964,79 @@ export async function registerRoutes(
       res.status(400).json({ error: e.message });
     }
   });
+
+  // ─── CRM: Müşteri Listesi Excel içe aktarımı ────────────────────────────
+  //
+  // Kaynak sistemden alınan müşteri listesi. Excel BİNLERCE firma içerir ve
+  // çoğu uzun süredir çalışılmayan firmalardır; bu yüzden yön APP'TEN
+  // EXCEL'E taranır — Excel'de olup app'te olmayan firma OLUŞTURULMAZ.
+  // Eşleşenlerde de yalnız BOŞ alanlar doldurulur.
+
+  app.post("/api/crm/musteri-excel", uploadCrmExcelMemory.single("xlsx"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
+
+      const wb = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sayfa = wb.Sheets[wb.SheetNames[0]];
+      if (!sayfa) return res.status(400).json({ error: "Excel boş" });
+      const ham = XLSX.utils.sheet_to_json(sayfa, { defval: null, raw: true }) as any[];
+
+      const metin = (v: unknown): string | null => {
+        const s = v === null || v === undefined ? "" : String(v).trim();
+        return s && s !== "-" && s !== "." ? s : null;
+      };
+      const eposta = (v: unknown): string | null => {
+        const s = metin(v);
+        return s && s.includes("@") ? s.toLowerCase() : null;
+      };
+
+      const satirlar: CrmExcelSatir[] = [];
+      for (const r of ham) {
+        const ad = metin(r["Ünvan"]);
+        if (!ad) continue;
+        const il = metin(r["Şehir"]);
+        const adres = [metin(r["Adres1"]), metin(r["Adres2"])].filter(Boolean).join(" ") || null;
+        const noter = [metin(r["Vekalet1"]), metin(r["Vekalet2"])].filter(Boolean).join(" - ") || null;
+        // EFatura kaynakta 1/2 kodlu; yalnız "1" mükellef sayılır, diğerleri
+        // bilinmiyor kabul edilip null bırakılır (tahmin edilmez).
+        const efHam = metin(r["EFatura"]);
+
+        satirlar.push({
+          ad,
+          vergiDairesi: metin(r["Vergi Dairesi"]),
+          vergiNo: metin(r["Vergi No"]),
+          adres,
+          ilce: metin(r["Semt"]),
+          il,
+          telefon: telefonBirlestir(telefonTemizle(r["Telefon"], il)),
+          faks: telefonBirlestir(telefonTemizle(r["Fax"], il)),
+          genelEmail: eposta(r["Mail Adresi"]),
+          kepAdresi: eposta(r["Kep Adresi"]),
+          eFatura: efHam === "1" ? true : null,
+          vekaletBaslangic: excelSeriTarih(r["Vekalet Baş Tarihi"]),
+          vekaletBitis: excelSeriTarih(r["Vekalet Bitiş Tarihi"]),
+          vekaletNoter: noter,
+        });
+      }
+
+      if (satirlar.length === 0) {
+        return res.status(400).json({ error: "Excel'de 'Ünvan' kolonlu satır bulunamadı" });
+      }
+
+      res.json(await storage.crmExcelIceAktar(satirlar));
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/crm/vekaletler", async (_req, res) => {
+    try {
+      res.json(await storage.getCrmVekaletler());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
 
 
   return httpServer;
