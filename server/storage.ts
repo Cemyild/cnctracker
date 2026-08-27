@@ -163,7 +163,7 @@ function crmDolu(v: unknown): string | null {
 
 // Katalog ilk açılışta bunlarla tohumlanır; sonrası kullanıcının.
 const VARSAYILAN_DEPARTMANLAR = [
-  "İthalat", "İhracat", "Muhasebe", "Lojistik", "Satın Alma", "Depo", "Yönetim",
+  "İthalat", "İhracat", "Muhasebe", "Lojistik", "Depo", "Yönetim",
 ];
 
 export interface IStorage {
