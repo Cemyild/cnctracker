@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { firmaIbanOzet } from "./portalUtils";
 import { SayfaBasligi } from "./kasaUI";
 import { Search, Plus, Upload, FileDown, Pencil, Power, Trash2 } from "lucide-react";
 
@@ -24,10 +23,8 @@ const KAYNAK_ETIKET: Record<string, string> = { muhasebe: "Muhasebe", temsilci: 
 
 // Tek accent (indigo) — para birimi rozetleri de dahil, gökkuşağı yok.
 const DOVIZ_ROZET = "border-transparent bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300";
-
-function bas2(s: string | null | undefined) {
-  return (s ?? "?").trim().slice(0, 2).toUpperCase();
-}
+// 800+ satırlık liste: rozetler satır yüksekliğini büyütmesin.
+const DOVIZ_ROZET_MINI = `${DOVIZ_ROZET} shrink-0 px-1.5 py-0 text-[10px] leading-4`;
 
 export default function FirmalarSayfasi() {
   const { toast } = useToast();
@@ -160,81 +157,71 @@ export default function FirmalarSayfasi() {
         </div>
       </div>
 
-      {/* Firma kartları */}
-      <div className="space-y-3">
+      {/* Firma listesi — 800+ kayıt: kart yığını yerine tek yoğun liste.
+          Ad + IBAN aynı satırda; IBAN başlıkları (Döviz/IBAN/Etiket) her satırda
+          tekrarlanmıyor, yalnız kolon sırası olarak korunuyor. */}
+      <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
         {filtreli.map((f) => {
-          const ozet = firmaIbanOzet(f);
           const ibanlar = f.ibanlar ?? [];
           return (
-            <div key={f.id} className="overflow-hidden rounded-xl border bg-card shadow-sm" data-testid={`row-firma-${f.id}`}>
-              <div className={`flex flex-wrap items-center justify-between gap-3 p-4 ${f.aktif ? "" : "opacity-60"}`}>
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-sm font-bold text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
-                    {bas2(f.ad)}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate font-semibold" title={f.ad}>{f.ad}</span>
-                      <Badge variant={f.aktif ? "outline" : "secondary"} className="text-[10px] font-medium">
-                        {f.aktif ? "Aktif" : "Pasif"}
-                      </Badge>
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                      <span>Vergi No: {f.vergiNo || "—"}</span>
-                      <span>{KAYNAK_ETIKET[f.kaynak] ?? f.kaynak}</span>
-                      <span>{f.kullanimSayisi} kullanım</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                  {ozet.length > 0 ? (
-                    ozet.map((o) => (
-                      <Badge key={o.paraBirimi} className={DOVIZ_ROZET}>
-                        {o.paraBirimi}{o.adet > 1 ? ` ×${o.adet}` : ""}
-                      </Badge>
-                    ))
-                  ) : (
-                    <Badge variant="destructive" data-testid={`rozet-iban-yok-${f.id}`}>IBAN yok</Badge>
+            <div
+              key={f.id}
+              className={`flex flex-wrap items-start gap-x-4 gap-y-1 border-b px-3 py-2 last:border-b-0 hover:bg-muted/30 ${f.aktif ? "" : "opacity-60"}`}
+              data-testid={`row-firma-${f.id}`}
+            >
+              {/* Ad + ikincil bilgi */}
+              <div className="min-w-0 flex-1 basis-56">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium" title={f.ad}>{f.ad}</span>
+                  {!f.aktif && (
+                    <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] leading-4">Pasif</Badge>
                   )}
-                  <Button variant="ghost" size="sm" onClick={() => duzenleAc(f)} data-testid={`button-firma-duzenle-${f.id}`}>
-                    <Pencil className="mr-1 h-3.5 w-3.5" />Düzenle
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => aktifToggle(f)} data-testid={`button-firma-aktif-${f.id}`}>
-                    <Power className="mr-1 h-3.5 w-3.5" />{f.aktif ? "Pasifleştir" : "Aktifleştir"}
-                  </Button>
+                </div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  {f.vergiNo ? `VKN ${f.vergiNo} · ` : ""}
+                  {KAYNAK_ETIKET[f.kaynak] ?? f.kaynak} · {f.kullanimSayisi} kullanım
                 </div>
               </div>
 
-              {/* IBAN alt-tablosu */}
-              {ibanlar.length > 0 && (
-                <div className="border-t bg-muted/20 px-4 py-2.5">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-left text-muted-foreground">
-                        <th className="w-20 pb-1.5 pr-3 font-medium">Döviz</th>
-                        <th className="pb-1.5 pr-3 font-medium">IBAN</th>
-                        <th className="pb-1.5 font-medium">Etiket</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ibanlar.map((i) => (
-                        <tr key={i.id} className="border-t border-dashed border-border/60">
-                          <td className="py-1.5 pr-3">
-                            <Badge className={DOVIZ_ROZET}>{i.paraBirimi}</Badge>
-                          </td>
-                          <td className="py-1.5 pr-3 font-mono tabular-nums">{i.iban}</td>
-                          <td className="py-1.5 text-muted-foreground">{i.etiket || "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              {/* IBAN'lar — tek IBAN tek satır, çoklu IBAN alt alta */}
+              <div className="min-w-0 flex-[2] basis-80 space-y-0.5">
+                {ibanlar.length === 0 ? (
+                  <Badge variant="destructive" className="px-1.5 py-0 text-[10px] leading-4" data-testid={`rozet-iban-yok-${f.id}`}>
+                    IBAN yok
+                  </Badge>
+                ) : (
+                  ibanlar.map((i) => (
+                    <div key={i.id} className="flex items-center gap-2 text-xs">
+                      <Badge className={DOVIZ_ROZET_MINI}>{i.paraBirimi}</Badge>
+                      <span className="truncate font-mono tabular-nums">{i.iban}</span>
+                      {i.etiket && <span className="truncate text-muted-foreground">{i.etiket}</span>}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Aksiyonlar — metin buton 800 satırda yer yiyor; ikon + tooltip */}
+              <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                <Button
+                  variant="ghost" size="icon" className="h-7 w-7" title="Düzenle"
+                  onClick={() => duzenleAc(f)} data-testid={`button-firma-duzenle-${f.id}`}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span className="sr-only">Düzenle</span>
+                </Button>
+                <Button
+                  variant="ghost" size="icon" className="h-7 w-7" title={f.aktif ? "Pasifleştir" : "Aktifleştir"}
+                  onClick={() => aktifToggle(f)} data-testid={`button-firma-aktif-${f.id}`}
+                >
+                  <Power className="h-3.5 w-3.5" />
+                  <span className="sr-only">{f.aktif ? "Pasifleştir" : "Aktifleştir"}</span>
+                </Button>
+              </div>
             </div>
           );
         })}
         {filtreli.length === 0 && (
-          <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground shadow-sm">Kayıt yok.</div>
+          <div className="p-8 text-center text-sm text-muted-foreground">Kayıt yok.</div>
         )}
       </div>
 
