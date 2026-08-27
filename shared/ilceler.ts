@@ -116,6 +116,22 @@ export function ilceNormalize(s: unknown): string {
 const IL_ESANLAM: Record<string, string> = { ISTANBUL: "ISTANBUL", ICEL: "ICEL", MERSIN: "ICEL" };
 
 /**
+ * Verilen adayın o ilin ilçesi olup olmadığını doğrular; öyleyse özgün
+ * yazımıyla döner. Kaynaktaki "Semt" kolonu kısmen kirli ("BAĞCILAR/",
+ * "34/ATAŞEHİR", "KADİKÖY"), bu yüzden doğrudan kullanılmaz.
+ */
+export function ilceDogrula(aday: unknown, il: unknown): string | null {
+  const ilAnahtar = IL_ESANLAM[ilceNormalize(il)] ?? ilceNormalize(il);
+  const liste = ILCELER[ilAnahtar];
+  if (!liste) return null;
+  const ozgun = String(aday ?? "").split(/[^0-9A-Za-zÇĞİıÖŞÜçğıöşü]+/).filter(Boolean);
+  for (let i = 0; i < ozgun.length; i++) {
+    if (liste.includes(ilceNormalize(ozgun[i]))) return ozgun[i].toLocaleUpperCase("tr");
+  }
+  return null;
+}
+
+/**
  * Adres metninden ilçeyi çıkarır. İl adının hemen öncesindeki kelime aday
  * sayılır ve O İLİN ilçe listesinde varsa kabul edilir; yoksa null döner
  * (mahalle adı ya da yazım hatası olabilir, tahmin edilmez).

@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { buildDedupKey } from "./dedup";
 import multer from "multer";
 import { telefonTemizle, telefonBirlestir, excelSeriTarih } from "@shared/musteriExcel";
-import { adrestenIlce } from "@shared/ilceler";
+import { adrestenIlce, ilceDogrula } from "@shared/ilceler";
 import type { CrmExcelSatir } from "./storage";
 import { type IStorage } from "./storage";
 import * as XLSX from "xlsx";
@@ -7012,7 +7012,7 @@ export async function registerRoutes(
           adres,
           // Semt kolonu %6 dolu; ilçe asıl olarak ADRES METNİNDEN çıkarılır
           // ("NİLÜFER/BURSA"). Doğrulamalı çıkarım — mahalle adı kabul edilmez.
-          ilce: metin(r["Semt"]) ?? adrestenIlce(adres, il),
+          ilce: ilceDogrula(r["Semt"], il) ?? adrestenIlce(adres, il),
           il,
           telefon: telefonBirlestir(telefonTemizle(r["Telefon"], il)),
           faks: telefonBirlestir(telefonTemizle(r["Fax"], il)),
