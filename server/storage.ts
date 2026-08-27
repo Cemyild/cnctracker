@@ -101,6 +101,8 @@ export type CrmMusteriListe = Musteri & {
   sonGorusmeTarihi: string | null;
   telefon: string | null;
   il: string | null;
+  ilce: string | null;
+  vekaletBitis: string | null;
 };
 
 export type CrmKisiDetay = CrmKisi & { departmanAd: string | null };
@@ -4955,6 +4957,8 @@ export class DatabaseStorage implements IStorage {
         musteriId: crmMusteriBilgileri.musteriId,
         telefon: crmMusteriBilgileri.telefon,
         il: crmMusteriBilgileri.il,
+        ilce: crmMusteriBilgileri.ilce,
+        vekaletBitis: crmMusteriBilgileri.vekaletBitis,
       }).from(crmMusteriBilgileri),
       db.select({
         musteriId: crmGorusmeler.musteriId,
@@ -4975,6 +4979,8 @@ export class DatabaseStorage implements IStorage {
         sonGorusmeTarihi: gorusmeMap.get(m.id) ?? null,
         telefon: bilgi?.telefon ?? null,
         il: bilgi?.il ?? null,
+        ilce: bilgi?.ilce ?? null,
+        vekaletBitis: bilgi?.vekaletBitis ?? null,
       };
     });
   }

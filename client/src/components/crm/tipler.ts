@@ -13,6 +13,8 @@ export type CrmMusteriListe = {
   sonGorusmeTarihi: string | null;
   telefon: string | null;
   il: string | null;
+  ilce: string | null;
+  vekaletBitis: string | null;
 };
 
 export type CrmDepartman = {
@@ -128,3 +130,33 @@ export const aramaEslesir = (terim: string, ...alanlar: (string | null | undefin
 };
 
 export const DEPARTMANSIZ = "Departmansız";
+
+// ── Vekalet durumu ──────────────────────────────────────────────────────────
+// Tarihler YYYY-MM-DD metni olduğu için doğrudan karşılaştırılır; new Date()
+// üzerinden geçirilmez (timezone kayması olmasın diye).
+
+export type VekaletDurum = "yok" | "dolmus" | "yakin" | "gecerli" | "suresiz";
+
+export const VEKALET_BILGI: Record<VekaletDurum, { etiket: string; renk: string; arka: string }> = {
+  yok:     { etiket: "Vekalet yok",   renk: "#64748b", arka: "#f1f5f9" },
+  dolmus:  { etiket: "Süresi dolmuş", renk: "#b91c1c", arka: "#fee2e2" },
+  yakin:   { etiket: "Yaklaşıyor",    renk: "#b45309", arka: "#fef3c7" },
+  gecerli: { etiket: "Geçerli",       renk: "#15803d", arka: "#dcfce7" },
+  suresiz: { etiket: "Süresiz",       renk: "#4338ca", arka: "#e0e7ff" },
+};
+
+/** YYYY-MM-DD metnine gün ekler (UTC üzerinden, yerel saat kaydırmasın). */
+export function gunEkle(tarih: string, gun: number): string {
+  const [y, a, g] = tarih.split("-").map(Number);
+  const d = new Date(Date.UTC(y, a - 1, g + gun));
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+export function vekaletDurumu(bitis: string | null | undefined): VekaletDurum {
+  if (!bitis) return "yok";
+  if (bitis.startsWith("3000") || bitis.startsWith("2999")) return "suresiz";
+  const b = bugun();
+  if (bitis < b) return "dolmus";
+  return bitis <= gunEkle(b, 90) ? "yakin" : "gecerli";
+}

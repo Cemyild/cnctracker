@@ -4,7 +4,7 @@ import { ExternalLink, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { aramaEslesir, bugun, fmtTarih } from "./tipler";
+import { aramaEslesir, fmtTarih, vekaletDurumu, VEKALET_BILGI, type VekaletDurum } from "./tipler";
 
 type Vekalet = {
   musteriId: string;
@@ -17,47 +17,19 @@ type Vekalet = {
   il: string | null;
 };
 
-type Durum = "dolmus" | "yakin" | "gecerli" | "suresiz";
-
-const DURUM_BILGI: Record<Durum, { etiket: string; renk: string; arka: string }> = {
-  dolmus:  { etiket: "Süresi dolmuş", renk: "#b91c1c", arka: "#fee2e2" },
-  yakin:   { etiket: "Yaklaşıyor",    renk: "#b45309", arka: "#fef3c7" },
-  gecerli: { etiket: "Geçerli",       renk: "#15803d", arka: "#dcfce7" },
-  suresiz: { etiket: "Süresiz",       renk: "#4338ca", arka: "#e0e7ff" },
-};
-
-// YYYY-MM-DD metinleri doğrudan karşılaştırılır — sıralama zaten doğru olur ve
-// new Date() üzerinden geçmediği için timezone kayması olmaz.
-function gunEkle(tarih: string, gun: number): string {
-  const [y, a, g] = tarih.split("-").map(Number);
-  const d = new Date(Date.UTC(y, a - 1, g + gun));
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
-}
+// Durum siniflamasi ve renkler ./tipler icinde ortak: musteri listesi de
+// ayni kurallari kullaniyor, iki yerde tutulursa ayrisirlar.
 
 export function Vekaletler({ onMusteriAc }: { onMusteriAc: (musteriId: string) => void }) {
   const [arama, setArama] = useState("");
-  const [filtre, setFiltre] = useState<Durum | "hepsi">("hepsi");
+  const [filtre, setFiltre] = useState<VekaletDurum | "hepsi">("hepsi");
 
   const { data: satirlar = [], isLoading } = useQuery<Vekalet[]>({
     queryKey: ["/api/crm/vekaletler"],
   });
 
-  const BUGUN = bugun();
-  const ESIK = gunEkle(BUGUN, 90);
-
-  const durumu = (v: Vekalet): Durum => {
-    const b = v.vekaletBitis ?? "";
-    if (b.startsWith("3000") || b.startsWith("2999")) return "suresiz";
-    if (b < BUGUN) return "dolmus";
-    if (b <= ESIK) return "yakin";
-    return "gecerli";
-  };
-
   const zenginlestirilmis = useMemo(
-    () => satirlar.map((v) => ({ ...v, durum: durumu(v) })),
-    // BUGUN/ESIK render başına sabit; satırlar değişince yeniden hesaplanır.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () => satirlar.map((v) => ({ ...v, durum: vekaletDurumu(v.vekaletBitis) })),
     [satirlar],
   );
 
@@ -71,7 +43,7 @@ export function Vekaletler({ onMusteriAc }: { onMusteriAc: (musteriId: string) =
     .filter((v) => filtre === "hepsi" || v.durum === filtre)
     .filter((v) => aramaEslesir(arama, v.musteriAd, v.hesapKodu, v.il, v.vekaletNoter));
 
-  const FILTRELER: { kod: Durum | "hepsi"; etiket: string }[] = [
+  const FILTRELER: { kod: VekaletDurum | "hepsi"; etiket: string }[] = [
     { kod: "hepsi", etiket: "Hepsi" },
     { kod: "dolmus", etiket: "Süresi dolmuş" },
     { kod: "yakin", etiket: "90 gün içinde" },
@@ -141,7 +113,7 @@ export function Vekaletler({ onMusteriAc }: { onMusteriAc: (musteriId: string) =
                 </tr>
               )}
               {suzulmus.map((v) => {
-                const d = DURUM_BILGI[v.durum];
+                const d = VEKALET_BILGI[v.durum];
                 return (
                   <tr key={v.musteriId} className="border-b border-border/60">
                     <td className="p-3">
