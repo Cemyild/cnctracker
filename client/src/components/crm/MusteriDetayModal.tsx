@@ -110,19 +110,20 @@ export function MusteriDetayModal({
 
           {detay && (
             <>
-              {/* ═══ Sabit başlık ═══ */}
-              <DialogHeader className="min-w-0 space-y-0 border-b px-6 pb-4 pt-6 text-left">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <DialogTitle className="truncate pr-8 text-[19px] font-extrabold tracking-tight">
+              {/* ═══ Sabit başlık — üç ayrı katman, kendi nefes alanlarıyla ═══ */}
+              <DialogHeader className="min-w-0 space-y-0 border-b p-0 text-left">
+                {/* Katman 1: firma adı + işlemler */}
+                <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4 px-7 pb-5 pt-6">
+                  <div className="min-w-0 flex-1">
+                    <DialogTitle className="pr-8 text-[21px] font-extrabold leading-snug tracking-tight">
                       {detay.musteri.ad}
                     </DialogTitle>
-                    <p className="mt-0.5 text-[12px] text-muted-foreground">
+                    <p className="mt-1.5 text-[12.5px] text-muted-foreground">
                       {detay.musteri.hesapKodu}
                       {detay.musteri.sektor ? ` · ${detay.musteri.sektor}` : ""}
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2 pr-6">
+                  <div className="flex flex-wrap gap-2 pr-7">
                     <Button variant="outline" className="h-[34px] gap-1.5" onClick={() => setFormLinkAcik(true)}>
                       <Link2 className="h-3.5 w-3.5" /> Bilgi Formu
                     </Button>
@@ -141,33 +142,51 @@ export function MusteriDetayModal({
                   </div>
                 </div>
 
-                {/* Hızlı bakış şeridi */}
-                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[12px] text-muted-foreground">
+                {/* Katman 2: hızlı bakış şeridi */}
+                <div className="flex flex-wrap items-center gap-x-7 gap-y-2.5 border-t bg-muted/25 px-7 py-3">
                   <span
-                    className="inline-flex rounded-md px-2 py-0.5 text-[11px] font-bold"
+                    className="inline-flex shrink-0 items-center rounded-md px-2.5 py-1 text-[11.5px] font-bold"
                     style={{ background: vBilgi.arka, color: vBilgi.renk }}
                   >
-                    Vekalet: {vBilgi.etiket}
-                    {detay.bilgi?.vekaletBitis && vDurum !== "suresiz" ? ` · ${fmtTarih(detay.bilgi.vekaletBitis)}` : ""}
+                    {/* "Vekalet: Vekalet yok" tekrarını önle */}
+                    {vDurum === "yok"
+                      ? "Vekalet yok"
+                      : `Vekalet: ${vBilgi.etiket}${
+                          detay.bilgi?.vekaletBitis && vDurum !== "suresiz"
+                            ? ` · ${fmtTarih(detay.bilgi.vekaletBitis)}`
+                            : ""
+                        }`}
                   </span>
                   {detay.bilgi?.telefon && (
-                    <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{detay.bilgi.telefon}</span>
+                    <span className="inline-flex items-center gap-2 text-[12.5px]">
+                      <Phone className="h-4 w-4 shrink-0 text-muted-foreground" />{detay.bilgi.telefon}
+                    </span>
                   )}
                   {detay.bilgi?.genelEmail && (
-                    <span className="inline-flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{detay.bilgi.genelEmail}</span>
+                    <span className="inline-flex items-center gap-2 text-[12.5px]">
+                      <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />{detay.bilgi.genelEmail}
+                    </span>
                   )}
                   {(detay.bilgi?.ilce || detay.bilgi?.il) && (
-                    <span className="inline-flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5" />
+                    <span className="inline-flex items-center gap-2 text-[12.5px]">
+                      <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
                       {[detay.bilgi?.ilce, detay.bilgi?.il].filter(Boolean).join(" / ")}
                     </span>
                   )}
                   {detay.bilgi?.web && (
-                    <span className="inline-flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />{detay.bilgi.web}</span>
+                    <span className="inline-flex items-center gap-2 text-[12.5px]">
+                      <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />{detay.bilgi.web}
+                    </span>
+                  )}
+                  {!detay.bilgi && (
+                    <span className="text-[12.5px] italic text-muted-foreground">
+                      Firma bilgileri henüz girilmemiş
+                    </span>
                   )}
                 </div>
 
-                <div className="mt-3.5 flex gap-1">
+                {/* Katman 3: alt sekmeler */}
+                <div className="flex gap-1.5 border-t px-7 py-2.5">
                   {ALT_SEKMELER.map((s) => {
                     const sayi = s.id === "kisiler" ? detay.kisiler.length
                       : s.id === "gorusmeler" ? detay.gorusmeler.length : null;
@@ -177,7 +196,7 @@ export function MusteriDetayModal({
                         key={s.id}
                         onClick={() => setAltSekme(s.id)}
                         className={cn(
-                          "inline-flex items-center gap-2 rounded-[9px] px-3 py-1.5 text-[12.5px] transition-colors",
+                          "inline-flex items-center gap-2 rounded-[9px] px-3.5 py-2 text-[13px] transition-colors",
                           aktif
                             ? "bg-slate-900 font-bold text-white dark:bg-slate-100 dark:text-slate-900"
                             : "font-semibold text-muted-foreground hover:bg-muted",
@@ -186,7 +205,7 @@ export function MusteriDetayModal({
                         {s.etiket}
                         {sayi !== null && (
                           <span className={cn(
-                            "inline-flex h-[17px] min-w-[17px] items-center justify-center rounded-full px-1 text-[10px] font-extrabold tabular-nums",
+                            "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10.5px] font-extrabold tabular-nums",
                             aktif ? "bg-white/20 text-white dark:bg-slate-900/15 dark:text-slate-900" : "bg-muted-foreground/15",
                           )}>{sayi}</span>
                         )}
@@ -197,7 +216,7 @@ export function MusteriDetayModal({
               </DialogHeader>
 
               {/* ═══ Kaydırılan gövde ═══ */}
-              <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/60 px-6 py-5 dark:bg-background">
+              <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/60 px-7 py-6 dark:bg-background">
                 {altSekme === "bilgiler" && (
                   <FirmaBilgiForm musteriId={detay.musteri.id} bilgi={detay.bilgi} />
                 )}
