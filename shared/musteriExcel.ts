@@ -8,8 +8,8 @@
 // Yazım biçimi de değişken — 0533 225 58 62 / 533 225 58 62 / 05332255862 /
 // 252 77 84 (alan kodsuz yerel).
 
-// Numaraları AYIRAN işaretler. "-" BİLEREK dışarıda: "443 35 70-71" iki numara
-// değil, son iki hanenin varyantıdır; ayırıcı sayılsaydı numara ikiye bölünürdü.
+// Numaraları kesin ayıran işaretler. "-" burada YOK; onun üç ayrı anlamı var
+// ve uzunluğa bakılarak çözülür (bkz. tireCoz).
 const AYIRICI = /[*\/,;:]+|\s{2,}/;
 // Parantez ayırıcı DEĞİL, silinir: "(531)734-9505" içinde parantez alan kodunu
 // sarar; ayırıcı sayılsaydı 531 kopar ve numara alan kodsuz kalırdı.
@@ -61,29 +61,71 @@ function bicimle(no: string): string {
  * `il` verilirse ve o ilin tek alan kodu varsa, alan kodsuz yerel numaralar
  * tamamlanır (Bursa 224 gibi). İstanbul bilerek tamamlanmaz.
  */
+// Bir rakam dizisinden ardışık numaraları soyar.
+function hepsiniSoy(d: string, hedef: string[]): void {
+  let kalan = d;
+  for (let i = 0; i < 3 && kalan.length >= 7; i++) {
+    const r = soy(kalan);
+    if (!r) break;
+    hedef.push(r.no);
+    kalan = r.kalan;
+  }
+}
+
+/**
+ * "-" işaretinin ÜÇ anlamı var, ayrımı uzunluk belirler:
+ *   1. Numaranın içinde ayraç   — "258-286 51 30"      → toplam 10, birleştir
+ *   2. Son hane varyantı        — "443 35 70-71"       → kısa kuyruk, at
+ *   3. İki ayrı numara          — "413 34 00-522 83 20" → her parça ≥7, ayır
+ * Bu ayrım yapılmazsa 2. durumda numara ikiye bölünür, 3. durumda ise iki
+ * numaranın başları birleşip var olmayan bir alan kodu uydurulur.
+ */
+function tireCoz(parca: string, hedef: string[]): void {
+  const altlar = parca.split("-").map((x) => x.replace(/\D+/g, "")).filter(Boolean);
+  if (altlar.length === 0) return;
+
+  const toplam = altlar.reduce((a, b) => a + b.length, 0);
+  // Tire numaranın içinde: parçalar birleşince tam bir numara ediyor.
+  if (altlar.length > 1 && (toplam === 7 || toplam === 10 || toplam === 11)) {
+    hepsiniSoy(altlar.join(""), hedef);
+    return;
+  }
+
+  let oncekiTamamdi = false;
+  for (let i = 0; i < altlar.length; i++) {
+    const p = altlar[i];
+    // Tam bir numaranın ardındaki kısa kuyruk: son hane varyantı, atlanır.
+    if (p.length < 7 && oncekiTamamdi) continue;
+    // Kısa parça + sonraki tam bir numara ediyorsa önek (alan kodu) sayılır.
+    if (p.length < 7 && i + 1 < altlar.length) {
+      const birlesik = p + altlar[i + 1];
+      if (birlesik.length === 10 || birlesik.length === 11) {
+        hepsiniSoy(birlesik, hedef);
+        i++;
+        oncekiTamamdi = true;
+        continue;
+      }
+    }
+    hepsiniSoy(p, hedef);
+    oncekiTamamdi = p.length >= 7;
+  }
+}
+
 export function telefonTemizle(ham: unknown, il?: string | null): string[] {
   if (ham === null || ham === undefined) return [];
   const harfsiz = String(ham).replace(SILINECEK, "").replace(/[^\d*\/,;:\-\s]+/g, " ");
-  const parcalar = harfsiz.split(AYIRICI);
 
   const bulunan: string[] = [];
-  for (const p of parcalar) {
-    let d = p.replace(/\D+/g, "");
-    // En fazla 3 numara soyulur; bozuk veri sonsuz parça üretmesin.
-    for (let i = 0; i < 3 && d.length >= 7; i++) {
-      const r = soy(d);
-      if (!r) break;
-      bulunan.push(r.no);
-      d = r.kalan;
-    }
-  }
+  for (const p of harfsiz.split(AYIRICI)) tireCoz(p, bulunan);
 
   const alanKodu = IL_ALAN_KODU[ilAnahtari(il)];
   const gorulen = new Set<string>();
   const sonuc: string[] = [];
   for (const n of bulunan) {
     if (n.length !== 7 && n.length !== 10) continue;
-    const tam = n.length === 7 && alanKodu ? alanKodu + n : n;
+    // 444'lü numaralar ülke geneli servis hattıdır, alan kodu almaz.
+    const yerelTamamlanir = n.length === 7 && alanKodu && !n.startsWith("444");
+    const tam = yerelTamamlanir ? alanKodu + n : n;
     if (gorulen.has(tam)) continue;
     gorulen.add(tam);
     sonuc.push(bicimle(tam));
