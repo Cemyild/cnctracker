@@ -15,11 +15,13 @@ const TIP_ETIKET: Record<string, string> = {
   odeme_talebi: "Ödeme Talebi",
   operasyon_masraf: "Şube Masrafı",
   operasyon_avans: "Avans",
+  odeme_firmasi: "Ödeme Firması",
 };
 const TIP_STIL: Record<string, string> = {
   odeme_talebi: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300",
   operasyon_masraf: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
   operasyon_avans: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+  odeme_firmasi: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
 };
 
 // timestamp → "30/07/2026 14:32". Sunucu ISO döndürür; burada YALNIZCA gösterim yapılır.

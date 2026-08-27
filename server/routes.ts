@@ -5811,6 +5811,35 @@ export async function registerRoutes(
     }
   });
 
+  // Toplu firma silme. Admin silmelerinin aksine muhasebe de yapabilir (kullanıcı
+  // kararı) ama her kayıt yine Silme Günlüğü'ne snapshot'ıyla yazılır.
+  // Geçmiş ödemeler etkilenmez: alacaklı adı + IBAN talebin/masrafın içinde metin
+  // kopyası olarak durur, firmaya FK yoktur.
+  app.post("/api/portal/odeme-sirketleri/toplu-sil", requireMuhasebe, async (req, res) => {
+    try {
+      const ben = await portalKullanici(req);
+      if (!ben) return res.status(401).json({ error: "Giriş gerekli" });
+      const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+      if (ids.length === 0) return res.status(400).json({ error: "Silinecek kayıt seçilmedi" });
+      let silinen = 0;
+      let bulunamayan = 0;
+      for (const id of ids) {
+        const f = await storage.getOdemeSirketi(id);
+        if (!f) { bulunamayan++; continue; }
+        // Log ÖNCE yazılır — log atılamazsa kayıt da silinmez.
+        await storage.createSilmeLog({
+          silenId: ben.id, silenAd: ben.adSoyad, kayitTipi: "odeme_firmasi", kayitId: f.id,
+          ozet: `${f.ad} · ${f.ibanlar.length} IBAN${f.vergiNo ? ` · VKN ${f.vergiNo}` : ""}`,
+          detayJson: JSON.stringify(f),
+        });
+        if (await storage.deleteOdemeSirketi(f.id)) silinen++;
+      }
+      res.json({ silinen, bulunamayan });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post(
     "/api/portal/talepler",
     requirePortal,

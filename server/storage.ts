@@ -611,6 +611,8 @@ export interface IStorage {
   updateOdemeSirketi(id: string, data: Partial<{ ad: string; iban: string | null; ibanTry: string | null; ibanUsd: string | null; banka: string | null; vergiNo: string | null; notlar: string | null; aktif: boolean; ibanlar: { paraBirimi: string; iban: string; etiket?: string | null }[] }>): Promise<OdemeSirketi | null>;
   bulkUpsertOdemeSirketleri(rows: { ad: string; iban?: string | null; ibanTry?: string | null; ibanUsd?: string | null; banka?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
   bulkUpsertFirmaIbanRows(rows: { ad: string; paraBirimi: string; iban: string; etiket?: string | null; vergiNo?: string | null; notlar?: string | null }[]): Promise<{ eklendi: number; guncellendi: number; atlandi: number }>;
+  getOdemeSirketi(id: string): Promise<OdemeSirketiDetay | undefined>;
+  deleteOdemeSirketi(id: string): Promise<boolean>;
   firmaIbanlariExcelSablonu(): Promise<Buffer>;
 
   // Operasyon Kasası (Şube Masraf)
@@ -4542,6 +4544,22 @@ export class DatabaseStorage implements IStorage {
       if (g.ibanlar.length > 0) await db.insert(firmaIbanlari).values(g.ibanlar.map((x) => ({ firmaId, ...x })));
     }
     return { eklendi, guncellendi, atlandi };
+  }
+
+  async getOdemeSirketi(id: string): Promise<OdemeSirketiDetay | undefined> {
+    const [f] = await db.select().from(odemeSirketleri).where(eq(odemeSirketleri.id, id)).limit(1);
+    if (!f) return undefined;
+    const [detay] = await this.firmalaraIbanEkle([f]);
+    return detay;
+  }
+
+  // Kalıcı silme. firma_ibanlari'nda DB seviyesinde cascade YOK — çocuk satırlar
+  // elle silinir, yoksa öksüz IBAN kalır. Geçmiş ödemeler etkilenmez:
+  // odeme_talepleri/operasyon_masraflar alacaklı+IBAN'ı metin kopyası olarak tutar.
+  async deleteOdemeSirketi(id: string): Promise<boolean> {
+    await db.delete(firmaIbanlari).where(eq(firmaIbanlari.firmaId, id));
+    const silinen = await db.delete(odemeSirketleri).where(eq(odemeSirketleri.id, id)).returning({ id: odemeSirketleri.id });
+    return silinen.length > 0;
   }
 
   async firmaIbanlariExcelSablonu(): Promise<Buffer> {

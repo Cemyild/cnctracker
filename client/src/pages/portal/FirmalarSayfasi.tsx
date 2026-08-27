@@ -7,9 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { SayfaBasligi } from "./kasaUI";
@@ -36,6 +41,9 @@ export default function FirmalarSayfasi() {
   const [form, setForm] = useState<FirmaFormu>({ ...BOS_FORM });
   const [kaydediliyor, setKaydediliyor] = useState(false);
   const excelRef = useRef<HTMLInputElement>(null);
+  const [secili, setSecili] = useState<Set<string>>(new Set());
+  const [silOnay, setSilOnay] = useState(false);
+  const [siliniyor, setSiliniyor] = useState(false);
 
   const filtreli = useMemo(() => {
     const q = arama.trim().toLocaleLowerCase("tr");
@@ -107,6 +115,46 @@ export default function FirmalarSayfasi() {
     }
   };
 
+  // Seçim süzgeç değişince korunur; "tümünü seç" YALNIZ süzülmüş satırları kapsar —
+  // 818 kayıtta önce arayıp sonra seçmek asıl kullanım biçimi.
+  const seciliDegistir = (id: string, acik: boolean) =>
+    setSecili((p) => {
+      const y = new Set(p);
+      if (acik) y.add(id); else y.delete(id);
+      return y;
+    });
+  const tumunuSec = (acik: boolean) =>
+    setSecili((p) => {
+      const y = new Set(p);
+      for (const f of filtreli) { if (acik) y.add(f.id); else y.delete(f.id); }
+      return y;
+    });
+  const seciliFirmalar = useMemo(() => firmalar.filter((f) => secili.has(f.id)), [firmalar, secili]);
+  const hepsiSecili = filtreli.length > 0 && filtreli.every((f) => secili.has(f.id));
+  const bazisiSecili = !hepsiSecili && filtreli.some((f) => secili.has(f.id));
+
+  const topluSil = async () => {
+    setSiliniyor(true);
+    try {
+      const res = await fetch("/api/portal/odeme-sirketleri/toplu-sil", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...secili] }),
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Silinemedi");
+      const s = await res.json();
+      toast({ title: `${s.silinen} firma silindi`, description: "Silme günlüğüne işlendi." });
+      setSecili(new Set());
+      setSilOnay(false);
+      tazele();
+    } catch (err: any) {
+      toast({ title: "Hata", description: err.message, variant: "destructive" });
+    } finally {
+      setSiliniyor(false);
+    }
+  };
+
   const excelSec = () => excelRef.current?.click();
   const sablonIndir = () => { window.location.href = "/api/portal/odeme-sirketleri/sablon"; };
   const excelYukle = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -161,6 +209,30 @@ export default function FirmalarSayfasi() {
           Ad + IBAN aynı satırda; IBAN başlıkları (Döviz/IBAN/Etiket) her satırda
           tekrarlanmıyor, yalnız kolon sırası olarak korunuyor. */}
       <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        {/* Seçim şeridi — silme yalnız buradan, toplu olarak yapılır */}
+        <div className="flex flex-wrap items-center gap-3 border-b bg-muted/30 px-3 py-2">
+          <Checkbox
+            checked={hepsiSecili ? true : bazisiSecili ? "indeterminate" : false}
+            onCheckedChange={(v) => tumunuSec(v === true)}
+            aria-label="Görünen kayıtların tümünü seç"
+            data-testid="checkbox-firma-tumu"
+          />
+          <span className="text-xs text-muted-foreground">
+            {secili.size > 0
+              ? `${secili.size} kayıt seçildi`
+              : `${filtreli.length} kayıt${arama.trim() ? " (süzülmüş)" : ""}`}
+          </span>
+          {secili.size > 0 && (
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setSecili(new Set())} data-testid="button-firma-secim-temizle">
+                Seçimi temizle
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setSilOnay(true)} data-testid="button-firma-toplu-sil">
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />{secili.size} kaydı sil
+              </Button>
+            </div>
+          )}
+        </div>
         {filtreli.map((f) => {
           const ibanlar = f.ibanlar ?? [];
           return (
@@ -169,6 +241,14 @@ export default function FirmalarSayfasi() {
               className={`flex flex-wrap items-start gap-x-4 gap-y-1 border-b px-3 py-2 last:border-b-0 hover:bg-muted/30 ${f.aktif ? "" : "opacity-60"}`}
               data-testid={`row-firma-${f.id}`}
             >
+              <Checkbox
+                className="mt-0.5 shrink-0"
+                checked={secili.has(f.id)}
+                onCheckedChange={(v) => seciliDegistir(f.id, v === true)}
+                aria-label={`${f.ad} seç`}
+                data-testid={`checkbox-firma-${f.id}`}
+              />
+
               {/* Ad + ikincil bilgi */}
               <div className="min-w-0 flex-1 basis-56">
                 <div className="flex items-center gap-2">
@@ -280,6 +360,48 @@ export default function FirmalarSayfasi() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={silOnay} onOpenChange={setSilOnay}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{secili.size} firma kalıcı olarak silinsin mi?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <div className="max-h-40 overflow-y-auto rounded-md border bg-muted/40 p-2.5 text-sm text-foreground">
+                  {seciliFirmalar.slice(0, 12).map((f) => (
+                    <div key={f.id} className="truncate">{f.ad}</div>
+                  ))}
+                  {seciliFirmalar.length > 12 && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      …ve {seciliFirmalar.length - 12} kayıt daha
+                    </div>
+                  )}
+                </div>
+                <p>
+                  Firmalar ve bağlı IBAN'ları geri alınamaz biçimde silinir. İşlem, kim sildi
+                  bilgisiyle birlikte <b>Silme Günlüğü</b>'ne yazılır.
+                </p>
+                <p className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                  Geçmiş ödemeler <b>etkilenmez</b> — her talep alacaklı adını ve IBAN'ını kendi
+                  içinde saklar. Silinen bir firmaya yeniden ödeme yapılırsa listeye kendiliğinden
+                  geri gelir (IBAN'ı olmadan).
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Vazgeç</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); topluSil(); }}
+              disabled={siliniyor}
+              className="bg-rose-600 text-white hover:bg-rose-700"
+              data-testid="button-firma-sil-onay"
+            >
+              {siliniyor ? "Siliniyor…" : "Kalıcı Olarak Sil"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
