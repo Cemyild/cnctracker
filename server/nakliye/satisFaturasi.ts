@@ -660,7 +660,14 @@ async function musteriBul(vkn: string | null, firmaUnvan: string): Promise<strin
 
   const liste = await cariListesiYukle();
   const tam = liste.filter((c) => firmaAdiBenzerligi(firmaUnvan, c.ad) === 100);
-  if (tam.length === 1) return tam[0].id;
+  // TEK ADAY BİLE SİMETRİK DOĞRULAMADAN GEÇER. Kapsama 100 tek başına yetmez:
+  // "M.F.C. TEKSTİL" normalize edilince {TEKSTIL} kalır ve her "X TEKSTİL"
+  // unvanının içinde bulunur; gerçek cari %100'ü tutturamazsa (kısaltma:
+  // "KONF." ≠ "KONFEKSİYON") tek aday M.F.C. kalır ve fatura yanlış firmaya
+  // kesilir — canlıda 26-12701 AKARCA → M.F.C. (2026-09-02). Eşik 70.
+  if (tam.length === 1) {
+    return firmaAdiSimetrikBenzerlik(firmaUnvan, tam[0].ad) >= 70 ? tam[0].id : undefined;
+  }
 
   // BİRDEN ÇOK TAM EŞLEŞME: kapsama metriği kısa taraf tek anlamlı kelimeye
   // indiğinde sahte 100 üretir ("M.F.C. TEKSTİL" → {TEKSTIL} ⊂ {ENYTEKS,
@@ -672,7 +679,9 @@ async function musteriBul(vkn: string | null, firmaUnvan: string): Promise<strin
     const puanli = tam
       .map((c) => ({ c, p: firmaAdiSimetrikBenzerlik(firmaUnvan, c.ad) }))
       .sort((a, b) => b.p - a.p);
-    if (puanli[0].p > (puanli[1]?.p ?? -1)) return puanli[0].c.id;
+    // Taban eşik 70: en iyi aday da dejenere olabilir (iki "X TEKSTİL" carisi
+    // arasında 33'e 25 gibi). Üstün olmak yetmez, gerçekten benzemesi gerekir.
+    if (puanli[0].p >= 70 && puanli[0].p > (puanli[1]?.p ?? -1)) return puanli[0].c.id;
     console.error(
       `Cari seçilemedi ("${firmaUnvan}"): ${tam.length} aday eşit puanlı ` +
       `(${tam.map((c) => c.ad).join(" | ")})`,

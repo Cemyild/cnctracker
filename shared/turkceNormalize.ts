@@ -48,6 +48,28 @@ export function normalizeFirmaAdi(s: string): string {
  *
  * Tek harfli parçalar gürültü olduğu için elenir.
  */
+/**
+ * İki parça eşdeğer mi: aynı, ya da biri diğerinin EN AZ 4 HARFLİK ÖNEKİ.
+ *
+ * Neden: Paraşüt cari adları kısaltmalı ("AKARCA TEKSTİL KONF. SAN. Ve TİC."),
+ * beyanname unvanları açık ("AKARCA TEKSTİL KONFEKSİYON SANAYİ VE TİCARET").
+ * "KONF" ile "KONFEKSIYON" farklı parça sayılınca gerçek AKARCA carisi %67'de
+ * kalıp reddedildi, tek parçaya inen "M.F.C. TEKSTİL" ise %100 alıp seçildi
+ * (canlıda 26-12596 ve 26-12701 yanlış firmaya kesildi, 2026-09-02).
+ * 4 harf sınırı: "SIR", "OTO" gibi kısa parçalar önek sayılmaz.
+ */
+function parcaEsdeger(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
+  return a.startsWith(b) || b.startsWith(a);
+}
+
+function kumedeEsdegerVar(k: string, kume: Set<string>): boolean {
+  if (kume.has(k)) return true;
+  for (const x of Array.from(kume)) if (parcaEsdeger(k, x)) return true;
+  return false;
+}
+
 export function firmaAdiBenzerligi(a: string, b: string): number {
   const na = normalizeFirmaAdi(a);
   const nb = normalizeFirmaAdi(b);
@@ -60,7 +82,7 @@ export function firmaAdiBenzerligi(a: string, b: string): number {
 
   const [kisa, uzun] = sa.size <= sb.size ? [sa, sb] : [sb, sa];
   let kesisim = 0;
-  kisa.forEach((k) => { if (uzun.has(k)) kesisim++; });
+  kisa.forEach((k) => { if (kumedeEsdegerVar(k, uzun)) kesisim++; });
   return Math.round((kesisim / kisa.size) * 100);
 }
 
@@ -93,7 +115,7 @@ export function firmaAdiSimetrikBenzerlik(a: string, b: string): number {
   if (sa.size === 0 || sb.size === 0) return 0;
 
   let kesisim = 0;
-  sa.forEach((k) => { if (sb.has(k)) kesisim++; });
+  sa.forEach((k) => { if (kumedeEsdegerVar(k, sb)) kesisim++; });
   const birlesim = sa.size + sb.size - kesisim;
   return birlesim === 0 ? 0 : Math.round((kesisim / birlesim) * 100);
 }
