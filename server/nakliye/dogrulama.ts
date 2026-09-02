@@ -20,8 +20,6 @@ export type FaturaAlanlari = {
   kalemler?: Array<{
     aciklama: string | null;
     konteynerler: string[];
-    miktar: number | null;
-    birim_fiyat: number | null;
     kdv_orani: number | null;
     matrah: number | null;
   }>;

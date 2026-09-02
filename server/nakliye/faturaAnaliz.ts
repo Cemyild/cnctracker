@@ -32,6 +32,14 @@ export async function pdfMetniCikar(buf: Buffer): Promise<string> {
 }
 
 // Elle yazılmış JSON Schema.
+//
+// BİRLEŞİK TİP SINIRI: Claude API'si şemada en fazla 16 adet union/nullable
+// alan kabul ediyor; 17'de "Schemas contains too many parameters with union
+// types" ile 400 döner (canlıda görüldü 2026-09-02, mail analizi tamamen
+// durmuştu). Bu yüzden kalem şemasında yalnız GEREKLİ alanlar var:
+// miktar ve birim_fiyat SORULMUYOR — navlun kalemlerinde miktar her zaman 1
+// ve birim fiyat satır tutarına eşit; ikisi de matrah'tan türetiliyor.
+// Yeni nullable alan eklemeden önce sayıyı kontrol et.
 // zodOutputFormat KULLANILMAZ: SDK 0.110.0'ın helpers/zod'u zod v4 API'si
 // bekler, repoda zod 3.25.76 kurulu ve çağrı TypeError ile patlar.
 const FATURA_SEMASI = {
@@ -71,12 +79,10 @@ const FATURA_SEMASI = {
         properties: {
           aciklama: { type: ["string", "null"], description: "Satırın mal/hizmet tanımı, HARFİ HARFİNE" },
           konteynerler: { type: "array", items: { type: "string" }, description: "Bu satırda geçen konteyner numaraları" },
-          miktar: { type: ["number", "null"], description: "Satır miktarı, örn. 1" },
-          birim_fiyat: { type: ["number", "null"], description: "Satır birim fiyatı, KDV hariç" },
           kdv_orani: { type: ["number", "null"], description: "Satırın KDV yüzdesi" },
           matrah: { type: ["number", "null"], description: "Satır tutarı, KDV hariç (miktar x birim fiyat)" },
         },
-        required: ["aciklama", "konteynerler", "miktar", "birim_fiyat", "kdv_orani", "matrah"],
+        required: ["aciklama", "konteynerler", "kdv_orani", "matrah"],
         additionalProperties: false,
       },
     },

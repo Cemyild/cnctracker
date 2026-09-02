@@ -966,8 +966,10 @@ export async function registerRoutes(
               sira: i + 1,
               aciklama: k.aciklama ? String(k.aciklama).slice(0, 500) : null,
               konteynerler: (k.konteynerler || []).join(", ") || null,
-              miktar: k.miktar != null ? String(k.miktar) : "1",
-              birimFiyat: k.birim_fiyat != null ? String(k.birim_fiyat) : String(k.matrah ?? 0),
+              // Navlun kaleminde miktar her zaman 1, birim fiyat satır tutarı.
+              // LLM'e sorulmuyor (şema union sınırı), matrahtan türetiliyor.
+              miktar: "1",
+              birimFiyat: String(k.matrah ?? 0),
               kdvOrani: k.kdv_orani != null ? Math.round(k.kdv_orani) : (alanlar.kdv_orani ?? 0),
               matrah: String(k.matrah ?? 0),
             })),
