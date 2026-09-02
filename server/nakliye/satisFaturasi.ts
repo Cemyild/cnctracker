@@ -22,6 +22,8 @@ export type FaturaKalemi = {
    * dahil hiçbir şey değiştirilmez.
    */
   aciklama: string | null;
+  /** Tedarikçi faturasındaki miktar. Müşteri faturasına aynen yansır. */
+  miktar: number;
   gelenMatrah: number;
   kesilecekMatrah: number;
   kdvOrani: number;
@@ -534,6 +536,7 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
           tedarikci: f.tedarikciUnvan,
           konteynerler: f.konteynerler || "",
           aciklama: f.aciklama,
+          miktar: 1,
           gelenMatrah: faturaMatrah,
           kesilecekMatrah: Math.round(faturaMatrah * MARJ * 100) / 100,
           kdvOrani: f.kdvOrani ?? 0,
@@ -548,6 +551,7 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
           tedarikci: f.tedarikciUnvan,
           konteynerler: k.konteynerler || f.konteynerler || "",
           aciklama: k.aciklama || f.aciklama,
+          miktar: Number(k.miktar ?? 1) > 0 ? Number(k.miktar) : 1,
           gelenMatrah: gelen,
           kesilecekMatrah: Math.round(gelen * MARJ * 100) / 100,
           kdvOrani: k.kdvOrani ?? f.kdvOrani ?? 0,
@@ -794,11 +798,18 @@ export async function tamamlananDosyalariFaturala(
         const urunAdi = k.aciklama?.trim()
           || `${k.konteynerler || "Nakliye"} konteyner taşıma bedeli`.trim();
         const productId = await urunOlustur(urunAdi, k.kdvOrani);
+        // MİKTAR TEDARİKÇİ FATURASINDAN AYNEN GELİR ("2 Adet × 13.000" ise
+        // müşteriye de 2 × 15.600 kesilir). Bölme tam çıkmazsa (kuruş kayması)
+        // tek kalem olarak yazılır — satır toplamı HER ZAMAN doğru kalmalı.
+        const miktar = k.miktar > 0 ? k.miktar : 1;
+        const birim = Math.round((k.kesilecekMatrah / miktar) * 100) / 100;
+        const bolunebilir = Math.abs(birim * miktar - k.kesilecekMatrah) < 0.01;
+
         kalemler.push({
           type: "sales_invoice_details",
           attributes: {
-            quantity: 1,
-            unit_price: k.kesilecekMatrah,
+            quantity: bolunebilir ? miktar : 1,
+            unit_price: bolunebilir ? birim : k.kesilecekMatrah,
             vat_rate: k.kdvOrani,
             vat_withholding_rate: 0, // SABİT — gidende tevkifat yok
             description: null,

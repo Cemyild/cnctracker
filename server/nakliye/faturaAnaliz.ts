@@ -37,9 +37,8 @@ export async function pdfMetniCikar(buf: Buffer): Promise<string> {
 // alan kabul ediyor; 17'de "Schemas contains too many parameters with union
 // types" ile 400 döner (canlıda görüldü 2026-09-02, mail analizi tamamen
 // durmuştu). Bu yüzden kalem şemasında yalnız GEREKLİ alanlar var:
-// miktar ve birim_fiyat SORULMUYOR — navlun kalemlerinde miktar her zaman 1
-// ve birim fiyat satır tutarına eşit; ikisi de matrah'tan türetiliyor.
-// Yeni nullable alan eklemeden önce sayıyı kontrol et.
+// Kalem şemasındaki miktar ve birim_fiyat bilerek NULLABLE DEĞİL — böylece
+// sayıma girmiyorlar. Yeni NULLABLE alan eklemeden önce sayıyı kontrol et.
 // zodOutputFormat KULLANILMAZ: SDK 0.110.0'ın helpers/zod'u zod v4 API'si
 // bekler, repoda zod 3.25.76 kurulu ve çağrı TypeError ile patlar.
 const FATURA_SEMASI = {
@@ -78,11 +77,15 @@ const FATURA_SEMASI = {
         type: "object",
         properties: {
           aciklama: { type: ["string", "null"], description: "Satırın mal/hizmet tanımı, HARFİ HARFİNE" },
+          // NULLABLE DEĞİL: union sınırına (16) girmesinler diye. Model her
+          // zaman doldurur; tek konteynerli satırda miktar 1'dir.
+          miktar: { type: "number", description: "Satır miktarı. Örn. '2 Adet' yazıyorsa 2." },
+          birim_fiyat: { type: "number", description: "Satır birim fiyatı, KDV hariç" },
           konteynerler: { type: "array", items: { type: "string" }, description: "Bu satırda geçen konteyner numaraları" },
           kdv_orani: { type: ["number", "null"], description: "Satırın KDV yüzdesi" },
           matrah: { type: ["number", "null"], description: "Satır tutarı, KDV hariç (miktar x birim fiyat)" },
         },
-        required: ["aciklama", "konteynerler", "kdv_orani", "matrah"],
+        required: ["aciklama", "konteynerler", "miktar", "birim_fiyat", "kdv_orani", "matrah"],
         additionalProperties: false,
       },
     },
@@ -112,6 +115,8 @@ faturasında genellikle her konteyner AYRI SATIRDIR:
   "40 CNTR GEMLİK-BURSA/HASANAĞA NAKLİYE BEDELİ(HLBU 321238-0)  1  13.000,00"
 → iki ayrı öğe, her biri matrah 13000.
 Satırların aciklama alanını HARFİ HARFİNE kopyala; satırları BİRLEŞTİRME.
+Miktar sütununu olduğu gibi al: "2 Adet" yazan bir satırda miktar 2, birim
+fiyat 13000, matrah 26000 olur (satırı İKİYE BÖLME).
 Satır tutarlarının toplamı matrah alanına eşit olmalıdır. Tek satırlık
 faturada dizide tek öğe döner.
 
