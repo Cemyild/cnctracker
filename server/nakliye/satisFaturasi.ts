@@ -6,7 +6,7 @@ import { firmaAdiBenzerligi, firmaAdiSimetrikBenzerlik } from "@shared/turkceNor
 import { konteynerAnahtarlari } from "@shared/konteyner";
 import { ihracatRejimiMi } from "@shared/rejim";
 import { tarihGoster, sistemOncesiMi } from "./tarih";
-import type { NakliyeFaturasi, GumrukVerisi, NakliyeVerisi } from "@shared/schema";
+import type { NakliyeFaturasi, GumrukVerisi, NakliyeVerisi, NakliyeFaturaKalemi } from "@shared/schema";
 
 /** Gelen matrahın üzerine eklenen marj. 10.000 → 12.000 (+ KDV). */
 const MARJ = 1.20;
@@ -300,6 +300,14 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
   const faturalar = await storage.getNakliyeFaturalari();
   const faturaMap = new Map<string, NakliyeFaturasi>(faturalar.map((f) => [f.faturaNo, f]));
 
+  // KALEM DÖKÜMÜ — müşteri faturasının satırları birebir buradan üretilir.
+  // N+1 önleme: tüm faturaların kalemleri TEK sorguda, sonra Map ile join.
+  const kalemMap = new Map<string, NakliyeFaturaKalemi[]>();
+  for (const k of await storage.getNakliyeKalemleriByFaturaIds(faturalar.map((f) => f.id))) {
+    if (!kalemMap.has(k.faturaId)) kalemMap.set(k.faturaId, []);
+    kalemMap.get(k.faturaId)!.push(k);
+  }
+
   // (dosya no | konteyner) → gümrük kaydı. VKN ve beklenen konteyner sayısı
   // buradan okunur. Aynı dosyada birden çok firma satırı olabildiği için
   // (canlıda görüldü: 26-10359 → ENYTEKS + FEKA) anahtar dosya no ile
@@ -491,18 +499,60 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
       .map((no) => faturaMap.get(no))
       .filter((f): f is NakliyeFaturasi => Boolean(f));
 
-    const kalemler: FaturaKalemi[] = grupFaturalari.map((f) => {
-      const gelen = Number(f.matrah ?? 0);
-      return {
-        faturaId: f.id,
-        faturaNo: f.faturaNo,
-        tedarikci: f.tedarikciUnvan,
-        konteynerler: f.konteynerler || "",
-        aciklama: f.aciklama,
-        gelenMatrah: gelen,
-        kesilecekMatrah: Math.round(gelen * MARJ * 100) / 100,
-        kdvOrani: f.kdvOrani ?? 0,
-      };
+    // MÜŞTERİ FATURASININ SATIRLARI.
+    //
+    // Bir tedarikçi faturası birden çok konteyner taşıyabiliyor ve her konteyner
+    // AYRI KALEM olarak geliyor (GAF2026000002285 → 5 kalem × 13.000 TL).
+    // Müşteriye de aynı kırılımla kesilir: her kalem kendi adı, kendi konteyneri
+    // ve kendi tutarıyla (×1,20) faturaya geçer.
+    //
+    // Kalem dökümü YOKSA ya da TOPLAMI FATURANIN MATRAHINI TUTMUYORSA faturanın
+    // kendi toplamı tek kalem olarak kullanılır. Toplam denetimi şart: eksik ya
+    // da fazla okunmuş bir kalem listesi müşteriye yanlış tutarlı fatura
+    // kestirirdi. Kırılımı kaybetmek görsel bir eksiklik, tutarı kaybetmek
+    // para hatası.
+    const kalemler: FaturaKalemi[] = grupFaturalari.flatMap((f) => {
+      const faturaMatrah = Number(f.matrah ?? 0);
+      const dokum = kalemMap.get(f.id) ?? [];
+      const dokumToplam = Math.round(
+        dokum.reduce((t, k) => t + Number(k.matrah ?? 0), 0) * 100,
+      ) / 100;
+
+      const dokumKullanilabilir =
+        dokum.length > 0 && Math.abs(dokumToplam - faturaMatrah) < 0.05;
+
+      if (!dokumKullanilabilir) {
+        if (dokum.length > 0) {
+          console.warn(
+            `Kalem dökümü kullanılmadı (${f.faturaNo}): kalem toplamı ` +
+            `${dokumToplam} ≠ fatura matrahı ${faturaMatrah}`,
+          );
+        }
+        return [{
+          faturaId: f.id,
+          faturaNo: f.faturaNo,
+          tedarikci: f.tedarikciUnvan,
+          konteynerler: f.konteynerler || "",
+          aciklama: f.aciklama,
+          gelenMatrah: faturaMatrah,
+          kesilecekMatrah: Math.round(faturaMatrah * MARJ * 100) / 100,
+          kdvOrani: f.kdvOrani ?? 0,
+        }];
+      }
+
+      return dokum.map((k) => {
+        const gelen = Number(k.matrah ?? 0);
+        return {
+          faturaId: f.id,
+          faturaNo: f.faturaNo,
+          tedarikci: f.tedarikciUnvan,
+          konteynerler: k.konteynerler || f.konteynerler || "",
+          aciklama: k.aciklama || f.aciklama,
+          gelenMatrah: gelen,
+          kesilecekMatrah: Math.round(gelen * MARJ * 100) / 100,
+          kdvOrani: k.kdvOrani ?? f.kdvOrani ?? 0,
+        };
+      });
     });
 
     const netToplam = Math.round(kalemler.reduce((t, k) => t + k.kesilecekMatrah, 0) * 100) / 100;

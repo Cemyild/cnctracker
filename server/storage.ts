@@ -36,6 +36,7 @@ import { users, gumrukVerileri, type User, type InsertUser, type GumrukVerisi, t
   type SubeGiderRaporu, type SubeGiderBloku,
   parasutToken, type ParasutToken,
   nakliyeFaturalari, type NakliyeFaturasi, type InsertNakliyeFaturasi,
+  nakliyeFaturaKalemleri, type NakliyeFaturaKalemi, type InsertNakliyeFaturaKalemi,
   nakliyeFaturaEslesme, type NakliyeFaturaEslesme, type InsertNakliyeFaturaEslesme,
   parasutSatisFaturalari, type ParasutSatisFaturasi, type InsertParasutSatisFaturasi,
   normalizeSube, normalizeKategori,
@@ -647,6 +648,8 @@ export interface IStorage {
   getNakliyeFaturalari(durum?: string): Promise<NakliyeFaturasi[]>;
   getNakliyeFaturasiByNo(faturaNo: string): Promise<NakliyeFaturasi | undefined>;
   getNakliyeFaturasiByMd5(md5: string): Promise<NakliyeFaturasi | undefined>;
+  setNakliyeKalemleri(faturaId: string, kalemler: Omit<InsertNakliyeFaturaKalemi, "faturaId">[]): Promise<void>;
+  getNakliyeKalemleriByFaturaIds(faturaIdler: string[]): Promise<NakliyeFaturaKalemi[]>;
   insertNakliyeFaturasi(f: InsertNakliyeFaturasi): Promise<NakliyeFaturasi>;
   updateNakliyeFaturasi(id: string, f: Partial<InsertNakliyeFaturasi>): Promise<NakliyeFaturasi | undefined>;
 
@@ -4819,6 +4822,34 @@ export class DatabaseStorage implements IStorage {
   async getNakliyeFaturasiByNo(faturaNo: string): Promise<NakliyeFaturasi | undefined> {
     const [row] = await db.select().from(nakliyeFaturalari).where(eq(nakliyeFaturalari.faturaNo, faturaNo));
     return row;
+  }
+
+  /**
+   * Bir faturanın kalem dökümünü YENİDEN YAZAR (önce siler, sonra ekler).
+   *
+   * Neden replace: aynı fatura Paraşüt'ten tekrar okunabiliyor ya da PDF
+   * yeniden çözümlenebiliyor. Ekleme yapsaydık kalemler ikiye katlanır ve
+   * müşteri faturası iki katı tutarla kesilirdi.
+   */
+  async setNakliyeKalemleri(
+    faturaId: string,
+    kalemler: Omit<InsertNakliyeFaturaKalemi, "faturaId">[],
+  ): Promise<void> {
+    await db.delete(nakliyeFaturaKalemleri).where(eq(nakliyeFaturaKalemleri.faturaId, faturaId));
+    if (kalemler.length === 0) return;
+    await db.insert(nakliyeFaturaKalemleri).values(
+      kalemler.map((k) => ({ ...k, faturaId })),
+    );
+  }
+
+  // N+1 önleme: bir dosyanın tüm faturalarının kalemleri tek sorguda.
+  async getNakliyeKalemleriByFaturaIds(faturaIdler: string[]): Promise<NakliyeFaturaKalemi[]> {
+    if (faturaIdler.length === 0) return [];
+    return await db
+      .select()
+      .from(nakliyeFaturaKalemleri)
+      .where(inArray(nakliyeFaturaKalemleri.faturaId, faturaIdler))
+      .orderBy(nakliyeFaturaKalemleri.sira);
   }
 
   async getNakliyeFaturasiByMd5(md5: string): Promise<NakliyeFaturasi | undefined> {

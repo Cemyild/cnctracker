@@ -26,6 +26,56 @@ function konteynerCikar(metin: string): string[] {
 }
 
 /**
+ * Alış faturasının KALEM DÖKÜMÜNÜ çıkarır.
+ *
+ * Bir navlun faturası birden çok konteyner taşıyabiliyor ve her konteyner ayrı
+ * kalem olarak geliyor (GAF2026000002285 → 5 kalem × 13.000 TL). Eskiden
+ * yalnız İLK kalemin adı saklanıyor, tutar olarak faturanın toplamı
+ * kullanılıyordu; müşteri faturasında 5 satır yerine tek satır çıkıyordu.
+ *
+ * Kalem adı olarak ÜRÜN ADI tercih edilir, yoksa kalem açıklaması: müşteri
+ * faturasına harfi harfine bu ad geçiyor ve ürün adı tedarikçinin yazdığı
+ * metni taşıyor (bkz. parasutYazma.ts / satisFaturasi.ts).
+ */
+function kalemleriCikar(
+  detayIdler: string[],
+  iliskili: Map<string, any>,
+): Array<{
+  sira: number; aciklama: string | null; konteynerler: string | null;
+  miktar: string; birimFiyat: string; kdvOrani: number; matrah: string;
+}> {
+  const kalemler = [];
+  let sira = 0;
+  for (const id of detayIdler) {
+    const det = iliskili.get(`purchase_bill_details:${id}`);
+    if (!det) continue;
+    const at = det.attributes || {};
+    const urunId = iliskiId(det, "product");
+    const urunAdi = urunId ? iliskili.get(`products:${urunId}`)?.attributes?.name : null;
+    const ad = urunAdi || at.description || null;
+
+    const miktar = Number(at.quantity ?? 1) || 1;
+    const birimFiyat = Number(at.unit_price ?? 0);
+    // İskonto alanları burada UYGULANMAZ: canlıda bu tedarikçilerde iskonto
+    // yok ve toplam doğrulaması (kalem toplamı == fatura matrahı) sapmayı
+    // zaten yakalar; sapan faturada kalem dökümü kullanılmaz.
+    const satirMatrah = Math.round(miktar * birimFiyat * 100) / 100;
+
+    sira += 1;
+    kalemler.push({
+      sira,
+      aciklama: ad ? String(ad).slice(0, 500) : null,
+      konteynerler: konteynerCikar(`${urunAdi || ""} ${at.description || ""}`).join(", ") || null,
+      miktar: String(miktar),
+      birimFiyat: String(birimFiyat),
+      kdvOrani: at.vat_rate != null ? Math.round(Number(at.vat_rate)) : 0,
+      matrah: String(satirMatrah),
+    });
+  }
+  return kalemler;
+}
+
+/**
  * Paraşüt'teki alış faturalarını çeker ve nakliye olanları
  * nakliye_faturalari tablosuna yazar.
  *
@@ -83,6 +133,14 @@ export async function parasuttanCek(
 
       const mevcut = await storage.getNakliyeFaturasiByNo(faturaNo);
       if (mevcut) {
+        // Kalem dökümü sonradan eklendi; eski kayıtlarda yok. Paraşüt'ten
+        // okuduğumuz kalemleri geriye tamamla — aksi halde çok kalemli eski
+        // faturalar müşteriye hâlâ tek satır olarak kesilir.
+        const mevcutKalemler = await storage.getNakliyeKalemleriByFaturaIds([mevcut.id]);
+        if (mevcutKalemler.length === 0) {
+          const kalemler = kalemleriCikar(detayIdler, iliskili);
+          if (kalemler.length > 0) await storage.setNakliyeKalemleri(mevcut.id, kalemler);
+        }
         // Paraşüt id'si henüz bağlanmadıysa bağla (e-Arşiv kanalından gelmiş olabilir)
         if (!mevcut.parasutPurchaseBillId) {
           await storage.updateNakliyeFaturasi(mevcut.id, {
@@ -127,7 +185,7 @@ export async function parasuttanCek(
         pdfYolu = await eBelgePdfIndir(eBelgeId, faturaNo);
       }
 
-      await storage.insertNakliyeFaturasi({
+      const yeniKayit = await storage.insertNakliyeFaturasi({
         kaynak: "efatura",
         // Paraşüt'ten çekilen kayıt zaten Paraşüt'te var; sistemin oraya
         // yazacağı bir şey yok. Tipi "efatura" işaretlemek yazma kapısını
@@ -155,6 +213,8 @@ export async function parasuttanCek(
         durum: "parasutta",
         hataMesaji: null,
       });
+
+      await storage.setNakliyeKalemleri(yeniKayit.id, kalemleriCikar(detayIdler, iliskili));
 
       // Nakliye ekranının (Navlun Faturaları) kullandığı tabloya da yaz —
       // aksi halde Paraşüt'ten çekilen e-faturalar ekranda görünmez.

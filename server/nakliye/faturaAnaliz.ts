@@ -61,11 +61,30 @@ const FATURA_SEMASI = {
     tevkifat_tutari: { type: ["number", "null"], description: "KDV tevkifat tutarı. Yoksa 0." },
     odenecek_tutar: { type: ["number", "null"], description: "Ödenecek toplam tutar" },
     aciklama: { type: ["string", "null"], description: "Mal/hizmet açıklaması, tek satır" },
+    kalemler: {
+      type: "array",
+      description:
+        "Mal/hizmet tablosundaki HER SATIR ayrı bir öğe. Tek satırlık faturada " +
+        "tek öğe döner. Satır tutarları toplamı matrah'a eşit olmalıdır.",
+      items: {
+        type: "object",
+        properties: {
+          aciklama: { type: ["string", "null"], description: "Satırın mal/hizmet tanımı, HARFİ HARFİNE" },
+          konteynerler: { type: "array", items: { type: "string" }, description: "Bu satırda geçen konteyner numaraları" },
+          miktar: { type: ["number", "null"], description: "Satır miktarı, örn. 1" },
+          birim_fiyat: { type: ["number", "null"], description: "Satır birim fiyatı, KDV hariç" },
+          kdv_orani: { type: ["number", "null"], description: "Satırın KDV yüzdesi" },
+          matrah: { type: ["number", "null"], description: "Satır tutarı, KDV hariç (miktar x birim fiyat)" },
+        },
+        required: ["aciklama", "konteynerler", "miktar", "birim_fiyat", "kdv_orani", "matrah"],
+        additionalProperties: false,
+      },
+    },
   },
   required: [
     "fatura_no", "fatura_tarihi", "tedarikci_unvan", "tedarikci_vkn",
     "musteri_firma_adi", "konteynerler", "para_birimi", "matrah",
-    "kdv_orani", "kdv_tutari", "tevkifat_tutari", "odenecek_tutar", "aciklama",
+    "kdv_orani", "kdv_tutari", "tevkifat_tutari", "odenecek_tutar", "aciklama", "kalemler",
   ],
   additionalProperties: false,
 } as const;
@@ -79,6 +98,16 @@ KURALLAR:
 - tevkifat_tutari belgede yoksa 0 döndür.
 - konteynerler: 4 harf + 7 rakam biçimindeki numaralar (örn. MSBU4529335).
   Belgede yoksa boş dizi döndür.
+
+KALEM DÖKÜMÜ (kalemler):
+Mal/hizmet tablosundaki HER SATIRI ayrı bir öğe olarak döndür. Bir navlun
+faturasında genellikle her konteyner AYRI SATIRDIR:
+  "40 CNTR GEMLİK-BURSA/HASANAĞA NAKLİYE BEDELİ(HAMU 463076-4)  1  13.000,00"
+  "40 CNTR GEMLİK-BURSA/HASANAĞA NAKLİYE BEDELİ(HLBU 321238-0)  1  13.000,00"
+→ iki ayrı öğe, her biri matrah 13000.
+Satırların aciklama alanını HARFİ HARFİNE kopyala; satırları BİRLEŞTİRME.
+Satır tutarlarının toplamı matrah alanına eşit olmalıdır. Tek satırlık
+faturada dizide tek öğe döner.
 
 MÜŞTERİ ADI ÇIKARIMI (musteri_firma_adi):
 Mal/hizmet açıklaması şu kalıptadır:
@@ -148,6 +177,15 @@ export async function faturaAnalizEt(buf: Buffer): Promise<FaturaAlanlari> {
     .map(normalizeKonteyner)
     .filter(konteynerGecerliMi)
     .filter((k, i, arr) => arr.indexOf(k) === i);
+
+  // Kalem konteynerleri de aynı normalizasyondan geçer
+  ham.kalemler = (ham.kalemler || []).map((k) => ({
+    ...k,
+    konteynerler: (k.konteynerler || [])
+      .map(normalizeKonteyner)
+      .filter(konteynerGecerliMi)
+      .filter((x, i, arr) => arr.indexOf(x) === i),
+  }));
 
   return ham;
 }

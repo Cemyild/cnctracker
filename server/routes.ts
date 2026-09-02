@@ -947,6 +947,34 @@ export async function registerRoutes(
         hataMesaji: dogrulama.gecerli ? null : dogrulama.hatalar.join(" | "),
       });
 
+      // KALEM DÖKÜMÜ. Çok konteynerli faturalarda her konteyner ayrı satır;
+      // müşteri faturası da bu kırılımla kesilir (bkz. satisFaturasi.ts).
+      // Yeni kayıtta her zaman yazılır; mevcut kayıtta yalnız döküm hiç yoksa
+      // (eski kayıtları geriye tamamlamak için) — üzerine yazmak, kullanıcının
+      // düzelttiği bir dökümü geri alabilirdi.
+      const llmKalemler = (alanlar.kalemler || []).filter(
+        (k) => Number(k.matrah ?? 0) > 0,
+      );
+      if (llmKalemler.length > 0) {
+        const varolan = mevcut
+          ? await storage.getNakliyeKalemleriByFaturaIds([kayit.id])
+          : [];
+        if (varolan.length === 0) {
+          await storage.setNakliyeKalemleri(
+            kayit.id,
+            llmKalemler.map((k, i) => ({
+              sira: i + 1,
+              aciklama: k.aciklama ? String(k.aciklama).slice(0, 500) : null,
+              konteynerler: (k.konteynerler || []).join(", ") || null,
+              miktar: k.miktar != null ? String(k.miktar) : "1",
+              birimFiyat: k.birim_fiyat != null ? String(k.birim_fiyat) : String(k.matrah ?? 0),
+              kdvOrani: k.kdv_orani != null ? Math.round(k.kdv_orani) : (alanlar.kdv_orani ?? 0),
+              matrah: String(k.matrah ?? 0),
+            })),
+          );
+        }
+      }
+
       // Belge tipi sonradan eklendi; eski kayıtlarda boş olabilir.
       if (mevcut && !mevcut.belgeTipi && belgeTipi !== "bilinmiyor") {
         await storage.updateNakliyeFaturasi(mevcut.id, { belgeTipi });

@@ -1402,6 +1402,46 @@ export const insertNakliyeFaturasiSchema = createInsertSchema(nakliyeFaturalari)
 export type InsertNakliyeFaturasi = z.infer<typeof insertNakliyeFaturasiSchema>;
 export type NakliyeFaturasi = typeof nakliyeFaturalari.$inferSelect;
 
+/**
+ * TEDARİKÇİ FATURASININ KALEM DÖKÜMÜ.
+ *
+ * Neden ayrı tablo: bir navlun faturası birden çok konteyner taşıyabiliyor ve
+ * her konteyner AYRI BİR KALEM olarak geliyor (canlıda görüldü:
+ * GAF2026000002285 → 5 kalem, her biri 13.000 TL, her birinde farklı konteyner).
+ * Eskiden yalnız faturanın toplamı ve İLK kalemin adı saklanıyordu; müşteriye
+ * kesilen faturada 5 satır yerine tek satır çıkıyordu.
+ *
+ * Müşteri faturasının kalemleri BİREBİR buradan üretilir: her kalem kendi adı,
+ * kendi konteyneri ve kendi tutarıyla (x1,20) faturaya geçer.
+ *
+ * Kalem dökümü olmayan faturalar da var (eski kayıtlar, tek kalemli faturalar);
+ * o durumda faturanın kendi toplamı tek kalem olarak kullanılır.
+ */
+export const nakliyeFaturaKalemleri = pgTable("nakliye_fatura_kalemleri", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // FK kolon adı açıkça yazılır (Drizzle türetmesine bırakılmaz)
+  faturaId: varchar("fatura_id").notNull(),
+  sira: integer("sira").notNull(),
+  // Mal/hizmet tanımı — HARFİ HARFİNE. Müşteri faturasının kalem adı bu olur.
+  aciklama: text("aciklama"),
+  konteynerler: text("konteynerler"), // virgülle ayrılmış, normalize
+  miktar: decimal("miktar", { precision: 15, scale: 2 }),
+  birimFiyat: decimal("birim_fiyat", { precision: 15, scale: 2 }),
+  kdvOrani: integer("kdv_orani"),
+  // Satır tutarı, KDV HARİÇ (miktar x birim fiyat)
+  matrah: decimal("matrah", { precision: 15, scale: 2 }),
+  olusturmaTarihi: timestamp("olusturma_tarihi").defaultNow(),
+}, (table) => [
+  uniqueIndex("nakliye_fatura_kalemleri_fatura_sira_idx").on(table.faturaId, table.sira),
+]);
+
+export const insertNakliyeFaturaKalemiSchema = createInsertSchema(nakliyeFaturaKalemleri).omit({
+  id: true,
+  olusturmaTarihi: true,
+});
+export type InsertNakliyeFaturaKalemi = z.infer<typeof insertNakliyeFaturaKalemiSchema>;
+export type NakliyeFaturaKalemi = typeof nakliyeFaturaKalemleri.$inferSelect;
+
 // Fatura ↔ beyanname eşleşmesi (n:n)
 export const nakliyeFaturaEslesme = pgTable("nakliye_fatura_eslesme", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

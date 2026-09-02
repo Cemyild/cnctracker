@@ -12,6 +12,19 @@ export type FaturaAlanlari = {
   tevkifat_tutari: number | null;
   odenecek_tutar: number | null;
   aciklama: string | null;
+  /**
+   * Mal/hizmet tablosunun HER SATIRI ayrı bir kalem.
+   * Çok konteynerli faturalarda her konteyner kendi satırında gelir; müşteri
+   * faturası da bu kırılımla kesilir (bkz. satisFaturasi.ts).
+   */
+  kalemler?: Array<{
+    aciklama: string | null;
+    konteynerler: string[];
+    miktar: number | null;
+    birim_fiyat: number | null;
+    kdv_orani: number | null;
+    matrah: number | null;
+  }>;
 };
 
 /**
