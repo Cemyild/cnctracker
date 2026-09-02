@@ -1430,6 +1430,59 @@ export default function Nakliye() {
                                 </div>
                             </div>
 
+                            {/* KALEM DÖKÜMÜ — tedarikçi faturasının satırları.
+                                Çok konteynerli faturalarda her konteyner ayrı satır; müşteri
+                                faturası da bu kırılımla kesiliyor. Listedeki miktar/birim fiyat
+                                bunların özetidir (miktar toplamı, matrah/miktar). */}
+                            {Array.isArray(selectedInvoice.kalemler) && selectedInvoice.kalemler.length > 0 && (
+                                <div className="min-w-0 space-y-2">
+                                    <h4 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                                        Kalem Dökümü
+                                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold normal-case text-muted-foreground">
+                                            {selectedInvoice.kalemler.length} kalem
+                                        </span>
+                                    </h4>
+                                    <div className="overflow-x-auto rounded-lg border">
+                                        <table className="w-full text-[12.5px]">
+                                            <thead className="bg-muted/50 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                <tr>
+                                                    <th className="px-2 py-1.5 text-left">#</th>
+                                                    <th className="px-2 py-1.5 text-left">Mal / Hizmet</th>
+                                                    <th className="px-2 py-1.5 text-left">Konteyner</th>
+                                                    <th className="px-2 py-1.5 text-right">Miktar</th>
+                                                    <th className="px-2 py-1.5 text-right">Birim Fiyat</th>
+                                                    <th className="px-2 py-1.5 text-right">KDV</th>
+                                                    <th className="px-2 py-1.5 text-right">Tutar</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {selectedInvoice.kalemler.map((k: any) => (
+                                                    <tr key={k.sira} className="border-t">
+                                                        <td className="px-2 py-1.5 text-muted-foreground">{k.sira}</td>
+                                                        <td className="max-w-[260px] px-2 py-1.5" title={k.aciklama || ""}>
+                                                            <span className="block truncate">{k.aciklama || "-"}</span>
+                                                        </td>
+                                                        <td className="px-2 py-1.5 font-mono text-[11.5px]">{k.konteynerler || "-"}</td>
+                                                        <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatCurrency(k.miktar)}</td>
+                                                        <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatCurrency(k.birimFiyat)}</td>
+                                                        <td className="px-2 py-1.5 text-right font-mono tabular-nums">%{k.kdvOrani ?? 0}</td>
+                                                        <td className="px-2 py-1.5 text-right font-mono font-semibold tabular-nums">{formatCurrency(k.matrah)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                            <tfoot className="border-t bg-muted/30">
+                                                <tr>
+                                                    <td colSpan={6} className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase text-muted-foreground">Kalem toplamı (KDV hariç)</td>
+                                                    <td className="px-2 py-1.5 text-right font-mono font-bold tabular-nums">
+                                                        {formatCurrency(selectedInvoice.kalemler.reduce((t: number, k: any) => t + (parseFloat(k.matrah) || 0), 0))}
+                                                    </td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Financial Summary */}
                             <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
                                 <div className="flex items-center justify-between text-sm">

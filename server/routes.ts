@@ -20,6 +20,7 @@ import { senkronCalistir, senkronHazirMi } from "./nakliye/senkron";
 import { faturaOnizleme, tamamlananDosyalariFaturala } from "./nakliye/satisFaturasi";
 import { dosyaNoIleEslestir } from "./nakliye/dosyaEslestirme";
 import { sistemOncesiMi } from "./nakliye/tarih";
+import { ekranOzeti } from "./nakliye/kalemOzeti";
 
 const ruhsatStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -994,12 +995,18 @@ export async function registerRoutes(
       if (!mevcutVeri) {
         const kdvOrani = alanlar.kdv_orani ?? 0;
         const matrah = alanlar.matrah ?? 0;
+        // Ekran satırı özeti kalem dökümünden (miktar, birim fiyat, mal/hizmet).
+        const ekranOzet = ekranOzeti(
+          (alanlar.kalemler || []).map((k) => ({ miktar: k.miktar, matrah: k.matrah, aciklama: k.aciklama })),
+          matrah,
+          alanlar.aciklama,
+        );
         await storage.insertNakliyeVerileri([{
           faturaNo: alanlar.fatura_no,
           faturaTarihi: alanlar.fatura_tarihi,
-          malHizmet: alanlar.aciklama,
-          miktar: "1",
-          birimFiyat: String(matrah),
+          malHizmet: ekranOzet.malHizmet,
+          miktar: ekranOzet.miktar,
+          birimFiyat: ekranOzet.birimFiyat,
           kdvOranı: kdvOrani,
           kdvTutarı: alanlar.kdv_tutari !== null ? String(alanlar.kdv_tutari) : null,
           malHizmetToplamTutarı: String(matrah),
@@ -4485,6 +4492,19 @@ export async function registerRoutes(
 
       const alisMap = new Map(parasutFaturalari.map((f) => [f.faturaNo, f]));
 
+      // Kalem dökümü — modaldaki kalem tablosu için. TEK sorgu + Map join.
+      const kalemMap = new Map<string, Array<{
+        sira: number; aciklama: string | null; konteynerler: string | null;
+        miktar: string | null; birimFiyat: string | null; kdvOrani: number | null; matrah: string | null;
+      }>>();
+      for (const k of await storage.getNakliyeKalemleriByFaturaIds(parasutFaturalari.map((f) => f.id))) {
+        if (!kalemMap.has(k.faturaId)) kalemMap.set(k.faturaId, []);
+        kalemMap.get(k.faturaId)!.push({
+          sira: k.sira, aciklama: k.aciklama, konteynerler: k.konteynerler,
+          miktar: k.miktar, birimFiyat: k.birimFiyat, kdvOrani: k.kdvOrani, matrah: k.matrah,
+        });
+      }
+
       // Bir dosyanın birden çok satış kaydı olabilir: hata → silinmiş →
       // yeniden taslak. Rozet YAŞAYAN taslağı göstermeli; düz Map kurulumunda
       // sıralamaya göre eski bir 'silinmis' kayıt yeni taslağı gölgeleyip
@@ -4517,6 +4537,7 @@ export async function registerRoutes(
             parasutSatisDurum: "elle",
             parasutSalesInvoiceId: satis?.parasutSalesInvoiceId ?? null,
             parasutSatisHata: null,
+            kalemler: alis ? (kalemMap.get(alis.id) ?? []) : [],
           };
         }
 
@@ -4556,6 +4577,7 @@ export async function registerRoutes(
           parasutSalesInvoiceId: satis?.parasutSalesInvoiceId ?? null,
           parasutFaturaNo: satis?.parasutFaturaNo ?? null,
           parasutSatisHata: satis?.hataMesaji ?? null,
+          kalemler: alis ? (kalemMap.get(alis.id) ?? []) : [],
         };
       });
 

@@ -4,6 +4,7 @@ import { parasutMatrahTuret, paraBirimiCnc } from "../parasut/hesap";
 import { konteynerGecerliMi } from "./dogrulama";
 import { konteynerAnahtarlari } from "@shared/konteyner";
 import { eBelgePdfIndir } from "./parasutPdf";
+import { ekranOzeti } from "./kalemOzeti";
 
 /**
  * Serbest metinden konteyner numaralarını çıkarır.
@@ -131,15 +132,36 @@ export async function parasuttanCek(
       const konteynerler = konteynerCikar(tumMetin);
       if (konteynerler.length === 0) { atlanan++; continue; } // nakliye değil
 
+      // Kalem dökümü bir kez çıkarılır; hem yeni kayıt hem geri doldurma kullanır.
+      const kalemDokumu = kalemleriCikar(detayIdler, iliskili);
+
       const mevcut = await storage.getNakliyeFaturasiByNo(faturaNo);
       if (mevcut) {
         // Kalem dökümü sonradan eklendi; eski kayıtlarda yok. Paraşüt'ten
         // okuduğumuz kalemleri geriye tamamla — aksi halde çok kalemli eski
         // faturalar müşteriye hâlâ tek satır olarak kesilir.
         const mevcutKalemler = await storage.getNakliyeKalemleriByFaturaIds([mevcut.id]);
-        if (mevcutKalemler.length === 0) {
-          const kalemler = kalemleriCikar(detayIdler, iliskili);
-          if (kalemler.length > 0) await storage.setNakliyeKalemleri(mevcut.id, kalemler);
+        if (mevcutKalemler.length === 0 && kalemDokumu.length > 0) {
+          await storage.setNakliyeKalemleri(mevcut.id, kalemDokumu);
+        }
+
+        // EKRAN SATIRI ÖZETİ dökümden türetilsin (miktar, birim fiyat, mal/hizmet).
+        // Eski kayıtlar "1 × fatura toplamı" ile yazılmıştı; 5 kalemli fatura
+        // ekranda 1 × 65.000 görünüyordu. Yalnız değer gerçekten farklıysa yazılır.
+        const dokum = mevcutKalemler.length > 0 ? mevcutKalemler : kalemDokumu;
+        if (dokum.length > 0) {
+          const ozet = ekranOzeti(dokum, Number(mevcut.matrah ?? 0), mevcut.aciklama);
+          const ekran = await storage.getNakliyeVerisiByFaturaNo(faturaNo);
+          if (ekran && (
+            Number(ekran.miktar ?? 0) !== Number(ozet.miktar) ||
+            Number(ekran.birimFiyat ?? 0) !== Number(ozet.birimFiyat)
+          )) {
+            await storage.updateNakliyeVerisi(ekran.id, {
+              miktar: ozet.miktar,
+              birimFiyat: ozet.birimFiyat,
+              ...(ozet.malHizmet ? { malHizmet: ozet.malHizmet } : {}),
+            });
+          }
         }
         // Paraşüt id'si henüz bağlanmadıysa bağla (e-Arşiv kanalından gelmiş olabilir)
         if (!mevcut.parasutPurchaseBillId) {
@@ -214,7 +236,7 @@ export async function parasuttanCek(
         hataMesaji: null,
       });
 
-      await storage.setNakliyeKalemleri(yeniKayit.id, kalemleriCikar(detayIdler, iliskili));
+      await storage.setNakliyeKalemleri(yeniKayit.id, kalemDokumu);
 
       // Nakliye ekranının (Navlun Faturaları) kullandığı tabloya da yaz —
       // aksi halde Paraşüt'ten çekilen e-faturalar ekranda görünmez.
@@ -235,12 +257,14 @@ export async function parasuttanCek(
           await storage.updateNakliyeVerisi(ekranKaydi.id, eksikler as any);
         }
       } else {
+        // Ekran satırı özeti kalem dökümünden: 5 × 13.000 → miktar 5, birim 13.000
+        const ozet = ekranOzeti(kalemDokumu, matrah, aciklama ? String(aciklama) : null);
         await storage.insertNakliyeVerileri([{
           faturaNo,
           faturaTarihi: a.issue_date || null,
-          malHizmet: aciklama ? String(aciklama).slice(0, 500) : null,
-          miktar: "1",
-          birimFiyat: String(matrah),
+          malHizmet: ozet.malHizmet,
+          miktar: ozet.miktar,
+          birimFiyat: ozet.birimFiyat,
           kdvOranı: kdvOrani,
           kdvTutarı: String(totalVat),
           malHizmetToplamTutarı: String(matrah),

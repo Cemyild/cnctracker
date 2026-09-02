@@ -281,6 +281,7 @@ export interface IStorage {
   // Nakliye verileri
   getNakliyeVerileri(): Promise<NakliyeVerisi[]>;
   getNakliyeVerisi(id: string): Promise<NakliyeVerisi | undefined>;
+  getNakliyeVerisiByFaturaNo(faturaNo: string): Promise<NakliyeVerisi | undefined>;
   insertNakliyeVerileri(veriler: InsertNakliyeVerisi[]): Promise<NakliyeVerisi[]>;
   deleteNakliyeVerisi(id: string): Promise<void>;
   updateNakliyeVerisi(id: string, veri: Partial<InsertNakliyeVerisi>): Promise<NakliyeVerisi>;
@@ -1478,6 +1479,13 @@ export class DatabaseStorage implements IStorage {
 
   async getNakliyeVerisi(id: string): Promise<NakliyeVerisi | undefined> {
     const [v] = await db.select().from(nakliyeVerileri).where(eq(nakliyeVerileri.id, id));
+    return v;
+  }
+
+  // Ekran satırını fatura numarasıyla bul. Tüm tabloyu çekip JS'de aramak
+  // yerine (parasutOkuma döngüsünde her fatura için tekrarlanıyordu) tek satır.
+  async getNakliyeVerisiByFaturaNo(faturaNo: string): Promise<NakliyeVerisi | undefined> {
+    const [v] = await db.select().from(nakliyeVerileri).where(eq(nakliyeVerileri.faturaNo, faturaNo)).limit(1);
     return v;
   }
 
