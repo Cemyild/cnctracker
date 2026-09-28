@@ -2,7 +2,7 @@ import { storage } from "../storage";
 import { parasutIstek, jsonApiCoz, iliskiId } from "../parasut/client";
 import { paraBirimiParasut } from "../parasut/hesap";
 import { normalizeKonteyner, konteynerGecerliMi } from "./dogrulama";
-import { firmaAdiBenzerligi, firmaAdiSimetrikBenzerlik } from "@shared/turkceNormalize";
+import { firmaAdiBenzerligi, firmaAdiSimetrikBenzerlik, normalizeFirmaAdi } from "@shared/turkceNormalize";
 import { konteynerAnahtarlari } from "@shared/konteyner";
 import { ihracatRejimiMi } from "@shared/rejim";
 import { tarihGoster, sistemOncesiMi } from "./tarih";
@@ -378,9 +378,16 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
   // olmayanlar) yukarıdaki konteyner anahtarlı indeks tutmaz. VKN ve beklenen
   // konteyner sayısı yalnız gümrük kaydında olduğu için dosya numarasıyla
   // tekrar aranır. N+1 değil: eksik dosyaların TAMAMI tek inArray sorgusunda.
+  // Gümrük kaydı bulunamayan VEYA bulunup VKN'si boş olan dosyalar yeniden
+  // aranır. VKN'siz durum yaygın: transit (TR) satırında konteyner var ama VKN
+  // yok, aynı dosyada aynı firmanın VKN'li ithalat satırı var (canlıda NOBEL
+  // 11 dosya, DNI 4 dosya). Kardeş satırdan VKN alınmazsa unvan yedeğine
+  // düşülür ve kesik unvan orada da takılır — 26-00312 / 26-00366 böyle
+  // "müşteri bulunamadı" ile kaldı.
   const eksikDosyalar = Array.from(gruplar.values())
-    .filter((g) => !g.gumruk)
+    .filter((g) => !g.gumruk || !String(g.gumruk.vn || "").trim())
     .map((g) => g.dosyaNo);
+  const kardesVkn = new Map<string, string>(); // dosya no → kardeş satırdan VKN
 
   if (eksikDosyalar.length > 0) {
     const ekstra = await storage.getGumrukVerileriByDosyaNolar(eksikDosyalar);
@@ -415,6 +422,20 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
       if (puanli[0].p >= 70 && (!puanli[1] || puanli[0].p > puanli[1].p)) {
         grup.gumruk = puanli[0].g;
       }
+    }
+
+    // KARDEŞ SATIRDAN VKN: seçilen gümrük satırı VKN'siz ise aynı dosyada
+    // AYNI FİRMANIN (normalize unvan birebir) VKN'li satırı aranır. Yalnız
+    // birebir aynı unvan kabul edilir — benzerlikle seçmek, ithalat/ihracat
+    // çiftindeki komşu firmanın VKN'sini getirebilir.
+    for (const grup of Array.from(gruplar.values())) {
+      if (!grup.gumruk || String(grup.gumruk.vn || "").trim()) continue;
+      const hedef = normalizeFirmaAdi(grup.gumruk.firmaUnvan || "");
+      if (!hedef) continue;
+      const kardes = (dosyaBazli.get(grup.dosyaNo) ?? []).find(
+        (g) => String(g.vn || "").trim() && normalizeFirmaAdi(g.firmaUnvan || "") === hedef,
+      );
+      if (kardes) kardesVkn.set(grup.dosyaNo, String(kardes.vn).trim());
     }
   }
 
@@ -455,7 +476,7 @@ export async function faturaOnizleme(): Promise<DosyaOnizleme[]> {
       );
     }
     const vkn = unvanTutarli
-      ? String(grup.gumruk?.vn || "").replace(/\D/g, "") || null
+      ? String(grup.gumruk?.vn || kardesVkn.get(dosyaNo) || "").replace(/\D/g, "") || null
       : null;
 
     // Bu dosyanın konteynerlerinden biri Paraşüt'teki bir satış faturasında

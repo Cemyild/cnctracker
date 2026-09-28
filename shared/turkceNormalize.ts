@@ -4,6 +4,11 @@
 // Sıra önemli: çok kelimeli ekler önce elenmeli.
 const SIRKET_EKLERI = [
   "ANONIM SIRKETI", "LIMITED SIRKETI", "KOLLEKTIF SIRKETI",
+  // Tek başına şirket türü sözcükleri de eklerdir. Gümrük listesinde unvanlar
+  // sabit genişlikte KESİLİYOR ("...ANONİM ŞİR" — ŞİRKETİ yarım kalmış); iki
+  // kelimelik ek eşleşmeyince "ANONIM" ve "SIR" ad parçası sanılıyor ve gerçek
+  // cari %60'ta kalıp reddediliyordu (canlıda NOBEL, 26-00312 / 26-00366).
+  "ANONIM", "LIMITED", "KOLLEKTIF", "SIRKETI", "SIRKET",
   "IC VE DIS TICARET", "DIS TICARET", "ITHALAT IHRACAT",
   "A S", "AS", "LTD STI", "LTD", "STI",
   "SANAYI", "TICARET", "SAN", "TIC",
@@ -34,7 +39,12 @@ export function normalizeFirmaAdi(s: string): string {
   for (const ek of SIRKET_EKLERI) {
     sonuc = sonuc.replace(new RegExp(`(^| )${ek}( |$)`, "g"), " ");
   }
-  return sonuc.replace(/\s+/g, " ").trim();
+  sonuc = sonuc.replace(/\s+/g, " ").trim();
+  // Kesik son parça: "SIRKETI"nin en az 3 harflik öneki ise ("SIR", "SIRK",
+  // "SIRKE") unvanın sonundan düşer. Yalnız SON parçada uygulanır; ortadaki
+  // gerçek bir "SIR..." sözcüğüne dokunulmaz.
+  sonuc = sonuc.replace(/ (SIR|SIRK|SIRKE|SIRKET)$/, "");
+  return sonuc;
 }
 
 /**
